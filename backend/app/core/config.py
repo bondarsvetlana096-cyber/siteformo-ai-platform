@@ -12,13 +12,13 @@ class Settings(BaseSettings):
     )
 
     app_env: str = "development"
+    rate_limit_per_hour: int = 60
 
     public_base_url: str = "http://localhost:8000"
     app_base_url: str | None = None
     frontend_base_url: str | None = None
     demo_base_url: str | None = None
     pricing_redirect_url: str = "https://siteformo.com/pricing"
-    database_url: str
 
     queue_backend: str = "pgmq"
     queue_visibility_timeout_seconds: int = 60
