@@ -18,11 +18,11 @@ class Settings(BaseSettings):
     frontend_base_url: str | None = None
     demo_base_url: str | None = None
     pricing_redirect_url: str = "https://siteformo.com/pricing"
-
     database_url: str
 
     queue_backend: str = "pgmq"
     queue_visibility_timeout_seconds: int = 60
+    queue_poll_seconds: int = 2
     queue_poll_interval_seconds: int = 2
     queue_batch_size: int = 1
 
