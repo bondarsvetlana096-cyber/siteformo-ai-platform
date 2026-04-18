@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     database_url: str
 
     queue_backend: str = "pgmq"
+    queue_visibility_timeout_seconds: int = 60
+    queue_poll_interval_seconds: int = 2
+    queue_batch_size: int = 1
+
     storage_backend: str = "local"
     demo_storage_dir: str = "./storage"
 
