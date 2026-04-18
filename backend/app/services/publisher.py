@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from urllib.parse import quote
 
 from app.core.config import settings
-from app.services.demo_enhancer import inject_demo_cta
-from app.services.html_postprocess import rewrite_asset_urls
+from app.core.security import sign_asset
 from app.services.storage import get_storage
 
 
@@ -13,29 +13,67 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _master_storage_key(request_id: str) -> str:
-    return f'masters/{request_id}/index.html'
+def publish_demo(request_id: str, html: str) -> tuple[str, str, datetime, datetime, str]:
+    now = _utcnow()
 
+    expires_at = now + timedelta(minutes=settings.demo_ttl_minutes)
+    retention_expires_at = now + timedelta(hours=settings.demo_retention_hours)
 
-def _build_continue_url(request_id: str, token: str) -> str:
-    return (
-        f"{settings.main_site_base_url.rstrip('/')}"
-        f"/{settings.main_site_continue_path.lstrip('/')}"
-        f"?request_id={request_id}&demo_token={token}"
+    token = secrets.token_urlsafe(16)
+    master_storage_key = f"demos/{request_id}/master/index.html"
+
+    get_storage().put_text(
+        master_storage_key,
+        html,
+        content_type="text/html; charset=utf-8",
     )
 
+    public_base_url = str(settings.public_base_url).rstrip("/")
+    demo_url = f"{public_base_url}/demo/{token}"
 
-def publish_demo(request_id: str, html: str) -> tuple[str, str, datetime, datetime, str]:
-    token = uuid4().hex + uuid4().hex
-    master_storage_key = _master_storage_key(str(request_id))
-    master_html = rewrite_asset_urls(html)
-    get_storage().put_text(master_storage_key, master_html)
-    demo_url = f'{settings.demo_base_url}/demo/{token}'
-    expires_at = _utcnow() + timedelta(minutes=settings.demo_ttl_minutes)
-    retention_expires_at = _utcnow() + timedelta(hours=settings.demo_retention_hours)
     return token, master_storage_key, expires_at, retention_expires_at, demo_url
 
 
-def build_demo_delivery_html(request_id: str, demo_token: str, master_html: str) -> str:
-    continue_url = _build_continue_url(str(request_id), demo_token)
-    return inject_demo_cta(master_html, str(request_id), demo_token, continue_url)
+def build_demo_delivery_html(request_id: str, demo_token: str, html: str) -> str:
+    base_url = str(settings.public_base_url).rstrip("/")
+
+    def asset_url(storage_key: str) -> str:
+        token = sign_asset(storage_key)
+        return f"{base_url}/demo-assets/{quote(token, safe='')}"
+
+    rewritten_html = html
+
+    rewritten_html = rewritten_html.replace('src="/', f'src="{base_url}/')
+    rewritten_html = rewritten_html.replace("src='/", f"src='{base_url}/")
+    rewritten_html = rewritten_html.replace('href="/', f'href="{base_url}/')
+    rewritten_html = rewritten_html.replace("href='/", f"href='{base_url}/")
+
+    delivery_html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex" />
+  <title>Demo Preview</title>
+  <style>
+    html, body {{
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      width: 100%;
+      min-height: 100%;
+    }}
+    iframe {{
+      border: 0;
+      display: block;
+      width: 100%;
+      height: 100vh;
+    }}
+  </style>
+</head>
+<body>
+{rewritten_html}
+</body>
+</html>"""
+
+    return delivery_html

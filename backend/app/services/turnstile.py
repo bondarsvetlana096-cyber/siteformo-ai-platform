@@ -6,7 +6,7 @@ from app.core.config import settings
 
 
 def _is_development() -> bool:
-    return settings.app_env.strip().lower() == 'development'
+    return settings.app_env.strip().lower() in {'development', 'dev', 'local'}
 
 
 async def verify_turnstile(token: str | None, remote_ip: str | None = None) -> bool:

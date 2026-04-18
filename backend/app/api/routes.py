@@ -72,14 +72,17 @@ def _asset_headers(content_type: str) -> dict[str, str]:
 def _validate_demo_binding(req_row: Request, request: FastAPIRequest, db: Session) -> None:
     if not settings.demo_bind_ip_enabled:
         return
+
     ip_hash = sha256_text(_client_ip(request))
     meta = req_row.generation_metadata or {}
     bound_ip_hash = meta.get("demo_bound_ip_hash")
+
     if bound_ip_hash is None:
         meta["demo_bound_ip_hash"] = ip_hash
         req_row.generation_metadata = meta
         db.commit()
         return
+
     if bound_ip_hash != ip_hash:
         raise HTTPException(status_code=403, detail="Demo access denied")
 
@@ -90,15 +93,26 @@ def healthz() -> dict[str, str]:
 
 
 @router.post("/api/requests", response_model=CreateRequestResponse, dependencies=[Depends(rate_limit_dependency)])
-async def create_request_endpoint(payload: CreateRequestPayload, request: FastAPIRequest, db: Session = Depends(get_db)) -> CreateRequestResponse:
+async def create_request_endpoint(
+    payload: CreateRequestPayload,
+    request: FastAPIRequest,
+    db: Session = Depends(get_db),
+) -> CreateRequestResponse:
     try:
         passed = await verify_turnstile(payload.turnstile_token, request.client.host if request.client else None)
         if not passed:
             raise HTTPException(status_code=400, detail="Turnstile verification failed")
+
         status, req, _delivery = create_request(db, payload, dict(request.headers))
+
         if status == RequestStatus.LIMIT_REACHED:
             return CreateRequestResponse(status="limit_reached", redirect_url=settings.pricing_redirect_url)
-        return CreateRequestResponse(status="accepted", request_id=str(req.id), message="Request accepted for processing")
+
+        return CreateRequestResponse(
+            status="accepted",
+            request_id=str(req.id),
+            message="Request accepted for processing",
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -109,8 +123,17 @@ async def create_request_endpoint(payload: CreateRequestPayload, request: FastAP
 
 
 @router.post("/api/contact-confirmations/{confirmation_token}")
-def confirm_contact(confirmation_token: str, payload: ConfirmContactPayload, db: Session = Depends(get_db)) -> dict[str, str]:
-    req = confirm_contact_and_queue(db, confirmation_token, inbound_message_text=payload.inbound_message_text, external_user_id=payload.external_user_id)
+def confirm_contact(
+    confirmation_token: str,
+    payload: ConfirmContactPayload,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    req = confirm_contact_and_queue(
+        db,
+        confirmation_token,
+        inbound_message_text=payload.inbound_message_text,
+        external_user_id=payload.external_user_id,
+    )
     if req is None:
         raise HTTPException(status_code=404, detail="Confirmation token not found")
     return {"status": req.status, "request_id": str(req.id)}
@@ -121,6 +144,7 @@ def get_request_status(request_id: str, db: Session = Depends(get_db)) -> Reques
     req = db.get(Request, request_id)
     if req is None:
         raise HTTPException(status_code=404, detail="Request not found")
+
     return RequestStatusResponse(
         request_id=str(req.id),
         status=req.status,
@@ -144,10 +168,15 @@ def get_request_status(request_id: str, db: Session = Depends(get_db)) -> Reques
 
 
 @router.post("/api/requests/{request_id}/events")
-def track_request_event(request_id: str, payload: RequestEventPayload, db: Session = Depends(get_db)) -> dict[str, str]:
+def track_request_event(
+    request_id: str,
+    payload: RequestEventPayload,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
     req = db.get(Request, request_id)
     if req is None:
         raise HTTPException(status_code=404, detail="Request not found")
+
     record_request_event(db, req, payload.event_type, payload.metadata)
     return {"status": "ok", "request_id": str(req.id), "event_type": payload.event_type}
 
@@ -155,19 +184,43 @@ def track_request_event(request_id: str, payload: RequestEventPayload, db: Sessi
 @router.get("/demo/{token}", response_class=HTMLResponse)
 def get_demo(token: str, request: FastAPIRequest, db: Session = Depends(get_db)) -> HTMLResponse:
     req = db.execute(select(Request).where(Request.demo_token == token)).scalar_one_or_none()
+
     if req is None or not req.master_storage_key:
         raise HTTPException(status_code=404, detail="Demo not found")
+
     now = datetime.now(timezone.utc)
     expires_at = req.expires_at
     if expires_at is not None and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
+
     if expires_at and expires_at <= now:
-        raise HTTPException(status_code=404, detail="Demo expired")
+        if req.status != RequestStatus.EXPIRED:
+            req.status = RequestStatus.EXPIRED
+            db.commit()
+        raise HTTPException(status_code=410, detail="Demo expired")
+
     _validate_demo_binding(req, request, db)
-    body, _ = get_storage().get_bytes(req.master_storage_key)
-    delivery_html = build_demo_delivery_html(str(req.id), token, body.decode("utf-8"))
+
+    try:
+        body, _ = get_storage().get_bytes(req.master_storage_key)
+    except StorageError as exc:
+        log_exception(
+            exc,
+            {
+                "stage": "demo_get",
+                "request_id": str(req.id),
+                "storage_key": req.master_storage_key,
+            },
+        )
+        raise HTTPException(status_code=404, detail="Demo content missing") from exc
+
+    html = body.decode("utf-8", errors="replace")
+    delivery_html = build_demo_delivery_html(str(req.id), token, html)
+
     record_request_event(db, req, "demo_opened", {"token": token})
+
     response = HTMLResponse(delivery_html, headers=_demo_headers())
+
     if settings.demo_session_cookie_enabled:
         response.set_cookie(
             key=settings.demo_session_cookie_name,
@@ -178,6 +231,7 @@ def get_demo(token: str, request: FastAPIRequest, db: Session = Depends(get_db))
             samesite="strict",
             path="/",
         )
+
     return response
 
 
@@ -188,21 +242,30 @@ def get_demo_asset(asset_token: str, request: FastAPIRequest, db: Session = Depe
         request_id_match = REQUEST_ID_FROM_KEY_RE.match(key)
         if not request_id_match:
             raise HTTPException(status_code=403, detail="Asset access denied")
+
         request_id = request_id_match.group(1)
         req = db.get(Request, request_id)
         if req is None or not req.demo_token:
             raise HTTPException(status_code=404, detail="Asset not found")
+
         if settings.demo_session_cookie_enabled:
             cookie = request.cookies.get(settings.demo_session_cookie_name)
             if not cookie:
                 raise HTTPException(status_code=403, detail="Asset session missing")
-            cookie_request_id = unsign_demo_session(cookie, max_age_seconds=settings.demo_ttl_minutes * 60)
+
+            cookie_request_id = unsign_demo_session(
+                cookie,
+                max_age_seconds=settings.demo_ttl_minutes * 60,
+            )
             if str(cookie_request_id) != str(request_id):
                 raise HTTPException(status_code=403, detail="Asset session mismatch")
+
         if settings.demo_bind_ip_enabled:
             _validate_demo_binding(req, request, db)
+
         data, mime = get_storage().get_bytes(key)
         return Response(content=data, media_type=mime, headers=_asset_headers(mime))
+
     except HTTPException:
         raise
     except (StorageError, Exception) as exc:

@@ -58,6 +58,16 @@ def enqueue_job(db: Session, job_type: str, payload: dict, scheduled_at: datetim
         _enqueue_supabase(job_type, payload, scheduled_at)
         return None
 
+    job = Job(job_type=job_type, payload=payload, status=JobStatus.PENDING)
+    if scheduled_at is not None:
+        target = scheduled_at.astimezone(timezone.utc).replace(tzinfo=None) if scheduled_at.tzinfo else scheduled_at
+        job.scheduled_at = target
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    logger.info("[QUEUE] created db job id=%s type=%s", job.id, job.job_type)
+    return job
+
 
 def fetch_next_job(db: Session) -> Job | None:
     stmt = select(Job).where(Job.status == JobStatus.PENDING).where(or_(Job.scheduled_at.is_(None), Job.scheduled_at <= _utcnow_naive())).order_by(Job.created_at.asc()).limit(1)
