@@ -168,16 +168,36 @@ async def process_generate_job(db: Session, request_id: str) -> None:
             source = await scrape_site(req.source_url)
 
         result = generate_demo_page(req.request_type, source, req.business_description)
+
         req.status = RequestStatus.GENERATED
         req.generation_metadata = {
+            **(req.generation_metadata or {}),
             "title": result["title"],
             "request_type": req.request_type,
-            **(req.generation_metadata or {}),
+            "worker_code_version": "retention_v2",
         }
         db.commit()
 
-        token, master_storage_key, expires_at, retention_expires_at, demo_url = publish_demo(str(req.id), result["html"])
-        logger.info("[STORAGE] master demo saved: key=%s", master_storage_key)
+        token, master_storage_key, expires_at, retention_expires_at, demo_url = publish_demo(
+            str(req.id),
+            result["html"],
+        )
+
+        logger.info(
+            "[STORAGE] publish_demo result: request_id=%s token=%s master_storage_key=%s expires_at=%s retention_expires_at=%s demo_url=%s",
+            request_id,
+            token,
+            master_storage_key,
+            expires_at,
+            retention_expires_at,
+            demo_url,
+        )
+
+        if not master_storage_key:
+            raise RuntimeError(f"publish_demo returned empty master_storage_key for request_id={request_id}")
+
+        if not retention_expires_at:
+            raise RuntimeError(f"publish_demo returned empty retention_expires_at for request_id={request_id}")
 
         req.status = RequestStatus.PUBLISHED
         req.demo_token = token
@@ -188,26 +208,55 @@ async def process_generate_job(db: Session, request_id: str) -> None:
         req.retention_expires_at = retention_expires_at
         req.outbound_message_text = None
 
-        db.add(DemoAsset(request_id=req.id, storage_key=master_storage_key, asset_type="master_html", expires_at=retention_expires_at))
+        db.add(
+            DemoAsset(
+                request_id=req.id,
+                storage_key=master_storage_key,
+                asset_type="master_html",
+                expires_at=retention_expires_at,
+            )
+        )
+
         db.commit()
+        db.refresh(req)
+
+        logger.info(
+            "[DB] request saved: request_id=%s master_storage_key=%s retention_expires_at=%s status=%s",
+            request_id,
+            req.master_storage_key,
+            req.retention_expires_at,
+            req.status,
+        )
 
         log_event(
             db,
             "demo_published",
             request_id=req.id,
-            payload={"demo_url": demo_url, "master_storage_key": master_storage_key},
+            payload={
+                "demo_url": demo_url,
+                "master_storage_key": master_storage_key,
+                "retention_expires_at": str(retention_expires_at),
+            },
             distinct_id=req.contact_value,
         )
+
         enqueue_job(db, "expire_demo", {"request_id": str(req.id)}, scheduled_at=expires_at)
         enqueue_job(db, "cleanup_demo", {"request_id": str(req.id)}, scheduled_at=retention_expires_at)
         _schedule_followup(db, str(req.id), FOLLOWUP_REASON_DEMO_READY, settings.demo_ready_followup_delay_minutes)
+
         logger.info("[WORKER] generate complete: request_id=%s", request_id)
 
     except Exception as exc:
         req.status = RequestStatus.FAILED
         req.error_message = str(exc)
         db.commit()
-        log_event(db, "generation_failed", request_id=req.id, payload={"error": str(exc)}, distinct_id=req.contact_value)
+        log_event(
+            db,
+            "generation_failed",
+            request_id=req.id,
+            payload={"error": str(exc)},
+            distinct_id=req.contact_value,
+        )
         log_exception(exc, {"request_id": request_id, "stage": "generate"})
         raise
 

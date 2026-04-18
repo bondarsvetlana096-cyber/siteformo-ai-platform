@@ -16,11 +16,8 @@ def _utcnow() -> datetime:
 def publish_demo(request_id: str, html: str) -> tuple[str, str, datetime, datetime, str]:
     now = _utcnow()
 
-    demo_ttl_hours = getattr(settings, "demo_ttl_hours", 24)
-    retention_days = getattr(settings, "demo_retention_days", 30)
-
-    expires_at = now + timedelta(hours=demo_ttl_hours)
-    retention_expires_at = now + timedelta(days=retention_days)
+    expires_at = now + timedelta(minutes=settings.demo_ttl_minutes)
+    retention_expires_at = now + timedelta(hours=settings.demo_retention_hours)
 
     token = secrets.token_urlsafe(16)
     master_storage_key = f"demos/{request_id}/master/index.html"
