@@ -38,8 +38,6 @@ class RequestType:
 class ContactType:
     EMAIL = 'email'
     TELEGRAM = 'telegram'
-    WHATSAPP = 'whatsapp'
-    MESSENGER = 'messenger'
 
 
 class Request(Base):

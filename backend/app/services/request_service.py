@@ -62,9 +62,6 @@ def _normalize_contact(contact_type: str, contact_value: str) -> tuple[str | Non
     if contact_type == ContactType.EMAIL:
         email = normalize_email(value)
         return email, email
-    if contact_type == ContactType.WHATSAPP:
-        normalized = "".join(ch for ch in value if ch.isdigit() or ch == "+")
-        return None, normalized or value.lower()
     return None, value.lstrip("@").lower()
 
 
@@ -358,7 +355,7 @@ async def process_follow_up_job(db: Session, request_id: str, reason: str) -> No
             body_text=body_text,
             cta_label="Continue",
             cta_url=cta_url,
-            footer_text="Все дальнейшие шаги выполняются на основном сайте Siteformo.",
+            footer_text="All remaining steps are completed on the main Siteformo website.",
         )
     else:
         req.outbound_message_text = build_outbound_followup_text(req, reason)

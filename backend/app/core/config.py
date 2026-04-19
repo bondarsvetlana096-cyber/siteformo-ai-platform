@@ -93,9 +93,6 @@ class Settings(BaseSettings):
     # Contact channels
     telegram_bot_username: Optional[str] = Field(default=None, validation_alias=AliasChoices('TELEGRAM_BOT_USERNAME'))
     telegram_contact_label: Optional[str] = Field(default='@siteformo_bot', validation_alias=AliasChoices('TELEGRAM_CONTACT_LABEL'))
-    whatsapp_contact_number: Optional[str] = Field(default=None, validation_alias=AliasChoices('WHATSAPP_CONTACT_NUMBER'))
-    messenger_contact_url: Optional[str] = Field(default=None, validation_alias=AliasChoices('MESSENGER_CONTACT_URL'))
-    messenger_contact_label: Optional[str] = Field(default='Siteformo Messenger', validation_alias=AliasChoices('MESSENGER_CONTACT_LABEL'))
 
     # Browser automation
     playwright_headless: bool = Field(default=True, validation_alias=AliasChoices('PLAYWRIGHT_HEADLESS'))

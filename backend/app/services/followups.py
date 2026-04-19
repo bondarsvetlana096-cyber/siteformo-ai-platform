@@ -27,33 +27,33 @@ def build_main_site_url(req: Request, step: str = "continue") -> str:
     return f"{base}{path}?{query}"
 
 
-def build_followup_message(req: Request, reason: str) -> tuple[str, str, str]:
+def build_followup_message(req: Request, reason: str) -> tuple[str, str, str, str]:
     if reason == FOLLOWUP_REASON_DEMO_READY:
         subject = "Your Siteformo demo is ready"
-        headline = "Ваша demo-страница уже готова"
+        headline = "Your demo page is ready"
         cta_url = req.demo_url or build_main_site_url(req)
         text = (
-            "Ваша demo-страница уже готова. "
-            "Откройте её, посмотрите результат и перейдите на основной сайт, чтобы заполнить форму и продолжить оформление."
+            "Your demo page is ready. "
+            "Open it, review the result, and return to the main site to continue your order."
         )
         return subject, headline, cta_url, text
 
     if reason == FOLLOWUP_REASON_DEMO_CTA:
         subject = "Return to your Siteformo flow"
-        headline = "Вы посмотрели demo, но не продолжили"
+        headline = "You viewed the demo but did not continue"
         cta_url = build_main_site_url(req)
         text = (
-            "Вы уже посмотрели demo-страницу, но не завершили следующий шаг. "
-            "Вернитесь на основной сайт, заполните форму и продолжите оформление."
+            "You already viewed the demo page, but did not finish the next step. "
+            "Return to the main site, complete the form, and continue your order."
         )
         return subject, headline, cta_url, text
 
     subject = "Complete your Siteformo request"
-    headline = "Вы не завершили форму или оплату"
+    headline = "You did not finish the form or payment"
     cta_url = build_main_site_url(req, step="checkout")
     text = (
-        "Вы начали оформление, но не завершили его. "
-        "Вернитесь на основной сайт, заполните форму до конца и завершите оплату."
+        "You started the order flow but did not complete it. "
+        "Return to the main site, finish the form, and complete the payment."
     )
     return subject, headline, cta_url, text
 
@@ -62,9 +62,5 @@ def build_outbound_followup_text(req: Request, reason: str) -> str:
     _, headline, cta_url, text = build_followup_message(req, reason)
     channel_hint = ""
     if req.contact_type == ContactType.TELEGRAM:
-        channel_hint = " Напишите в Telegram, если хотите, чтобы мы помогли довести заявку до конца."
-    elif req.contact_type == ContactType.WHATSAPP:
-        channel_hint = " Ответьте в WhatsApp, если нужна помощь с завершением заявки."
-    elif req.contact_type == ContactType.MESSENGER:
-        channel_hint = " Ответьте в Messenger, если нужна помощь с завершением заявки."
-    return f"{headline}. {text} Ссылка: {cta_url}.{channel_hint}"
+        channel_hint = " Reply in Telegram if you would like help finishing your request."
+    return f"{headline}. {text} Link: {cta_url}.{channel_hint}"

@@ -1,17 +1,16 @@
 # Vercel demo proxy
 
-Этот мини-проект нужен для домена `demo-siteformo.com`.
+This mini project is intended for the `demo-siteformo.com` domain.
 
-## Что делает
-- принимает запросы на `/demo/*`
-- принимает запросы на `/demo-assets/*`
-- проксирует их на `https://api.siteformo.com`
+## What it does
+- proxies requests on `/demo/*`
+- proxies requests on `/demo-assets/*`
+- forwards them to `https://api.siteformo.com`
 
-## Как использовать
-1. Создай отдельный Vercel project из этой папки
-2. Подключи домен `demo-siteformo.com`
-3. Убедись, что в Railway:
-   - `DEMO_BASE_URL=https://demo-siteformo.com`
+## How to use it
+1. Create a separate Vercel project from this folder.
+2. Attach the `demo-siteformo.com` domain.
+3. In Railway, set `DEMO_BASE_URL=https://demo-siteformo.com`.
 
-## Важно
-Если позже перейдёшь на `demo.siteformo.com`, просто поменяй `DEMO_BASE_URL` в Railway.
+## Important
+If you later move to `demo.siteformo.com`, only update `DEMO_BASE_URL` in Railway.

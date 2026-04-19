@@ -10,7 +10,7 @@ from app.models.request import ContactType, RequestType
 
 class CreateRequestPayload(BaseModel):
     request_type: Literal['redesign', 'create'] | None = None
-    contact_type: Literal['email', 'telegram', 'whatsapp', 'messenger'] = ContactType.EMAIL
+    contact_type: Literal['email', 'telegram'] = ContactType.EMAIL
     contact_value: str | None = Field(default=None, max_length=320)
     email: EmailStr | None = None
     source_url: HttpUrl | None = None
@@ -49,27 +49,26 @@ class CreateRequestPayload(BaseModel):
 
         if self.request_type == RequestType.REDESIGN and self.source_url is None:
             raise ValueError('source_url is required for redesign')
-        if self.request_type == RequestType.CREATE and not self.business_description:
+
+        if self.request_type == RequestType.CREATE and self.business_description is None:
             raise ValueError('business_description is required for create')
 
         if self.contact_type == ContactType.EMAIL:
-            final_email = self.email or self.contact_value
-            if not final_email:
+            if self.email is None and not self.contact_value:
                 raise ValueError('email or contact_value is required for email contact type')
-            normalized_email = final_email.strip().lower()
-            self.email = normalized_email
-            self.contact_value = normalized_email
-            return self
+            if self.email is not None:
+                self.contact_value = str(self.email)
+            elif self.contact_value:
+                self.email = self.contact_value
+        else:
+            if not self.contact_value:
+                raise ValueError('contact_value is required for non-email contact types')
 
-        if not self.contact_value:
-            raise ValueError('contact_value is required for messenger contact types')
-
-        self.contact_value = self.contact_value.strip()
         return self
 
 
 class CreateRequestResponse(BaseModel):
-    status: str
+    status: Literal['accepted', 'limit_reached']
     request_id: str | None = None
     message: str | None = None
     redirect_url: str | None = None
@@ -78,6 +77,18 @@ class CreateRequestResponse(BaseModel):
     confirmation_text: str | None = None
     confirmation_link: str | None = None
     channel_contact: str | None = None
+
+
+class RequestEventPayload(BaseModel):
+    event_type: Literal[
+        'demo_opened',
+        'demo_cta_clicked',
+        'main_form_started',
+        'main_form_completed',
+        'payment_started',
+        'payment_completed',
+    ]
+    metadata: dict | None = None
 
 
 class RequestStatusResponse(BaseModel):
@@ -99,15 +110,3 @@ class RequestStatusResponse(BaseModel):
     payment_started_at: datetime | None = None
     payment_completed_at: datetime | None = None
     follow_up_count: int = 0
-
-
-class RequestEventPayload(BaseModel):
-    event_type: Literal[
-        'demo_opened',
-        'demo_cta_clicked',
-        'main_form_started',
-        'main_form_completed',
-        'payment_started',
-        'payment_completed',
-    ]
-    metadata: dict | None = None

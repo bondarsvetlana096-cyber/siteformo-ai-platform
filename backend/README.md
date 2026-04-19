@@ -12,8 +12,8 @@ Backend for the updated Siteformo funnel:
 
 ## Updated flow
 1. User opens the main site.
-2. User submits **contact + homepage URL or topic**.
-3. Backend creates a request and queues demo generation immediately for every contact type.
+2. User submits contact details plus a homepage URL or business topic.
+3. Backend creates a request and queues demo generation immediately for every supported contact type.
 4. Worker generates a master HTML version, stores it for 96 hours, then issues a short-lived `/demo/{token}` public window.
 5. Demo page is rendered from the stored master version through a protected delivery wrapper and shows a built-in CTA that sends the user back to the main site.
 6. Main site tracks the funnel through request events:
@@ -23,13 +23,14 @@ Backend for the updated Siteformo funnel:
    - `main_form_completed`
    - `payment_started`
    - `payment_completed`
-7. If the user leaves without finishing, a delayed follow-up job sends an email reminder or prepares an outbound message for non-email channels.
+7. If the user leaves without finishing, a delayed follow-up job sends an email reminder or prepares an outbound message for Telegram.
 
 ## Important changes
-- No mandatory pre-confirmation step for Telegram / WhatsApp / Messenger before generation.
+- No mandatory pre-confirmation step for Telegram before generation.
+- Additional messaging channels are intentionally disabled until their integrations are implemented.
 - No automatic "demo ready" email at generation time.
-- Reminder logic now depends on **unfinished actions** on the main site.
-- API and worker must use the **same storage backend**.
+- Reminder logic now depends on unfinished actions on the main site.
+- API and worker must use the same storage backend.
 - Public demo access lasts 10 minutes, while the stored master page remains available internally for 96 hours.
 - Expiring public demo access no longer deletes the stored master page.
 
@@ -47,7 +48,7 @@ Compatible payloads:
 }
 ```
 
-or explicit create mode:
+Or explicit create mode:
 ```json
 {
   "request_type": "create",
@@ -77,11 +78,15 @@ or explicit create mode:
 This endpoint now loads the stored master HTML and wraps it at request time into a protected delivery page.
 
 ## Required env
-Use the same values in **both** API and worker:
+Use the same values in both API and worker:
 - `STORAGE_BACKEND=supabase`
 - `SUPABASE_URL=...`
 - `SUPABASE_SERVICE_ROLE_KEY=...`
 - `SUPABASE_STORAGE_BUCKET=siteformo-demo`
+- `SUPABASE_STORAGE_BUCKET_DEMOS=siteformo-demo`
+- `SUPABASE_STORAGE_BUCKET_ASSETS=demo-assets`
+- `QUEUE_BACKEND=supabase`
+- `SUPABASE_QUEUE_NAME=generate_demo_queue`
 - `DEMO_BASE_URL=https://siteformo-production.up.railway.app`
 - `DEMO_TTL_MINUTES=10`
 - `DEMO_RETENTION_HOURS=96`

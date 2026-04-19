@@ -44,7 +44,7 @@ User must fill both fields:
    - Website topic OR existing website URL
 
 2. Field 2:
-   - Email OR WhatsApp OR Telegram OR Facebook Messenger
+   - Email or Telegram
 
 Rules:
 - If one field is empty → generation button is disabled
@@ -57,7 +57,7 @@ Rules:
 Case A — Email:
 - Demo generated immediately
 
-Case B — Messenger:
+Case B — Telegram:
 - User must initiate chat first
 - Then demo is generated
 
