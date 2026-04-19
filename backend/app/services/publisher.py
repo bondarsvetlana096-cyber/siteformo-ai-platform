@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -48,35 +49,50 @@ def build_demo_delivery_html(
         return f"{base_url}/demo-assets/{quote(token, safe='')}"
 
     rewritten_html = html
+
     rewritten_html = rewritten_html.replace('src="/', f'src="{base_url}/')
     rewritten_html = rewritten_html.replace("src='/", f"src='{base_url}/")
     rewritten_html = rewritten_html.replace('href="/', f'href="{base_url}/')
     rewritten_html = rewritten_html.replace("href='/", f"href='{base_url}/")
 
-    overlay_block = f"""
-<div id="siteformo-demo-shell">
-  <div id="siteformo-demo-topnote">
-    <div class="sf-note-badge">
-      <span class="sf-note-dot"></span>
-      <span>{free_limit_text}</span>
-    </div>
-  </div>
+    # Optional signed asset rewrite support if later you emit internal storage keys.
+    rewritten_html = re.sub(
+        r'src="(demos/[^"]+|masters/[^"]+)"',
+        lambda m: f'src="{asset_url(m.group(1))}"',
+        rewritten_html,
+        flags=re.I,
+    )
+    rewritten_html = re.sub(
+        r"src='(demos/[^']+|masters/[^']+)'",
+        lambda m: f"src='{asset_url(m.group(1))}'",
+        rewritten_html,
+        flags=re.I,
+    )
 
-  <div id="siteformo-demo-cta">
-    <div class="sf-cta-card">
-      <div class="sf-cta-text">
-        <div class="sf-cta-label">Siteformo</div>
-        <div class="sf-cta-title">Ready to order your website?</div>
-        <div class="sf-cta-subtitle">Continue on the main Siteformo website.</div>
-      </div>
-      <a
-        href="{continue_url}"
-        onclick="window.siteformoTrackCta&&window.siteformoTrackCta()"
-        class="sf-cta-button"
-      >
-        Order on Siteformo
-      </a>
+    overlay_block = f"""
+<div id="siteformo-demo-topnote" aria-live="polite">
+  <div class="sf-note-badge">
+    <span class="sf-note-dot"></span>
+    <span>{free_limit_text}</span>
+  </div>
+</div>
+
+<div id="siteformo-demo-cta">
+  <div class="sf-cta-card">
+    <div class="sf-cta-text">
+      <div class="sf-cta-label">Siteformo</div>
+      <div class="sf-cta-title">Ready to order your website?</div>
+      <div class="sf-cta-subtitle">Continue on the main Siteformo website.</div>
     </div>
+    <a
+      href="{continue_url}"
+      target="_blank"
+      rel="noopener noreferrer"
+      onclick="return window.siteformoTrackCta ? window.siteformoTrackCta(event) : true;"
+      class="sf-cta-button"
+    >
+      Order on Siteformo
+    </a>
   </div>
 </div>
 
@@ -84,27 +100,29 @@ def build_demo_delivery_html(
 (function() {{
   var endpoint = '/api/requests/{request_id}/events';
 
-  window.siteformoTrackCta = function() {{
+  window.siteformoTrackCta = function(event) {{
+    var destination = {continue_url!r};
     var payload = JSON.stringify({{
       event_type: 'demo_cta_clicked',
       metadata: {{
         source: 'demo_overlay',
         demo_token: '{demo_token}',
-        destination: '{continue_url}'
+        destination: destination
       }}
     }});
 
-    if (navigator.sendBeacon) {{
-      navigator.sendBeacon(endpoint, new Blob([payload], {{ type: 'application/json' }}));
-      return true;
-    }}
-
-    fetch(endpoint, {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: payload,
-      keepalive: true
-    }}).catch(function(){{}});
+    try {{
+      if (navigator.sendBeacon) {{
+        navigator.sendBeacon(endpoint, new Blob([payload], {{ type: 'application/json' }}));
+      }} else {{
+        fetch(endpoint, {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: payload,
+          keepalive: true
+        }}).catch(function(){{}});
+      }}
+    }} catch (e) {{}}
 
     return true;
   }};
@@ -112,145 +130,163 @@ def build_demo_delivery_html(
 </script>
 """
 
-    delivery_html = f"""<!doctype html>
+    overlay_styles = """
+<style id="siteformo-demo-overlay-styles">
+  #siteformo-demo-topnote {
+    position: fixed !important;
+    top: 14px !important;
+    left: 14px !important;
+    z-index: 2147483646 !important;
+    max-width: min(560px, calc(100vw - 28px)) !important;
+    pointer-events: none !important;
+  }
+
+  .sf-note-badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 10px 14px !important;
+    border-radius: 999px !important;
+    background: rgba(15, 23, 42, 0.88) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,0.16) !important;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.22) !important;
+    backdrop-filter: blur(10px) !important;
+    font: 600 13px/1.35 Inter, Arial, sans-serif !important;
+  }
+
+  .sf-note-dot {
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 999px !important;
+    background: #22c55e !important;
+    flex: 0 0 auto !important;
+  }
+
+  #siteformo-demo-cta {
+    position: fixed !important;
+    right: 18px !important;
+    bottom: 18px !important;
+    z-index: 2147483647 !important;
+    width: min(420px, calc(100vw - 24px)) !important;
+  }
+
+  .sf-cta-card {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 14px !important;
+    padding: 16px !important;
+    border-radius: 18px !important;
+    background: rgba(15, 23, 42, 0.92) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.28) !important;
+    backdrop-filter: blur(12px) !important;
+    font-family: Inter, Arial, sans-serif !important;
+  }
+
+  .sf-cta-label {
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: .08em !important;
+    color: rgba(255,255,255,.72) !important;
+    margin-bottom: 4px !important;
+  }
+
+  .sf-cta-title {
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    line-height: 1.2 !important;
+    color: #ffffff !important;
+  }
+
+  .sf-cta-subtitle {
+    margin-top: 4px !important;
+    font-size: 14px !important;
+    line-height: 1.45 !important;
+    color: rgba(255,255,255,.78) !important;
+  }
+
+  .sf-cta-button {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 48px !important;
+    padding: 0 18px !important;
+    border-radius: 14px !important;
+    text-decoration: none !important;
+    font: 800 14px/1 Inter, Arial, sans-serif !important;
+    color: #ffffff !important;
+    background: linear-gradient(90deg, #7c3aed, #06b6d4) !important;
+    box-shadow: 0 12px 30px rgba(12, 74, 110, 0.30) !important;
+    border: 0 !important;
+    cursor: pointer !important;
+  }
+
+  @media (max-width: 640px) {
+    #siteformo-demo-topnote {
+      top: 10px !important;
+      left: 10px !important;
+      right: 10px !important;
+      max-width: none !important;
+    }
+
+    #siteformo-demo-cta {
+      left: 10px !important;
+      right: 10px !important;
+      bottom: 10px !important;
+      width: auto !important;
+    }
+
+    .sf-cta-card {
+      padding: 14px !important;
+      border-radius: 16px !important;
+    }
+
+    .sf-cta-title {
+      font-size: 16px !important;
+    }
+
+    .sf-cta-subtitle {
+      font-size: 13px !important;
+    }
+  }
+</style>
+"""
+
+    if re.search(r"</head\s*>", rewritten_html, flags=re.I):
+        rewritten_html = re.sub(
+            r"</head\s*>",
+            overlay_styles + "\n</head>",
+            rewritten_html,
+            count=1,
+            flags=re.I,
+        )
+    else:
+        rewritten_html = overlay_styles + rewritten_html
+
+    if re.search(r"</body\s*>", rewritten_html, flags=re.I):
+        rewritten_html = re.sub(
+            r"</body\s*>",
+            overlay_block + "\n</body>",
+            rewritten_html,
+            count=1,
+            flags=re.I,
+        )
+        return rewritten_html
+
+    return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex" />
   <title>Demo Preview</title>
-  <style>
-    html, body {{
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      min-height: 100%;
-      background: #ffffff;
-    }}
-
-    #siteformo-demo-topnote {{
-      position: fixed;
-      top: 14px;
-      left: 14px;
-      z-index: 2147483646;
-      max-width: min(560px, calc(100vw - 28px));
-    }}
-
-    .sf-note-badge {{
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
-      border-radius: 999px;
-      background: rgba(15, 23, 42, 0.82);
-      color: #ffffff;
-      border: 1px solid rgba(255,255,255,0.16);
-      box-shadow: 0 10px 28px rgba(0,0,0,0.22);
-      backdrop-filter: blur(10px);
-      font: 600 13px/1.35 Inter, Arial, sans-serif;
-    }}
-
-    .sf-note-dot {{
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: #22c55e;
-      flex: 0 0 auto;
-    }}
-
-    #siteformo-demo-cta {{
-      position: fixed;
-      right: 18px;
-      bottom: 18px;
-      z-index: 2147483647;
-      width: min(420px, calc(100vw - 24px));
-    }}
-
-    .sf-cta-card {{
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      padding: 16px;
-      border-radius: 18px;
-      background: rgba(15, 23, 42, 0.88);
-      color: #ffffff;
-      border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: 0 18px 50px rgba(0,0,0,0.28);
-      backdrop-filter: blur(12px);
-      font-family: Inter, Arial, sans-serif;
-    }}
-
-    .sf-cta-label {{
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      color: rgba(255,255,255,.72);
-      margin-bottom: 4px;
-    }}
-
-    .sf-cta-title {{
-      font-size: 18px;
-      font-weight: 800;
-      line-height: 1.2;
-      color: #ffffff;
-    }}
-
-    .sf-cta-subtitle {{
-      margin-top: 4px;
-      font-size: 14px;
-      line-height: 1.45;
-      color: rgba(255,255,255,.78);
-    }}
-
-    .sf-cta-button {{
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 48px;
-      padding: 0 18px;
-      border-radius: 14px;
-      text-decoration: none;
-      font: 800 14px/1 Inter, Arial, sans-serif;
-      color: #ffffff;
-      background: linear-gradient(90deg, #7c3aed, #06b6d4);
-      box-shadow: 0 12px 30px rgba(12, 74, 110, 0.3);
-    }}
-
-    @media (max-width: 640px) {{
-      #siteformo-demo-topnote {{
-        top: 10px;
-        left: 10px;
-        right: 10px;
-        max-width: none;
-      }}
-
-      #siteformo-demo-cta {{
-        left: 10px;
-        right: 10px;
-        bottom: 10px;
-        width: auto;
-      }}
-
-      .sf-cta-card {{
-        padding: 14px;
-        border-radius: 16px;
-      }}
-
-      .sf-cta-title {{
-        font-size: 16px;
-      }}
-
-      .sf-cta-subtitle {{
-        font-size: 13px;
-      }}
-    }}
-  </style>
+  {overlay_styles}
 </head>
 <body>
 {rewritten_html}
 {overlay_block}
 </body>
 </html>"""
-
-    return delivery_html

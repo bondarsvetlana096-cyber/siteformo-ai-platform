@@ -225,7 +225,7 @@ def get_demo(token: str, request: FastAPIRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="Demo content missing") from exc
 
     html = body.decode("utf-8", errors="replace")
-    continue_url = build_main_site_url(req)
+    continue_url = "https://siteformo.com"
     delivery_html = build_demo_delivery_html(
         str(req.id),
         token,
