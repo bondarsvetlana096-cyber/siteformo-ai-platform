@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     supabase_project_ref: Optional[str] = Field(default=None, validation_alias=AliasChoices('SUPABASE_PROJECT_REF'))
     supabase_db_schema: str = Field(default='public', validation_alias=AliasChoices('SUPABASE_DB_SCHEMA'))
 
-    storage_backend: str = Field(default='local', validation_alias=AliasChoices('STORAGE_BACKEND'))
+    storage_backend: str = Field(default='auto', validation_alias=AliasChoices('STORAGE_BACKEND'))
     demo_storage_dir: str = Field(default='./generated_demos', validation_alias=AliasChoices('DEMO_STORAGE_DIR'))
 
     s3_bucket: Optional[str] = Field(default=None, validation_alias=AliasChoices('S3_BUCKET'))
@@ -74,6 +74,7 @@ class Settings(BaseSettings):
 
     # UX / rate limits / protection
     free_attempt_limit: int = Field(default=2, validation_alias=AliasChoices('FREE_ATTEMPT_LIMIT'))
+    bypass_limit_emails_raw: str = Field(default='klon97048@gmail.com', validation_alias=AliasChoices('BYPASS_LIMIT_EMAILS'))
     demo_ttl_minutes: int = Field(default=10, validation_alias=AliasChoices('DEMO_TTL_MINUTES'))
     demo_retention_hours: int = Field(default=96, validation_alias=AliasChoices('DEMO_RETENTION_HOURS'))
     rate_limit_enabled: bool = Field(default=False, validation_alias=AliasChoices('RATE_LIMIT_ENABLED'))
@@ -111,11 +112,18 @@ class Settings(BaseSettings):
         }
         return aliases.get(text, text)
 
-    @field_validator('queue_backend', 'storage_backend', mode='before')
+    @field_validator('queue_backend', mode='before')
     @classmethod
-    def _normalize_backend(cls, value: object) -> str:
+    def _normalize_queue_backend(cls, value: object) -> str:
         if value is None:
             return 'db'
+        return str(value).strip().lower()
+
+    @field_validator('storage_backend', mode='before')
+    @classmethod
+    def _normalize_storage_backend(cls, value: object) -> str:
+        if value is None:
+            return 'auto'
         return str(value).strip().lower()
 
     @computed_field
@@ -142,6 +150,15 @@ class Settings(BaseSettings):
     @property
     def demo_retention_days(self) -> float:
         return self.demo_retention_hours / 24.0
+
+    @computed_field
+    @property
+    def bypass_limit_emails(self) -> set[str]:
+        return {
+            item.strip().lower()
+            for item in str(self.bypass_limit_emails_raw or '').split(',')
+            if item.strip()
+        }
 
     def masked_dict(self) -> dict:
         data = self.model_dump()

@@ -19,6 +19,7 @@ from app.middleware.rate_limit import rate_limit_dependency
 from app.models.request import Request, RequestStatus
 from app.schemas.request import CreateRequestPayload, CreateRequestResponse, RequestEventPayload, RequestStatusResponse
 from app.services.analytics import log_event, log_exception
+from app.services.followups import build_main_site_url
 from app.services.publisher import build_demo_delivery_html
 from app.services.request_service import confirm_contact_and_queue, create_request, record_request_event
 from app.services.storage import StorageError, get_storage
@@ -224,7 +225,14 @@ def get_demo(token: str, request: FastAPIRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="Demo content missing") from exc
 
     html = body.decode("utf-8", errors="replace")
-    delivery_html = build_demo_delivery_html(str(req.id), token, html)
+    continue_url = build_main_site_url(req)
+    delivery_html = build_demo_delivery_html(
+        str(req.id),
+        token,
+        html,
+        continue_url=continue_url,
+        free_limit_text=f"You can generate {settings.free_attempt_limit} free demos before placing an order.",
+    )
 
     record_request_event(db, req, "demo_opened", {"token": token})
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -27,7 +28,14 @@ If factual business information is provided, preserve it exactly:
 - important offer constraints
 
 Never alter those facts.
-The result must feel like a premium custom agency page, not generic AI output.
+Never change the business type or niche.
+Never turn the redesign into a generic agency ad.
+Use the same language as the source website or business description.
+If the source website is a hair salon, it must stay a hair salon.
+If the source website is in Russian, the output must be in Russian.
+If source images are provided, reuse at least one real source image URL in the page.
+Do not invent WhatsApp or Messenger.
+The result must feel like a premium custom redesign of the SAME business, not generic AI output.
 Use complete HTML with inline CSS and small inline JS only.
 Make it responsive and visually impressive.
 """)
@@ -93,52 +101,18 @@ STYLE_PROMPTS = {
 }
 
 
-FALLBACK_HTML = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Siteformo Demo</title>
-<style>
-:root{--bg:#0a0a0f;--panel:rgba(255,255,255,.06);--line:rgba(255,255,255,.12);--text:#fff;--muted:#cdd3ea;--a:#7c3aed;--b:#06b6d4}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;font-family:Inter,Arial,sans-serif;background:radial-gradient(circle at top right,rgba(124,58,237,.35),transparent 22%),radial-gradient(circle at left center,rgba(6,182,212,.16),transparent 24%),linear-gradient(180deg,#0b1020,#05070d 55%,#03050a);color:var(--text)}.wrap{max-width:1180px;margin:0 auto;padding:28px}.hero{min-height:100vh;display:flex;align-items:center}.badge{display:inline-block;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.05);backdrop-filter:blur(14px)}h1{font-size:clamp(48px,8vw,92px);line-height:.95;margin:20px 0 16px;letter-spacing:-.04em;max-width:950px}.lead{font-size:clamp(18px,2.2vw,24px);line-height:1.6;color:var(--muted);max-width:820px}.cta-row{display:flex;gap:14px;flex-wrap:wrap;margin-top:24px}.btn{display:inline-block;padding:16px 22px;border-radius:16px;text-decoration:none;font-weight:800}.btn.primary{background:linear-gradient(90deg,var(--a),var(--b));color:#fff}.btn.secondary{border:1px solid var(--line);color:#fff;background:rgba(255,255,255,.04)}section{padding:56px 0}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.card{padding:22px;border:1px solid var(--line);background:var(--panel);border-radius:22px;backdrop-filter:blur(14px)}@media (max-width:900px){.grid{grid-template-columns:1fr}.hero{min-height:auto;padding:70px 0}h1{font-size:48px}}
-</style>
-</head>
-<body>
-<div class="wrap">
-<section class="hero">
-  <div>
-    <span class="badge">Siteformo Demo</span>
-    <h1>Luxury redesign. Sharper message. Stronger conversion.</h1>
-    <p class="lead">We transformed the page into a more premium, persuasive, conversion-ready experience while preserving the important business facts.</p>
-    <div class="cta-row">
-      <a class="btn primary" href="#cta">See the offer</a>
-      <a class="btn secondary" href="#contact">Contact</a>
-    </div>
-  </div>
-</section>
-<section>
-  <div class="grid">
-    <div class="card"><h3>Preserved important data</h3><p>Prices, links, videos, and contact facts stay intact.</p></div>
-    <div class="card"><h3>Sharper messaging</h3><p>Headlines, structure, and calls to action are rebuilt for desire.</p></div>
-    <div class="card"><h3>Modern premium visual style</h3><p>Motion, depth, contrast, and premium layout create the wow effect.</p></div>
-  </div>
-</section>
-<section id="cta">
-  <div class="card">
-    <h2>Ready to turn your page into a conversion machine?</h2>
-    <p>This demo is temporary. Review the new direction while it is still live.</p>
-    <div class="cta-row"><a class="btn primary" href="#contact">Open the next step</a></div>
-  </div>
-</section>
-<section id="contact">
-  <div class="card">
-    <h2>Contact</h2>
-    <p>Email: hello@example.com</p>
-  </div>
-</section>
-</div>
-</body>
-</html>"""
+def _escape(value: str | None) -> str:
+    return html.escape(value or '', quote=True)
+
+
+def _detect_language_from_text(text: str) -> str:
+    if not text:
+        return 'en'
+    cyr = sum(1 for ch in text if 'а' <= ch.lower() <= 'я' or ch.lower() == 'ё')
+    latin = sum(1 for ch in text if 'a' <= ch.lower() <= 'z')
+    if cyr > latin * 0.35:
+        return 'ru'
+    return 'en'
 
 
 def _infer_brand_profile(source: dict | None, business_description: str | None) -> dict:
@@ -146,149 +120,178 @@ def _infer_brand_profile(source: dict | None, business_description: str | None) 
     if business_description:
         text_parts.append(business_description)
     if source:
-        text_parts.extend(source.get("headings", [])[:12])
-        text_parts.extend(source.get("paragraphs", [])[:24])
-        if source.get("title"):
-            text_parts.append(source["title"])
-    text = " ".join(text_parts).lower()
+        text_parts.extend(source.get('headings', [])[:12])
+        text_parts.extend(source.get('paragraphs', [])[:24])
+        if source.get('title'):
+            text_parts.append(source['title'])
+    text = ' '.join(text_parts).lower()
 
     patterns = [
-        ("luxury_editorial", r"luxury|premium|exclusive|boutique|villa|interior|jewelry|beauty|aesthetic|spa|fine dining|resort"),
-        ("future_saas", r"saas|software|platform|ai|automation|crm|analytics|dashboard|api|cloud|workflow|productivity"),
-        ("executive_b2b", r"b2b|enterprise|industrial|procurement|logistics|manufacturing|consulting|compliance|operations"),
-        ("clean_trust", r"clinic|health|medical|dental|wellness|therapy|doctor|care|patient"),
-        ("bold_commerce", r"shop|store|ecommerce|fashion|product|shipping|cart|collection|shopify|dropshipping"),
-        ("architectural_premium", r"real estate|property|apartment|homes|estate|broker|architecture|residence|commercial property"),
-        ("creative_studio", r"agency|studio|creative|marketing|branding|design|production|content"),
+        ('beauty_salon', r'hair|salon|barber|beauty|stylist|colour|coloring|cut|blowout|парикмах|салон|стриж|окрашив|уклад'),
+        ('luxury_editorial', r'luxury|premium|exclusive|boutique|villa|interior|jewelry|aesthetic|spa|fine dining|resort'),
+        ('future_saas', r'saas|software|platform|ai|automation|crm|analytics|dashboard|api|cloud|workflow|productivity'),
+        ('executive_b2b', r'b2b|enterprise|industrial|procurement|logistics|manufacturing|consulting|compliance|operations'),
+        ('clean_trust', r'clinic|health|medical|dental|wellness|therapy|doctor|care|patient'),
+        ('bold_commerce', r'shop|store|ecommerce|fashion|product|shipping|cart|collection|shopify|dropshipping'),
+        ('architectural_premium', r'real estate|property|apartment|homes|estate|broker|architecture|residence|commercial property'),
+        ('creative_studio', r'agency|studio|creative|marketing|branding|design|production|content'),
     ]
 
-    style = "premium_modern"
-    audience = "broad"
-    tone = "confident, persuasive, elevated"
-    visual_direction = "premium gradients, layered depth, bold typography, subtle motion"
-    cta_style = "strong, aspirational, action-oriented"
+    style = 'premium_modern'
+    audience = 'broad'
+    tone = 'confident, persuasive, elevated'
+    visual_direction = 'premium gradients, layered depth, bold typography, subtle motion'
+    cta_style = 'strong, aspirational, action-oriented'
+    business_type = 'business service'
 
     for label, pattern in patterns:
         if re.search(pattern, text):
-            style = label
+            if label == 'beauty_salon':
+                business_type = 'hair salon'
+                style = 'luxury_editorial'
+            else:
+                style = label
             break
 
-    if style == "luxury_editorial":
-        audience = "high-end buyers"
-        tone = "elegant, aspirational, exclusive"
-        visual_direction = "editorial typography, luxury spacing, rich gradients, refined contrast"
-        cta_style = "exclusive, invitation-based"
-    elif style == "future_saas":
-        audience = "modern tech buyers"
-        tone = "clear, sharp, confident, outcome-driven"
-        visual_direction = "product-led layouts, clean grids, futuristic glow, smooth motion"
-        cta_style = "direct, high-clarity, high-intent"
-    elif style == "executive_b2b":
-        audience = "decision makers"
-        tone = "credible, authoritative, efficient"
-        visual_direction = "structured sections, proof-driven blocks, restrained premium design"
-        cta_style = "trust-first, low-friction"
-    elif style == "clean_trust":
-        audience = "patients and families"
-        tone = "calm, trustworthy, warm"
-        visual_direction = "soft gradients, bright surfaces, trust signals, clarity"
-        cta_style = "comforting, simple, reassuring"
-    elif style == "bold_commerce":
-        audience = "shoppers"
-        tone = "desirable, energetic, benefit-driven"
-        visual_direction = "strong product focus, bold cards, contrast, urgency"
-        cta_style = "buy-now, desire-driven"
-    elif style == "architectural_premium":
-        audience = "buyers and investors"
-        tone = "aspirational, polished, premium"
-        visual_direction = "large imagery zones, elegant layout, confident whitespace"
-        cta_style = "high-value, appointment-driven"
-    elif style == "creative_studio":
-        audience = "brand-conscious clients"
-        tone = "bold, premium, trend-aware"
-        visual_direction = "high-contrast art direction, punchy sections, smooth transitions"
-        cta_style = "portfolio-like, persuasive"
+    if 'hair salon' == business_type:
+        audience = 'local beauty clients'
+        tone = 'elegant, warm, confidence-building'
+        visual_direction = 'large beauty imagery, premium editorial spacing, warm premium contrast'
+        cta_style = 'practical booking-focused'
+    elif style == 'luxury_editorial':
+        business_type = business_type if business_type != 'business service' else 'premium service'
+        audience = 'high-end buyers'
+        tone = 'elegant, aspirational, exclusive'
+        visual_direction = 'editorial typography, luxury spacing, rich gradients, refined contrast'
+        cta_style = 'exclusive, invitation-based'
+    elif style == 'future_saas':
+        business_type = 'software product'
+        audience = 'modern tech buyers'
+        tone = 'clear, sharp, confident, outcome-driven'
+        visual_direction = 'product-led layouts, clean grids, futuristic glow, smooth motion'
+        cta_style = 'direct, high-clarity, high-intent'
+    elif style == 'executive_b2b':
+        business_type = 'business service'
+        audience = 'decision makers'
+        tone = 'credible, authoritative, efficient'
+        visual_direction = 'structured sections, proof-driven blocks, restrained premium design'
+        cta_style = 'trust-first, low-friction'
+    elif style == 'clean_trust':
+        business_type = 'wellness service'
+        audience = 'patients and families'
+        tone = 'calm, trustworthy, warm'
+        visual_direction = 'soft gradients, bright surfaces, trust signals, clarity'
+        cta_style = 'comforting, simple, reassuring'
+    elif style == 'bold_commerce':
+        business_type = 'consumer product'
+        audience = 'shoppers'
+        tone = 'desirable, energetic, benefit-driven'
+        visual_direction = 'strong product focus, bold cards, contrast, urgency'
+        cta_style = 'buy-now, desire-driven'
+    elif style == 'architectural_premium':
+        business_type = 'property business'
+        audience = 'buyers and investors'
+        tone = 'aspirational, polished, premium'
+        visual_direction = 'large imagery zones, elegant layout, confident whitespace'
+        cta_style = 'high-value, appointment-driven'
+    elif style == 'creative_studio':
+        business_type = 'creative service'
+        audience = 'brand-conscious clients'
+        tone = 'bold, premium, trend-aware'
+        visual_direction = 'high-contrast art direction, punchy sections, smooth transitions'
+        cta_style = 'portfolio-like, persuasive'
+
+    raw_text = ' '.join(text_parts)
+    language = (source or {}).get('language') or _detect_language_from_text(raw_text)
 
     return {
-        "style": style,
-        "audience": audience,
-        "tone": tone,
-        "visual_direction": visual_direction,
-        "cta_style": cta_style,
+        'style': style,
+        'audience': audience,
+        'tone': tone,
+        'visual_direction': visual_direction,
+        'cta_style': cta_style,
+        'business_type': business_type,
+        'language': language,
     }
 
 
 def _build_system_prompt(style: str) -> str:
-    style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS["premium_modern"])
+    style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS['premium_modern'])
     return "\n\n".join([
         BASE_RULES.strip(),
         dedent("""
-        Your job is NOT to make a merely beautiful page.
-        Your job is to create a page that feels irresistible.
-        The user must think: "I WANT THIS"
+        Your job is to redesign an EXISTING business page so it becomes clearer, more persuasive, and more premium.
+        It must still obviously be the same business.
 
         Conversion rules:
-        - improve headlines aggressively
-        - sell outcomes, not features
-        - remove generic phrasing
-        - create aspiration, clarity, status, and desire
+        - improve headlines aggressively, but keep the same business reality
+        - sell outcomes, not vague abstractions
+        - remove generic phrasing and empty luxury words
+        - increase clarity, trust, and desire
         - reduce friction
         - intensify CTA hierarchy
-        - make the offer feel more valuable than expected
+        - make the offer feel more valuable without changing core facts
 
         Mandatory structure:
         1. Hero
-        2. Problem / tension
-        3. Solution / transformation
-        4. Benefits
-        5. Offer
-        6. Social proof
-        7. Differentiation
-        8. FAQ / objection handling
-        9. Strong final CTA
-        10. Contact / pricing / preserved facts if provided
+        2. Services / offer summary
+        3. Transformation / benefits
+        4. Trust / proof
+        5. FAQ or objections
+        6. Final CTA
+        7. Preserved facts block if provided
 
         Design rules:
         - premium visual hierarchy
-        - layered gradients or depth
-        - motion and micro-interactions
-        - elevated CTA blocks
-        - believable testimonials if none are provided
         - strong first screen
         - responsive production-presentable HTML
-
-        The final result must feel like a $5,000-$15,000 landing page.
+        - no fake agency pitch about redesigning the website
+        - no references to Siteformo inside the generated page itself
+        - if real source images exist, use them in hero or gallery
+        - preserve links, videos, payment references, contact data, and other factual data exactly
         """).strip(),
         style_prompt,
     ])
 
 
 def _build_user_prompt(request_type: str, source: dict | None, business_description: str | None, profile: dict) -> str:
+    source_summary = None
+    if source:
+        source_summary = {
+            'title': source.get('title'),
+            'meta_description': source.get('meta_description'),
+            'final_url': source.get('final_url'),
+            'language': source.get('language'),
+            'headings': source.get('headings', [])[:12],
+            'paragraphs': source.get('paragraphs', [])[:18],
+            'images': source.get('images', [])[:6],
+            'preserved_facts': source.get('preserved_facts', {}),
+        }
+
     payload = {
-        "request_type": request_type,
-        "brand_profile": profile,
-        "business_description": business_description,
-        "source": source,
-        "requirements": {
-            "goal": "wow, desire, conversion",
-            "must_preserve_real_facts": True,
-            "page_count": 1,
-            "must_be_complete_html": True,
-            "should_feel_premium": True,
-            "must_include_motion": True,
-            "must_strengthen_offer": True,
-            "must_upgrade_headlines": True,
-            "must_route_copy_to_detected_style": True,
-            "must_route_visuals_to_detected_style": True,
+        'request_type': request_type,
+        'brand_profile': profile,
+        'business_description': business_description,
+        'source': source_summary,
+        'requirements': {
+            'goal': 'premium redesign of the same business',
+            'must_preserve_real_facts': True,
+            'page_count': 1,
+            'must_be_complete_html': True,
+            'must_feel_custom': True,
+            'must_include_motion': True,
+            'must_upgrade_headlines': True,
+            'must_keep_business_type': True,
+            'must_keep_source_language': True,
+            'must_use_source_images_if_present': True,
         },
-        "extra_directions": [
-            "Choose the strongest possible conversion angle for this niche.",
-            "Make the hero instantly impressive and emotionally charged.",
-            "Use CTA copy that feels specific and high intent.",
-            "Make testimonials believable, not generic.",
-            "Use different visual language depending on the detected style.",
-            "Design the page so it feels custom-made for this business.",
-            "Avoid bland AI tone. Write like an elite agency.",
+        'extra_directions': [
+            'Write in the same language as the source material.',
+            'Keep the same niche and business type. Do not invent another concept.',
+            'Use clear practical CTA copy such as book, call, visit, request, reserve.',
+            'If the source is local, mention the location if it is available in the source.',
+            'Avoid abstract phrases like sanctuary, legacy, elevated excellence unless clearly supported by the source.',
+            'Do not output a site about website design or agency services unless the source business is actually an agency.',
         ],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -299,7 +302,7 @@ def _extract_candidate_content(response_text: str) -> dict | None:
         return json.loads(response_text)
     except Exception:
         pass
-    match = re.search(r"\{.*\}", response_text, re.S)
+    match = re.search(r'\{.*\}', response_text, re.S)
     if match:
         try:
             return json.loads(match.group(0))
@@ -308,29 +311,213 @@ def _extract_candidate_content(response_text: str) -> dict | None:
     return None
 
 
-def _score_candidate(candidate: dict) -> int:
-    html = str(candidate.get("html", "")).lower()
+def _score_candidate(candidate: dict, source: dict | None = None, profile: dict | None = None) -> int:
+    html_text = str(candidate.get('html', ''))
+    lowered = html_text.lower()
     score = 0
-    for needle in [
-        "<section", "hero", "testimonial", "faq", "contact", "pricing", "cta",
-        "animation", "transition", "gradient", "button", "hover"
-    ]:
-        if needle in html:
+    for needle in ['<section', 'hero', 'faq', 'contact', 'cta', 'button', 'hover']:
+        if needle in lowered:
             score += 1
-    if "wow" in html:
-        score += 1
+    if '<img' in lowered:
+        score += 2
+    if source:
+        for image_url in source.get('images', [])[:3]:
+            if image_url and image_url in html_text:
+                score += 4
+                break
+        language = (source.get('language') or (profile or {}).get('language') or 'en')
+        if language == 'ru' and re.search(r'[А-Яа-яЁё]', html_text):
+            score += 3
+    if 'agency' in lowered and (profile or {}).get('business_type') != 'creative service':
+        score -= 5
+    if 'siteformo' in lowered:
+        score -= 4
     return score
 
 
+def _pick_hero_image(source: dict | None) -> str:
+    if not source:
+        return ''
+    for image in source.get('images', []) or []:
+        if image:
+            return str(image)
+    return ''
+
+
+def _language_pack(language: str) -> dict[str, str]:
+    if language == 'ru':
+        return {
+            'badge': 'Новый дизайн',
+            'primary_cta': 'Оставить заявку',
+            'secondary_cta': 'Посмотреть услуги',
+            'services': 'Услуги',
+            'benefits': 'Почему выбирают нас',
+            'proof': 'Почему это удобно',
+            'faq': 'Частые вопросы',
+            'facts': 'Сохранённые данные',
+            'contact': 'Контакты',
+            'faq_q1': 'Как записаться?',
+            'faq_a1': 'Оставьте заявку через форму или свяжитесь по указанным контактам.',
+            'faq_q2': 'Сохраняются ли контакты и цены?',
+            'faq_a2': 'Да, ключевые фактические данные сохраняются без изменений.',
+            'hero_fallback': 'Современный сайт для вашего бизнеса',
+            'hero_sub_fallback': 'Более ясная структура, сильнее оффер и понятный следующий шаг для клиента.',
+        }
+    return {
+        'badge': 'Refreshed design',
+        'primary_cta': 'Request a consultation',
+        'secondary_cta': 'View services',
+        'services': 'Services',
+        'benefits': 'Why clients choose this business',
+        'proof': 'Why this works',
+        'faq': 'Frequently asked questions',
+        'facts': 'Preserved facts',
+        'contact': 'Contact',
+        'faq_q1': 'How do I get started?',
+        'faq_a1': 'Use the main contact path on the page to request the service.',
+        'faq_q2': 'Are prices and contacts preserved?',
+        'faq_a2': 'Yes. Key factual data is kept intact.',
+        'hero_fallback': 'A clearer, stronger website for this business',
+        'hero_sub_fallback': 'Sharper positioning, better structure, and a more persuasive next step for visitors.',
+    }
+
+
+def _source_guided_fallback(source: dict | None, business_description: str | None, profile: dict) -> dict:
+    language = profile.get('language', 'en')
+    pack = _language_pack(language)
+
+    title = ''
+    if source and source.get('title'):
+        title = str(source['title'])
+    elif business_description:
+        title = business_description[:80]
+    else:
+        title = pack['hero_fallback']
+
+    headings = source.get('headings', [])[:6] if source else []
+    paragraphs = source.get('paragraphs', [])[:10] if source else []
+    facts = (source or {}).get('preserved_facts', {})
+    image_url = _pick_hero_image(source)
+
+    hero_title = headings[0] if headings else title
+    hero_subtitle = paragraphs[0] if paragraphs else pack['hero_sub_fallback']
+
+    service_items = headings[1:4] or paragraphs[1:4] or [business_description or profile.get('business_type', 'service')]
+    benefit_items = paragraphs[2:5] or headings[1:4] or [pack['hero_sub_fallback']]
+
+    links = facts.get('links', [])[:3]
+    prices = facts.get('prices', [])[:4]
+    phones = facts.get('phones', [])[:2]
+    emails = facts.get('emails', [])[:2]
+    videos = facts.get('videos', [])[:2]
+
+    link_markup = ''.join(
+        f'<li><a href="{_escape(item.get("href"))}">{_escape(item.get("text") or item.get("href"))}</a></li>'
+        for item in links if item.get('href')
+    )
+    price_markup = ''.join(f'<li>{_escape(item)}</li>' for item in prices)
+    phone_markup = ''.join(f'<li>{_escape(item)}</li>' for item in phones)
+    email_markup = ''.join(f'<li>{_escape(item)}</li>' for item in emails)
+    video_markup = ''.join(f'<li><a href="{_escape(item)}">{_escape(item)}</a></li>' for item in videos)
+
+    service_markup = ''.join(f'<div class="mini-card"><h3>{_escape(str(item)[:80])}</h3></div>' for item in service_items if item)
+    benefit_markup = ''.join(f'<li>{_escape(str(item)[:180])}</li>' for item in benefit_items if item)
+    hero_image_markup = f'<img src="{_escape(image_url)}" alt="{_escape(hero_title)}" />' if image_url else ''
+
+    html_doc = f"""<!doctype html>
+<html lang="{language}">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{_escape(title)}</title>
+<style>
+:root{{--bg:#0f1115;--panel:#171a21;--line:rgba(255,255,255,.12);--text:#f8fafc;--muted:#c9d1df;--accent:#d4a24c;--accent2:#f3d08b}}
+*{{box-sizing:border-box}}
+body{{margin:0;font-family:Inter,Arial,sans-serif;background:linear-gradient(180deg,#0f1115,#151922 55%,#111318);color:var(--text)}}
+a{{color:inherit}}
+.wrap{{max-width:1180px;margin:0 auto;padding:28px}}
+.hero{{display:grid;grid-template-columns:1.05fr .95fr;gap:32px;align-items:center;min-height:100vh}}
+.badge{{display:inline-flex;align-items:center;gap:10px;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:#fff}}
+h1{{font-size:clamp(42px,6vw,78px);line-height:.95;margin:20px 0 16px;letter-spacing:-.04em;max-width:720px}}
+.lead{{font-size:clamp(18px,2vw,24px);line-height:1.6;color:var(--muted);max-width:720px}}
+.cta-row{{display:flex;gap:14px;flex-wrap:wrap;margin-top:28px}}
+.btn{{display:inline-flex;align-items:center;justify-content:center;padding:16px 22px;border-radius:16px;text-decoration:none;font-weight:800}}
+.btn.primary{{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#141414}}
+.btn.secondary{{border:1px solid var(--line);background:rgba(255,255,255,.04);color:#fff}}
+.hero-visual{{min-height:540px;border-radius:28px;overflow:hidden;background:radial-gradient(circle at 40% 30%,rgba(212,162,76,.35),transparent 36%),linear-gradient(135deg,#1c1208,#6b4a18);box-shadow:0 30px 80px rgba(0,0,0,.28)}}
+.hero-visual img{{display:block;width:100%;height:100%;object-fit:cover}}
+section{{padding:40px 0}}
+.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}}
+.card,.mini-card{{padding:22px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.04)}}
+.list{{margin:0;padding-left:20px;color:var(--muted);line-height:1.7}}
+.two-col{{display:grid;grid-template-columns:1fr 1fr;gap:18px}}
+.kicker{{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#f3d08b;margin-bottom:10px;font-weight:700}}
+@media (max-width: 900px){{.hero{{grid-template-columns:1fr;min-height:auto;padding:70px 0 24px}}.hero-visual{{min-height:320px}}.grid,.two-col{{grid-template-columns:1fr}}h1{{font-size:46px}}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<section class="hero">
+  <div>
+    <span class="badge">{_escape(pack['badge'])}</span>
+    <h1>{_escape(hero_title)}</h1>
+    <p class="lead">{_escape(hero_subtitle)}</p>
+    <div class="cta-row">
+      <a class="btn primary" href="#contact">{_escape(pack['primary_cta'])}</a>
+      <a class="btn secondary" href="#services">{_escape(pack['secondary_cta'])}</a>
+    </div>
+  </div>
+  <div class="hero-visual">{hero_image_markup}</div>
+</section>
+<section id="services">
+  <div class="kicker">{_escape(pack['services'])}</div>
+  <div class="grid">{service_markup}</div>
+</section>
+<section>
+  <div class="two-col">
+    <div class="card">
+      <div class="kicker">{_escape(pack['benefits'])}</div>
+      <ul class="list">{benefit_markup}</ul>
+    </div>
+    <div class="card">
+      <div class="kicker">{_escape(pack['faq'])}</div>
+      <p><strong>{_escape(pack['faq_q1'])}</strong><br />{_escape(pack['faq_a1'])}</p>
+      <p><strong>{_escape(pack['faq_q2'])}</strong><br />{_escape(pack['faq_a2'])}</p>
+    </div>
+  </div>
+</section>
+<section id="contact">
+  <div class="card">
+    <div class="kicker">{_escape(pack['facts'])}</div>
+    <div class="two-col">
+      <div>
+        {'<h3>Links</h3><ul class="list">' + link_markup + '</ul>' if link_markup else ''}
+        {'<h3>Prices</h3><ul class="list">' + price_markup + '</ul>' if price_markup else ''}
+      </div>
+      <div>
+        {'<h3>Phones</h3><ul class="list">' + phone_markup + '</ul>' if phone_markup else ''}
+        {'<h3>Emails</h3><ul class="list">' + email_markup + '</ul>' if email_markup else ''}
+        {'<h3>Videos</h3><ul class="list">' + video_markup + '</ul>' if video_markup else ''}
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+</body>
+</html>"""
+
+    return {'title': title or 'Siteformo Demo', 'html': html_doc}
+
+
 def generate_demo_page(request_type: str, source: dict | None = None, business_description: str | None = None) -> dict:
-    logger.info("[AI] generating high-conversion page...")
+    logger.info('[AI] generating high-conversion page...')
     profile = _infer_brand_profile(source, business_description)
-    logger.info("[AI] routed style=%s audience=%s tone=%s", profile["style"], profile["audience"], profile["tone"])
+    logger.info('[AI] routed style=%s audience=%s tone=%s language=%s business_type=%s', profile['style'], profile['audience'], profile['tone'], profile['language'], profile['business_type'])
 
     if not settings.openai_api_key:
-        return {"title": "Siteformo Demo", "html": FALLBACK_HTML}
+        return _source_guided_fallback(source, business_description, profile)
 
-    system_prompt = _build_system_prompt(profile["style"])
+    system_prompt = _build_system_prompt(profile['style'])
     user_prompt = _build_user_prompt(request_type, source, business_description, profile)
     client = OpenAI(api_key=settings.openai_api_key)
 
@@ -338,24 +525,24 @@ def generate_demo_page(request_type: str, source: dict | None = None, business_d
     for _ in range(2):
         response = client.chat.completions.create(
             model=settings.openai_model,
-            temperature=0.95,
+            temperature=0.7,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt},
             ],
         )
-        content = response.choices[0].message.content or ""
+        content = response.choices[0].message.content or ''
         data = _extract_candidate_content(content)
-        if data and data.get("html"):
+        if data and data.get('html'):
             candidates.append(data)
 
     if not candidates:
-        logger.info("[AI] generation fallback used")
-        return {"title": "Siteformo Demo", "html": FALLBACK_HTML}
+        logger.info('[AI] generation fallback used')
+        return _source_guided_fallback(source, business_description, profile)
 
-    best = max(candidates, key=_score_candidate)
-    logger.info("[AI] generation complete")
+    best = max(candidates, key=lambda item: _score_candidate(item, source=source, profile=profile))
+    logger.info('[AI] generation complete')
     return {
-        "title": str(best.get("title") or "Siteformo Demo"),
-        "html": str(best.get("html") or FALLBACK_HTML),
+        'title': str(best.get('title') or 'Siteformo Demo'),
+        'html': str(best.get('html') or _source_guided_fallback(source, business_description, profile)['html']),
     }

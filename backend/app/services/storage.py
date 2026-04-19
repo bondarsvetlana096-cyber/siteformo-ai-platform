@@ -228,6 +228,11 @@ def get_storage() -> BaseStorage:
         return _storage
 
     backend = settings.storage_backend.lower()
+    if backend == "auto":
+        if settings.supabase_url and settings.supabase_service_role_key and settings.supabase_storage_bucket:
+            backend = "supabase"
+        else:
+            backend = "local"
 
     logger.info("[STORAGE] init backend=%s", backend)
 

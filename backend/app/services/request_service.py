@@ -30,11 +30,6 @@ from app.services.storage import get_storage
 logger = logging.getLogger("siteformo.request_service")
 
 
-BYPASS_LIMIT_EMAILS = {
-    "klon97048@gmail.com",
-}
-
-
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -83,7 +78,7 @@ def _schedule_followup(db: Session, request_id: str, reason: str, delay_minutes:
 def _is_limit_bypass_email(email: str | None) -> bool:
     if not email:
         return False
-    return normalize_email(email) in BYPASS_LIMIT_EMAILS
+    return normalize_email(email) in settings.bypass_limit_emails
 
 
 def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str, str]) -> tuple[str, Request | None, dict | None]:
