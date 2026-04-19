@@ -30,6 +30,11 @@ from app.services.storage import get_storage
 logger = logging.getLogger("siteformo.request_service")
 
 
+BYPASS_LIMIT_EMAILS = {
+    "klon97048@gmail.com",
+}
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -75,11 +80,19 @@ def _schedule_followup(db: Session, request_id: str, reason: str, delay_minutes:
     enqueue_job(db, "follow_up_check", {"request_id": request_id, "reason": reason}, scheduled_at=scheduled_at)
 
 
+def _is_limit_bypass_email(email: str | None) -> bool:
+    if not email:
+        return False
+    return normalize_email(email) in BYPASS_LIMIT_EMAILS
+
+
 def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str, str]) -> tuple[str, Request | None, dict | None]:
     ip = _client_ip(headers)
     ip_hash = sha256_text(ip)
     normalized_email, normalized_contact = _normalize_contact(payload.contact_type, payload.contact_value or "")
     identity_hash = _build_user_identity(payload.contact_type, normalized_contact, ip, payload.fingerprint)
+
+    bypass_limits = _is_limit_bypass_email(normalized_email)
 
     usage = db.execute(select(UserUsage).where(UserUsage.user_identity_hash == identity_hash)).scalar_one_or_none()
     if usage is None:
@@ -94,7 +107,10 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         db.commit()
         db.refresh(usage)
 
-    if usage.free_attempts_used >= settings.free_attempt_limit:
+    if bypass_limits:
+        logger.info("[API] limit bypass applied: email=%s", normalized_email)
+
+    if not bypass_limits and usage.free_attempts_used >= settings.free_attempt_limit:
         req = Request(
             request_type=payload.request_type,
             email=normalized_email,
@@ -112,8 +128,16 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         db.commit()
         db.refresh(req)
         logger.warning("[API] limit reached: contact=%s", normalized_contact)
-        log_event(db, "request_limit_reached", request_id=req.id, payload={"contact_type": payload.contact_type}, distinct_id=normalized_contact)
+        log_event(
+            db,
+            "request_limit_reached",
+            request_id=req.id,
+            payload={"contact_type": payload.contact_type},
+            distinct_id=normalized_contact,
+        )
         return RequestStatus.LIMIT_REACHED, req, None
+
+    current_attempt_number = 1 if bypass_limits else usage.free_attempts_used + 1
 
     req = Request(
         request_type=payload.request_type,
@@ -127,10 +151,13 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         fingerprint=payload.fingerprint,
         ip_hash=ip_hash,
         user_identity_hash=identity_hash,
-        attempt_number=usage.free_attempts_used + 1,
+        attempt_number=current_attempt_number,
     )
     db.add(req)
-    usage.free_attempts_used += 1
+
+    if not bypass_limits:
+        usage.free_attempts_used += 1
+
     db.commit()
     db.refresh(req)
 
