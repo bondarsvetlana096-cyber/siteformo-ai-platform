@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import traceback
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest
@@ -32,6 +33,14 @@ class ConfirmContactPayload(BaseModel):
     inbound_message_text: str | None = None
     external_user_id: str | None = None
 
+
+
+
+def _parse_request_uuid(request_id: str):
+    try:
+        return uuid.UUID(str(request_id))
+    except Exception:
+        return request_id
 
 def _client_ip(req: FastAPIRequest) -> str:
     forwarded = req.headers.get("x-forwarded-for")
@@ -141,7 +150,7 @@ def confirm_contact(
 
 @router.get("/api/requests/{request_id}", response_model=RequestStatusResponse)
 def get_request_status(request_id: str, db: Session = Depends(get_db)) -> RequestStatusResponse:
-    req = db.get(Request, request_id)
+    req = db.get(Request, _parse_request_uuid(request_id))
     if req is None:
         raise HTTPException(status_code=404, detail="Request not found")
 
@@ -173,7 +182,7 @@ def track_request_event(
     payload: RequestEventPayload,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    req = db.get(Request, request_id)
+    req = db.get(Request, _parse_request_uuid(request_id))
     if req is None:
         raise HTTPException(status_code=404, detail="Request not found")
 
@@ -244,7 +253,7 @@ def get_demo_asset(asset_token: str, request: FastAPIRequest, db: Session = Depe
             raise HTTPException(status_code=403, detail="Asset access denied")
 
         request_id = request_id_match.group(1)
-        req = db.get(Request, request_id)
+        req = db.get(Request, _parse_request_uuid(request_id))
         if req is None or not req.demo_token:
             raise HTTPException(status_code=404, detail="Asset not found")
 

@@ -10,6 +10,18 @@ from app.core.config import settings
 
 logger = logging.getLogger("siteformo.db")
 
+
+def _build_engine_kwargs(db_url: str) -> dict:
+    parsed = make_url(db_url)
+    connect_args = {}
+    if parsed.drivername.startswith("postgresql") and "+psycopg" in parsed.drivername:
+        connect_args["prepare_threshold"] = None
+    kwargs = {"pool_pre_ping": True}
+    if connect_args:
+        kwargs["connect_args"] = connect_args
+    return kwargs
+
+
 db_url = settings.database_url
 logger.info("DATABASE_URL_RAW=%r", db_url)
 
@@ -26,11 +38,7 @@ try:
 except Exception:
     logger.exception("DB_URL_PARSE_ERROR")
 
-engine = create_engine(
-    db_url,
-    pool_pre_ping=True,
-    connect_args={"prepare_threshold": None},
-)
+engine = create_engine(db_url, **_build_engine_kwargs(db_url))
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -38,6 +46,7 @@ SessionLocal = sessionmaker(
     autocommit=False,
     expire_on_commit=False,
 )
+
 
 def get_db():
     db = SessionLocal()

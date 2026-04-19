@@ -91,9 +91,15 @@ Use the same values in **both** API and worker:
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
+cp .env.local.example .env.local
 playwright install chromium
-alembic upgrade head
+python - <<'PY'
+from app.db.base import Base
+from app.db.session import engine
+import app.models.request  # noqa: F401
+Base.metadata.create_all(bind=engine)
+print("local db ready")
+PY
 uvicorn app.main:app --reload
 ```
 

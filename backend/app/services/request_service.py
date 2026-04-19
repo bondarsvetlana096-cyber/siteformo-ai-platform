@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -31,6 +32,25 @@ logger = logging.getLogger("siteformo.request_service")
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _parse_request_uuid(request_id: str):
+    try:
+        return uuid.UUID(str(request_id))
+    except Exception:
+        return request_id
+
+
+def _get_existing_master_asset(db: Session, request_id: str) -> DemoAsset | None:
+    return db.execute(
+        select(DemoAsset)
+        .where(
+            DemoAsset.request_id == _parse_request_uuid(request_id),
+            DemoAsset.asset_type == "master_html",
+            DemoAsset.deleted_at.is_(None),
+        )
+        .order_by(DemoAsset.created_at.desc())
+    ).scalars().first()
 
 
 def _client_ip(headers: dict[str, str], fallback: str = "0.0.0.0") -> str:
@@ -151,7 +171,7 @@ def confirm_contact_and_queue(
 
 
 async def process_generate_job(db: Session, request_id: str) -> None:
-    req = db.get(Request, request_id)
+    req = db.get(Request, _parse_request_uuid(request_id))
     if req is None:
         return
 
@@ -178,6 +198,15 @@ async def process_generate_job(db: Session, request_id: str) -> None:
         }
         db.commit()
 
+        existing_asset = _get_existing_master_asset(db, str(req.id))
+        if existing_asset:
+            logger.warning(
+                "[WORKER] duplicate publish skipped: request_id=%s existing_storage_key=%s",
+                request_id,
+                existing_asset.storage_key,
+            )
+            return
+
         token, master_storage_key, expires_at, retention_expires_at, demo_url = publish_demo(
             str(req.id),
             result["html"],
@@ -198,6 +227,15 @@ async def process_generate_job(db: Session, request_id: str) -> None:
 
         if not retention_expires_at:
             raise RuntimeError(f"publish_demo returned empty retention_expires_at for request_id={request_id}")
+
+        existing_asset = _get_existing_master_asset(db, str(req.id))
+        if existing_asset:
+            logger.warning(
+                "[WORKER] duplicate asset insert skipped: request_id=%s existing_storage_key=%s",
+                request_id,
+                existing_asset.storage_key,
+            )
+            return
 
         req.status = RequestStatus.PUBLISHED
         req.demo_token = token
@@ -291,7 +329,7 @@ def record_request_event(db: Session, req: Request, event_type: str, metadata: d
 
 
 async def process_follow_up_job(db: Session, request_id: str, reason: str) -> None:
-    req = db.get(Request, request_id)
+    req = db.get(Request, _parse_request_uuid(request_id))
     if req is None or not req.demo_url or req.follow_up_count >= settings.max_followup_count:
         return
     if req.status in {RequestStatus.DELETED, RequestStatus.FAILED, RequestStatus.COMPLETED}:
@@ -333,7 +371,7 @@ async def process_follow_up_job(db: Session, request_id: str, reason: str) -> No
 
 
 async def process_expire_job(db: Session, request_id: str) -> None:
-    req = db.get(Request, request_id)
+    req = db.get(Request, _parse_request_uuid(request_id))
     if req is None or req.status in {RequestStatus.EXPIRED, RequestStatus.DELETED}:
         return
     if req.expires_at and req.expires_at > _utcnow():
@@ -346,7 +384,7 @@ async def process_expire_job(db: Session, request_id: str) -> None:
 
 
 async def process_cleanup_job(db: Session, request_id: str) -> None:
-    req = db.get(Request, request_id)
+    req = db.get(Request, _parse_request_uuid(request_id))
     if req is None or req.status == RequestStatus.DELETED:
         return
     if req.retention_expires_at and req.retention_expires_at > _utcnow():
