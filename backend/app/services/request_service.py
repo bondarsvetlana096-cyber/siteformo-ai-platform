@@ -203,8 +203,18 @@ async def process_generate_job(db: Session, request_id: str) -> None:
         log_event(db, "generation_started", request_id=req.id, distinct_id=req.contact_value)
 
         source = None
-        if req.request_type == RequestType.REDESIGN and req.source_url:
+        if req.source_url:
             source = await scrape_site(req.source_url)
+            logger.info(
+                "[WORKER] scraped source: request_id=%s title=%s headings=%s paragraphs=%s images=%s",
+                request_id,
+                (source or {}).get("title"),
+                len((source or {}).get("headings", []) or []),
+                len((source or {}).get("paragraphs", []) or []),
+                len((source or {}).get("images", []) or []),
+            )
+        else:
+            logger.info("[WORKER] no source_url: request_id=%s", request_id)
 
         result = generate_demo_page(req.request_type, source, req.business_description)
 
@@ -213,7 +223,7 @@ async def process_generate_job(db: Session, request_id: str) -> None:
             **(req.generation_metadata or {}),
             "title": result["title"],
             "request_type": req.request_type,
-            "worker_code_version": "retention_v2",
+            "worker_code_version": "source_scrape_always_v1",
         }
         db.commit()
 
