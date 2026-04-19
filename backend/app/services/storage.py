@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
 from pathlib import Path
 
@@ -10,12 +11,18 @@ from botocore.client import Config as BotoConfig
 from app.core.config import settings
 
 
+logger = logging.getLogger("siteformo.storage")
+
+
 class StorageError(Exception):
     pass
 
 
 class BaseStorage:
     def put_text(self, key: str, content: str, content_type: str = "text/html; charset=utf-8") -> None:
+        raise NotImplementedError
+
+    def put_bytes(self, key: str, content: bytes, content_type: str = "application/octet-stream") -> None:
         raise NotImplementedError
 
     def get_bytes(self, key: str) -> tuple[bytes, str]:
@@ -35,9 +42,13 @@ class LocalStorage(BaseStorage):
         self.root.mkdir(parents=True, exist_ok=True)
 
     def put_text(self, key: str, content: str, content_type: str = "text/html; charset=utf-8") -> None:
+        self.put_bytes(key, content.encode("utf-8"), content_type=content_type)
+
+    def put_bytes(self, key: str, content: bytes, content_type: str = "application/octet-stream") -> None:
         path = self.root / key
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        path.write_bytes(content)
+        logger.info("[STORAGE][local] put_bytes key=%s size=%s", key, len(content))
 
     def get_bytes(self, key: str) -> tuple[bytes, str]:
         path = self.root / key
@@ -67,29 +78,99 @@ class SupabaseStorage(BaseStorage):
         }
 
     def put_text(self, key: str, content: str, content_type: str = "text/html; charset=utf-8") -> None:
-        url = f"{settings.supabase_url}/storage/v1/object/{settings.supabase_storage_bucket}/{key}"
-        response = httpx.put(
+        self.put_bytes(key, content.encode("utf-8"), content_type=content_type)
+
+    def put_bytes(self, key: str, content: bytes, content_type: str = "application/octet-stream") -> None:
+        bucket = settings.supabase_storage_bucket
+        url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{key}"
+
+        logger.info(
+            "[STORAGE][supabase] upload start bucket=%s key=%s size=%s content_type=%s",
+            bucket,
+            key,
+            len(content),
+            content_type,
+        )
+
+        response = httpx.post(
             url,
             headers={
                 **self._headers(),
                 "content-type": content_type,
                 "x-upsert": "true",
             },
-            content=content.encode("utf-8"),
+            content=content,
             timeout=30.0,
         )
+
         if response.status_code >= 300:
+            logger.error(
+                "[STORAGE][supabase] upload failed bucket=%s key=%s status=%s body=%s",
+                bucket,
+                key,
+                response.status_code,
+                response.text,
+            )
             raise StorageError(response.text)
 
+        logger.info(
+            "[STORAGE][supabase] upload ok bucket=%s key=%s status=%s",
+            bucket,
+            key,
+            response.status_code,
+        )
+
+        verify_response = httpx.get(
+            url,
+            headers=self._headers(),
+            timeout=30.0,
+        )
+
+        if verify_response.status_code >= 300:
+            logger.error(
+                "[STORAGE][supabase] verify failed bucket=%s key=%s status=%s body=%s",
+                bucket,
+                key,
+                verify_response.status_code,
+                verify_response.text,
+            )
+            raise StorageError(
+                f"Supabase upload verification failed for key={key}: {verify_response.text}"
+            )
+
+        logger.info(
+            "[STORAGE][supabase] verify ok bucket=%s key=%s size=%s content_type=%s",
+            bucket,
+            key,
+            len(verify_response.content),
+            verify_response.headers.get("content-type", "application/octet-stream"),
+        )
+
     def get_bytes(self, key: str) -> tuple[bytes, str]:
-        url = f"{settings.supabase_url}/storage/v1/object/{settings.supabase_storage_bucket}/{key}"
+        bucket = settings.supabase_storage_bucket
+        url = f"{settings.supabase_url}/storage/v1/object/{bucket}/{key}"
+
+        logger.info("[STORAGE][supabase] get bucket=%s key=%s", bucket, key)
+
         response = httpx.get(url, headers=self._headers(), timeout=30.0)
         if response.status_code >= 300:
+            logger.error(
+                "[STORAGE][supabase] get failed bucket=%s key=%s status=%s body=%s",
+                bucket,
+                key,
+                response.status_code,
+                response.text,
+            )
             raise StorageError(response.text)
+
         return response.content, response.headers.get("content-type", "application/octet-stream")
 
     def delete(self, key: str) -> None:
-        url = f"{settings.supabase_url}/storage/v1/object/{settings.supabase_storage_bucket}"
+        bucket = settings.supabase_storage_bucket
+        url = f"{settings.supabase_url}/storage/v1/object/{bucket}"
+
+        logger.info("[STORAGE][supabase] delete bucket=%s key=%s", bucket, key)
+
         response = httpx.request(
             "DELETE",
             url,
@@ -98,6 +179,13 @@ class SupabaseStorage(BaseStorage):
             timeout=30.0,
         )
         if response.status_code >= 300:
+            logger.error(
+                "[STORAGE][supabase] delete failed bucket=%s key=%s status=%s body=%s",
+                bucket,
+                key,
+                response.status_code,
+                response.text,
+            )
             raise StorageError(response.text)
 
 
@@ -113,10 +201,13 @@ class S3Storage(BaseStorage):
         )
 
     def put_text(self, key: str, content: str, content_type: str = "text/html; charset=utf-8") -> None:
+        self.put_bytes(key, content.encode("utf-8"), content_type=content_type)
+
+    def put_bytes(self, key: str, content: bytes, content_type: str = "application/octet-stream") -> None:
         self.client.put_object(
             Bucket=settings.s3_bucket,
             Key=key,
-            Body=content.encode("utf-8"),
+            Body=content,
             ContentType=content_type,
         )
 
@@ -138,11 +229,15 @@ def get_storage() -> BaseStorage:
 
     backend = settings.storage_backend.lower()
 
+    logger.info("[STORAGE] init backend=%s", backend)
+
     if backend == "supabase":
+        logger.info("[STORAGE] using supabase bucket=%s", settings.supabase_storage_bucket)
         _storage = SupabaseStorage()
     elif backend == "s3":
         _storage = S3Storage()
     else:
+        logger.info("[STORAGE] using local dir=%s", settings.demo_storage_dir)
         _storage = LocalStorage(settings.demo_storage_dir)
 
     return _storage
