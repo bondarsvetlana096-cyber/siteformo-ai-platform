@@ -5,6 +5,10 @@ import json
 import logging
 import re
 from textwrap import dedent
+<<<<<<< HEAD
+=======
+from urllib.parse import quote
+>>>>>>> bd28258 (initial commit with fixes)
 
 from openai import OpenAI
 
@@ -34,6 +38,11 @@ Use the same language as the source website or business description.
 If the source website is a hair salon, it must stay a hair salon.
 If the source website is in Russian, the output must be in Russian.
 If source images are provided, reuse at least one real source image URL in the page.
+<<<<<<< HEAD
+=======
+Every final page must contain multiple images that clearly match the client's business theme.
+If suitable source images are missing, generate or compose theme-matching replacement visuals instead of leaving the page without images.
+>>>>>>> bd28258 (initial commit with fixes)
 Do not invent WhatsApp or Messenger.
 The result must feel like a premium custom redesign of the SAME business, not generic AI output.
 Use complete HTML with inline CSS and small inline JS only.
@@ -295,6 +304,11 @@ def _build_user_prompt(request_type: str, source: dict | None, business_descript
             'must_keep_business_type': True,
             'must_keep_source_language': True,
             'must_use_source_images_if_present': True,
+<<<<<<< HEAD
+=======
+            'must_contain_theme_matched_images': True,
+            'minimum_total_images': 3,
+>>>>>>> bd28258 (initial commit with fixes)
         },
         'extra_directions': [
             'Write in the same language as the source material.',
@@ -304,6 +318,10 @@ def _build_user_prompt(request_type: str, source: dict | None, business_descript
             'Avoid abstract phrases like sanctuary, legacy, elevated excellence unless clearly supported by the source.',
             'Do not output a site about website design or agency services unless the source business is actually an agency.',
             'The generated page must be mobile-first responsive and visually correct on phone screens.',
+<<<<<<< HEAD
+=======
+            'Every page must include a hero image and additional theme-matched visuals for services or gallery blocks.',
+>>>>>>> bd28258 (initial commit with fixes)
             'Do not use generic B2B/SaaS/consulting wording unless that is clearly the source niche.',
         ],
     }
@@ -337,8 +355,16 @@ def _score_candidate(candidate: dict, source: dict | None = None, profile: dict 
     for needle in ['<section', 'hero', 'faq', 'contact', 'cta', 'button', 'hover']:
         if needle in lowered:
             score += 1
+<<<<<<< HEAD
     if '<img' in lowered:
         score += 2
+=======
+    image_count = _count_images(html_text)
+    if image_count:
+        score += 2 + min(image_count, 4)
+    else:
+        score -= 18
+>>>>>>> bd28258 (initial commit with fixes)
     for responsive_signal in ['viewport', '@media', 'max-width', 'width:100%', 'clamp(', 'grid-template-columns', 'flex-wrap']:
         if responsive_signal in lowered:
             score += 2
@@ -373,6 +399,11 @@ def _score_candidate(candidate: dict, source: dict | None = None, profile: dict 
             if good in lowered:
                 score += 2
 
+<<<<<<< HEAD
+=======
+    if not _page_has_theme_images(html_text, profile or {}, source=source):
+        score -= 20
+>>>>>>> bd28258 (initial commit with fixes)
     if 'agency' in lowered and business_type != 'creative service':
         score -= 8
     if 'siteformo' in lowered:
@@ -389,6 +420,113 @@ def _pick_hero_image(source: dict | None) -> str:
     return ''
 
 
+<<<<<<< HEAD
+=======
+
+THEME_IMAGE_LIBRARY: dict[str, list[dict[str, str]]] = {
+    'hair salon': [
+        {'title': 'Salon interior', 'caption': 'Elegant salon interior with mirrors, styling chairs, warm light and premium beauty atmosphere', 'palette': '#1f1a17|#c08b5c|#f5dcc3'},
+        {'title': 'Hair styling', 'caption': 'Professional hairstylist creating a modern haircut with scissors, combs and glossy hair detail', 'palette': '#251a1f|#d26f7b|#f6d3c7'},
+        {'title': 'Beauty products', 'caption': 'Premium beauty products and hair care bottles arranged on a salon counter with soft glow', 'palette': '#201e28|#8f75ff|#e7defc'},
+    ],
+    'wellness service': [
+        {'title': 'Wellness reception', 'caption': 'Clean welcoming wellness clinic reception with plants, light walls and calming premium details', 'palette': '#0f3d46|#5fc5c8|#d5fbf6'},
+        {'title': 'Care treatment', 'caption': 'Professional care treatment room with reassuring atmosphere, towels and thoughtful service details', 'palette': '#19434b|#7fd0b1|#e9fff4'},
+        {'title': 'Wellness detail', 'caption': 'Spa and wellness product close-up with natural textures, stones and premium clean styling', 'palette': '#1e3b2f|#8fd2a1|#eff9ed'},
+    ],
+    'consumer product': [
+        {'title': 'Product showcase', 'caption': 'Premium product arranged for ecommerce hero shot with clean background and strong lighting', 'palette': '#171a2a|#ff8f4d|#ffe3c7'},
+        {'title': 'Lifestyle product', 'caption': 'Lifestyle product photo showing packaging, use case and desirable modern styling', 'palette': '#15243a|#50b7ff|#d7f0ff'},
+        {'title': 'Collection display', 'caption': 'Collection of featured products displayed in a premium retail composition', 'palette': '#2a1f17|#ffb547|#fff0ca'},
+    ],
+    'property business': [
+        {'title': 'Modern property', 'caption': 'Architectural exterior of a premium modern property with elegant lines and large windows', 'palette': '#18232f|#7da6c7|#e7f2ff'},
+        {'title': 'Interior living space', 'caption': 'Bright premium interior with furniture, natural light and spacious architectural feel', 'palette': '#2b211c|#d1a87e|#f8ecd8'},
+        {'title': 'Property detail', 'caption': 'Curated architectural detail with materials, textures and luxury finish', 'palette': '#1d252d|#8f9fb4|#edf2f8'},
+    ],
+    'creative service': [
+        {'title': 'Creative workspace', 'caption': 'Creative studio workspace with design boards, color samples and premium production mood', 'palette': '#27172c|#c56bff|#f6dbff'},
+        {'title': 'Brand concepts', 'caption': 'Brand concept presentation table with sketches, materials and vivid studio energy', 'palette': '#12253b|#55b6ff|#ddf4ff'},
+        {'title': 'Production scene', 'caption': 'Creative production scene with camera, lighting and polished behind the scenes aesthetic', 'palette': '#281a14|#ff9b52|#ffe7d3'},
+    ],
+    'software product': [
+        {'title': 'Product dashboard', 'caption': 'Futuristic software dashboard on a sleek device with clear data visualization and glow accents', 'palette': '#101828|#6a7bff|#dbe2ff'},
+        {'title': 'Automation workflow', 'caption': 'Abstract product workflow interface with connected nodes and premium dark UI style', 'palette': '#111827|#00c2ff|#def9ff'},
+        {'title': 'Platform experience', 'caption': 'Modern app screens floating in a polished SaaS product composition', 'palette': '#14162a|#7c3aed|#ece6ff'},
+    ],
+    'business service': [
+        {'title': 'Professional service', 'caption': 'Professional service environment with premium materials, confident atmosphere and real-world context', 'palette': '#1a2231|#61a5ff|#e3efff'},
+        {'title': 'Client experience', 'caption': 'Real client-facing service moment showing premium support, welcome and expertise', 'palette': '#2a1f1c|#d29b73|#fbe9d9'},
+        {'title': 'Service details', 'caption': 'Close-up of service details, tools and environment that clearly communicate the business type', 'palette': '#1f2831|#6fd3c4|#e7fff9'},
+    ],
+}
+
+
+def _svg_data_uri(title: str, caption: str, palette: str) -> str:
+    c1, c2, c3 = (palette.split('|') + ['#1f2937', '#6b7280', '#e5e7eb'])[:3]
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-label="{_escape(title)}">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="{c1}"/>
+      <stop offset="52%" stop-color="{c2}"/>
+      <stop offset="100%" stop-color="{c3}"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <circle cx="1320" cy="180" r="220" fill="rgba(255,255,255,0.10)"/>
+  <circle cx="240" cy="780" r="260" fill="rgba(255,255,255,0.08)"/>
+  <rect x="90" y="92" rx="34" ry="34" width="1420" height="716" fill="rgba(15,23,42,0.20)" stroke="rgba(255,255,255,0.18)"/>
+  <rect x="150" y="150" rx="28" ry="28" width="520" height="600" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.24)"/>
+  <rect x="720" y="150" rx="28" ry="28" width="720" height="178" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.22)"/>
+  <rect x="720" y="368" rx="28" ry="28" width="720" height="178" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.20)"/>
+  <rect x="720" y="586" rx="28" ry="28" width="720" height="164" fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.22)"/>
+  <text x="210" y="265" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="78" font-weight="700">{_escape(title)}</text>
+  <text x="210" y="350" fill="rgba(255,255,255,0.86)" font-family="Arial, Helvetica, sans-serif" font-size="34">Theme-matched visual</text>
+  <text x="210" y="455" fill="rgba(255,255,255,0.92)" font-family="Arial, Helvetica, sans-serif" font-size="32">{_escape(caption[:76])}</text>
+  <text x="210" y="500" fill="rgba(255,255,255,0.78)" font-family="Arial, Helvetica, sans-serif" font-size="28">{_escape(caption[76:152])}</text>
+  <text x="774" y="230" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700">Client theme required</text>
+  <text x="774" y="286" fill="rgba(255,255,255,0.78)" font-family="Arial, Helvetica, sans-serif" font-size="28">Images must match the client's business niche.</text>
+  <text x="774" y="448" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700">Mobile-first ready</text>
+  <text x="774" y="504" fill="rgba(255,255,255,0.78)" font-family="Arial, Helvetica, sans-serif" font-size="28">Responsive by default, safe for hero, gallery and cards.</text>
+  <text x="774" y="660" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700">Generated fallback visual</text>
+  <text x="774" y="716" fill="rgba(255,255,255,0.78)" font-family="Arial, Helvetica, sans-serif" font-size="28">Use when source assets are missing or irrelevant.</text>
+</svg>'''
+    return 'data:image/svg+xml;charset=UTF-8,' + quote(svg, safe='')
+
+
+def _themed_image_assets(profile: dict, source: dict | None = None) -> list[dict[str, str]]:
+    source_images = [str(img) for img in ((source or {}).get('images') or []) if img][:3]
+    business_type = str(profile.get('business_type') or 'business service')
+    presets = THEME_IMAGE_LIBRARY.get(business_type) or THEME_IMAGE_LIBRARY['business service']
+    themed_assets: list[dict[str, str]] = []
+    for idx, item in enumerate(presets):
+        themed_assets.append({
+            'src': source_images[idx] if idx < len(source_images) else _svg_data_uri(item['title'], item['caption'], item['palette']),
+            'alt': item['caption'],
+            'kind': 'source' if idx < len(source_images) else 'generated',
+        })
+    return themed_assets
+
+
+def _count_images(html_text: str) -> int:
+    return len(re.findall(r'<img\b', html_text or '', flags=re.I))
+
+
+def _page_has_theme_images(html_text: str, profile: dict, source: dict | None = None) -> bool:
+    if _count_images(html_text) == 0:
+        return False
+    for image_url in ((source or {}).get('images') or [])[:3]:
+        if image_url and str(image_url) in (html_text or ''):
+            return True
+    lowered = (html_text or '').lower()
+    themed_signals = [str(x).lower() for x in (profile.get('niche_keywords') or [])]
+    business_type = str(profile.get('business_type') or '')
+    if business_type == 'hair salon':
+        themed_signals.extend(['salon', 'beauty', 'hair', 'stylist', 'gallery'])
+    return any(signal in lowered for signal in themed_signals if signal)
+
+
+>>>>>>> bd28258 (initial commit with fixes)
 def _language_pack(language: str) -> dict[str, str]:
     if language == 'ru':
         return {
@@ -442,7 +580,12 @@ def _source_guided_fallback(source: dict | None, business_description: str | Non
     headings = source.get('headings', [])[:6] if source else []
     paragraphs = source.get('paragraphs', [])[:10] if source else []
     facts = (source or {}).get('preserved_facts', {})
+<<<<<<< HEAD
     image_url = _pick_hero_image(source)
+=======
+    themed_assets = _themed_image_assets(profile, source=source)
+    image_url = themed_assets[0]['src'] if themed_assets else _pick_hero_image(source)
+>>>>>>> bd28258 (initial commit with fixes)
 
     hero_title = headings[0] if headings else title
     hero_subtitle = paragraphs[0] if paragraphs else pack['hero_sub_fallback']
@@ -465,9 +608,25 @@ def _source_guided_fallback(source: dict | None, business_description: str | Non
     email_markup = ''.join(f'<li>{_escape(item)}</li>' for item in emails)
     video_markup = ''.join(f'<li><a href="{_escape(item)}">{_escape(item)}</a></li>' for item in videos)
 
+<<<<<<< HEAD
     service_markup = ''.join(f'<div class="mini-card"><h3>{_escape(str(item)[:80])}</h3></div>' for item in service_items if item)
     benefit_markup = ''.join(f'<li>{_escape(str(item)[:180])}</li>' for item in benefit_items if item)
     hero_image_markup = f'<img src="{_escape(image_url)}" alt="{_escape(hero_title)}" />' if image_url else ''
+=======
+    gallery_assets = themed_assets[1:] if len(themed_assets) > 1 else themed_assets
+    service_markup = ''.join(
+        f'<div class="mini-card">'
+        + (f'<img src="{_escape(gallery_assets[idx % len(gallery_assets)]["src"])}" alt="{_escape(gallery_assets[idx % len(gallery_assets)]["alt"])}" />' if gallery_assets else '')
+        + f'<h3>{_escape(str(item)[:80])}</h3></div>'
+        for idx, item in enumerate(service_items) if item
+    )
+    gallery_markup = ''.join(
+        f'<figure class="gallery-card"><img src="{_escape(asset["src"])}" alt="{_escape(asset["alt"])}" /><figcaption>{_escape(asset["alt"])}</figcaption></figure>'
+        for asset in themed_assets[:3]
+    )
+    benefit_markup = ''.join(f'<li>{_escape(str(item)[:180])}</li>' for item in benefit_items if item)
+    hero_image_markup = f'<img src="{_escape(image_url)}" alt="{_escape(themed_assets[0]["alt"] if themed_assets else hero_title)}" />' if image_url else ''
+>>>>>>> bd28258 (initial commit with fixes)
 
     html_doc = f"""<!doctype html>
 <html lang="{language}">
@@ -493,11 +652,23 @@ h1{{font-size:clamp(42px,6vw,78px);line-height:.95;margin:20px 0 16px;letter-spa
 .hero-visual img{{display:block;width:100%;height:100%;object-fit:cover}}
 section{{padding:40px 0}}
 .grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}}
+<<<<<<< HEAD
 .card,.mini-card{{padding:22px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.04)}}
 .list{{margin:0;padding-left:20px;color:var(--muted);line-height:1.7}}
 .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:18px}}
 .kicker{{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#f3d08b;margin-bottom:10px;font-weight:700}}
 @media (max-width: 900px){{.hero{{grid-template-columns:1fr;min-height:auto;padding:70px 0 24px}}.hero-visual{{min-height:320px}}.grid,.two-col{{grid-template-columns:1fr}}h1{{font-size:46px}}}}
+=======
+.card,.mini-card,.gallery-card{{padding:22px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.04)}}
+.list{{margin:0;padding-left:20px;color:var(--muted);line-height:1.7}}
+.mini-card img,.gallery-card img{{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:16px;margin-bottom:14px}}
+.gallery-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}}
+.gallery-card{{padding:14px}}
+.gallery-card figcaption{{margin-top:10px;color:var(--muted);font-size:14px;line-height:1.5}}
+.two-col{{display:grid;grid-template-columns:1fr 1fr;gap:18px}}
+.kicker{{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#f3d08b;margin-bottom:10px;font-weight:700}}
+@media (max-width: 900px){{.hero{{grid-template-columns:1fr;min-height:auto;padding:70px 0 24px}}.hero-visual{{min-height:320px}}.grid,.two-col,.gallery-grid{{grid-template-columns:1fr}}h1{{font-size:46px}}}}
+>>>>>>> bd28258 (initial commit with fixes)
 </style>
 </head>
 <body>
@@ -519,6 +690,13 @@ section{{padding:40px 0}}
   <div class="grid">{service_markup}</div>
 </section>
 <section>
+<<<<<<< HEAD
+=======
+  <div class="kicker">Gallery</div>
+  <div class="gallery-grid">{gallery_markup}</div>
+</section>
+<section>
+>>>>>>> bd28258 (initial commit with fixes)
   <div class="two-col">
     <div class="card">
       <div class="kicker">{_escape(pack['benefits'])}</div>
@@ -594,8 +772,19 @@ def generate_demo_page(request_type: str, source: dict | None = None, business_d
     if best_score < 6:
         logger.info('[AI] best candidate score too low (%s), using source-guided fallback', best_score)
         return _source_guided_fallback(source, business_description, profile)
+<<<<<<< HEAD
     logger.info('[AI] generation complete score=%s', best_score)
     return {
         'title': str(best.get('title') or 'Siteformo Demo'),
         'html': str(best.get('html') or _source_guided_fallback(source, business_description, profile)['html']),
+=======
+    best_html = str(best.get('html') or '')
+    if not _page_has_theme_images(best_html, profile, source=source) or _count_images(best_html) < 3:
+        logger.info('[AI] candidate missing required theme-matched images, using source-guided fallback')
+        return _source_guided_fallback(source, business_description, profile)
+    logger.info('[AI] generation complete score=%s images=%s', best_score, _count_images(best_html))
+    return {
+        'title': str(best.get('title') or 'Siteformo Demo'),
+        'html': best_html or _source_guided_fallback(source, business_description, profile)['html'],
+>>>>>>> bd28258 (initial commit with fixes)
     }
