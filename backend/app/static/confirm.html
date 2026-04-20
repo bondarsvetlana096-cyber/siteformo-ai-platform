@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Confirm request</title>
+</head>
+<body style="font-family: Arial; padding: 40px;">
+
+<h1>Confirming your request...</h1>
+
+<script>
+  const API_BASE = "https://siteformo-production.up.railway.app";
+
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token");
+
+  if (!token) {
+    document.body.innerHTML = "<h2>Invalid link</h2>";
+  } else {
+    fetch(`${API_BASE}/api/contact-confirmations/${token}`, {
+      method: "POST"
+    })
+    .then(res => {
+      if (!res.ok) throw new Error();
+      return res.json();
+    })
+    .then(() => {
+      document.body.innerHTML = "<h2>✅ Confirmed! Generating your demo...</h2>";
+    })
+    .catch(() => {
+      document.body.innerHTML = "<h2>❌ Failed to confirm request</h2>";
+    });
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,15 @@
+FROM mcr.microsoft.com/playwright/python:v1.52.0-jammy
+
+WORKDIR /app
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PYTHONUNBUFFERED=1
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN python -m playwright install chromium
+
+CMD ["python", "-m", "app.workers.worker"]
