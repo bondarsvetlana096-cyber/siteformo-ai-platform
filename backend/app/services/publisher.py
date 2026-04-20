@@ -163,6 +163,19 @@ def build_demo_delivery_html(
     flex: 0 0 auto !important;
   }
 
+  html, body {
+    max-width: 100% !important;
+    overflow-x: clip !important;
+  }
+
+  body {
+    padding-bottom: max(120px, env(safe-area-inset-bottom)) !important;
+  }
+
+  img, video, iframe {
+    max-width: 100% !important;
+  }
+
   #siteformo-demo-cta {
     position: fixed !important;
     right: 18px !important;
@@ -225,6 +238,10 @@ def build_demo_delivery_html(
   }
 
   @media (max-width: 640px) {
+    body {
+      padding-bottom: max(156px, env(safe-area-inset-bottom)) !important;
+    }
+
     #siteformo-demo-topnote {
       top: 10px !important;
       left: 10px !important;
@@ -242,6 +259,7 @@ def build_demo_delivery_html(
     .sf-cta-card {
       padding: 14px !important;
       border-radius: 16px !important;
+      gap: 12px !important;
     }
 
     .sf-cta-title {
@@ -250,6 +268,11 @@ def build_demo_delivery_html(
 
     .sf-cta-subtitle {
       font-size: 13px !important;
+    }
+
+    .sf-cta-button {
+      width: 100% !important;
+      min-height: 50px !important;
     }
   }
 </style>

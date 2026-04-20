@@ -38,6 +38,8 @@ Do not invent WhatsApp or Messenger.
 The result must feel like a premium custom redesign of the SAME business, not generic AI output.
 Use complete HTML with inline CSS and small inline JS only.
 Make it responsive and visually impressive.
+Design mobile-first for phone screens first, then scale up for tablet and desktop.
+Never create horizontal scrolling. Use fluid grids, clamp() typography, and tap-friendly buttons.
 """)
 
 
@@ -143,12 +145,16 @@ def _infer_brand_profile(source: dict | None, business_description: str | None) 
     visual_direction = 'premium gradients, layered depth, bold typography, subtle motion'
     cta_style = 'strong, aspirational, action-oriented'
     business_type = 'business service'
+    niche_keywords: list[str] = []
+    forbidden_keywords = ['strategy', 'execution', 'scale faster', 'optimize operations', 'business solutions', 'consultation']
 
     for label, pattern in patterns:
         if re.search(pattern, text):
             if label == 'beauty_salon':
                 business_type = 'hair salon'
                 style = 'luxury_editorial'
+                niche_keywords = ['salon', 'beauty', 'hair', 'stylist', 'booking', 'appointment', 'cut', 'color']
+                forbidden_keywords = ['strategy', 'execution', 'scale faster', 'optimize operations', 'business solutions', 'consultation', 'agency', 'saas', 'software', 'platform']
             else:
                 style = label
             break
@@ -212,6 +218,8 @@ def _infer_brand_profile(source: dict | None, business_description: str | None) 
         'cta_style': cta_style,
         'business_type': business_type,
         'language': language,
+        'niche_keywords': niche_keywords,
+        'forbidden_keywords': forbidden_keywords,
     }
 
 
@@ -245,6 +253,9 @@ def _build_system_prompt(style: str) -> str:
         - premium visual hierarchy
         - strong first screen
         - responsive production-presentable HTML
+        - mobile-first responsive layout for phones, then tablet, then desktop
+        - include viewport-friendly sizing, fluid images, stacked mobile sections, and tap-friendly controls
+        - no fixed-width blocks wider than the viewport and no horizontal scrolling
         - no fake agency pitch about redesigning the website
         - no references to Siteformo inside the generated page itself
         - if real source images exist, use them in hero or gallery
@@ -292,7 +303,15 @@ def _build_user_prompt(request_type: str, source: dict | None, business_descript
             'If the source is local, mention the location if it is available in the source.',
             'Avoid abstract phrases like sanctuary, legacy, elevated excellence unless clearly supported by the source.',
             'Do not output a site about website design or agency services unless the source business is actually an agency.',
+            'The generated page must be mobile-first responsive and visually correct on phone screens.',
+            'Do not use generic B2B/SaaS/consulting wording unless that is clearly the source niche.',
         ],
+    }
+    payload['niche_lock'] = {
+        'required_business_type': profile.get('business_type'),
+        'required_keywords': profile.get('niche_keywords', []),
+        'forbidden_keywords': profile.get('forbidden_keywords', []),
+        'instruction': 'If the output drifts into a generic SaaS, agency, consulting, or unrelated niche, treat that output as invalid and regenerate internally before answering.'
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -320,16 +339,42 @@ def _score_candidate(candidate: dict, source: dict | None = None, profile: dict 
             score += 1
     if '<img' in lowered:
         score += 2
+    for responsive_signal in ['viewport', '@media', 'max-width', 'width:100%', 'clamp(', 'grid-template-columns', 'flex-wrap']:
+        if responsive_signal in lowered:
+            score += 2
     if source:
-        for image_url in source.get('images', [])[:3]:
+        for image_url in source.get('images', [])[:4]:
             if image_url and image_url in html_text:
-                score += 4
+                score += 6
                 break
         language = (source.get('language') or (profile or {}).get('language') or 'en')
         if language == 'ru' and re.search(r'[А-Яа-яЁё]', html_text):
             score += 3
-    if 'agency' in lowered and (profile or {}).get('business_type') != 'creative service':
-        score -= 5
+
+    niche_keywords = [str(x).lower() for x in ((profile or {}).get('niche_keywords') or [])]
+    forbidden_keywords = [str(x).lower() for x in ((profile or {}).get('forbidden_keywords') or [])]
+    business_type = str((profile or {}).get('business_type') or '')
+
+    if niche_keywords:
+        matches = sum(1 for word in niche_keywords if word in lowered)
+        score += min(matches, 6) * 3
+        if matches == 0:
+            score -= 10
+
+    for word in forbidden_keywords:
+        if word and word in lowered:
+            score -= 6
+
+    if business_type == 'hair salon':
+        for bad in ['strategy', 'execution', 'scale faster', 'optimize operations', 'business solutions', 'enterprise', 'saas', 'software', 'consulting', 'consultation']:
+            if bad in lowered:
+                score -= 8
+        for good in ['book', 'appointment', 'stylist', 'salon', 'hair', 'beauty', 'cut', 'color']:
+            if good in lowered:
+                score += 2
+
+    if 'agency' in lowered and business_type != 'creative service':
+        score -= 8
     if 'siteformo' in lowered:
         score -= 4
     return score
@@ -513,12 +558,14 @@ def generate_demo_page(request_type: str, source: dict | None = None, business_d
     logger.info('[AI] generating high-conversion page...')
     profile = _infer_brand_profile(source, business_description)
     logger.info('[AI] routed style=%s audience=%s tone=%s language=%s business_type=%s', profile['style'], profile['audience'], profile['tone'], profile['language'], profile['business_type'])
+    logger.info('[AI] source analysis: title=%s headings=%s paragraphs=%s images=%s niche_keywords=%s forbidden_keywords=%s', (source or {}).get('title'), len((source or {}).get('headings', []) or []), len((source or {}).get('paragraphs', []) or []), len((source or {}).get('images', []) or []), profile.get('niche_keywords'), profile.get('forbidden_keywords'))
 
     if not settings.openai_api_key:
         return _source_guided_fallback(source, business_description, profile)
 
     system_prompt = _build_system_prompt(profile['style'])
     user_prompt = _build_user_prompt(request_type, source, business_description, profile)
+    logger.info('[AI] final generation prompt=%s', user_prompt)
     client = OpenAI(api_key=settings.openai_api_key)
 
     candidates: list[dict] = []
@@ -540,8 +587,14 @@ def generate_demo_page(request_type: str, source: dict | None = None, business_d
         logger.info('[AI] generation fallback used')
         return _source_guided_fallback(source, business_description, profile)
 
-    best = max(candidates, key=lambda item: _score_candidate(item, source=source, profile=profile))
-    logger.info('[AI] generation complete')
+    scored_candidates = [(item, _score_candidate(item, source=source, profile=profile)) for item in candidates]
+    for idx, (_, candidate_score) in enumerate(scored_candidates, start=1):
+        logger.info('[AI] scoring result candidate=%s score=%s', idx, candidate_score)
+    best, best_score = max(scored_candidates, key=lambda pair: pair[1])
+    if best_score < 6:
+        logger.info('[AI] best candidate score too low (%s), using source-guided fallback', best_score)
+        return _source_guided_fallback(source, business_description, profile)
+    logger.info('[AI] generation complete score=%s', best_score)
     return {
         'title': str(best.get('title') or 'Siteformo Demo'),
         'html': str(best.get('html') or _source_guided_fallback(source, business_description, profile)['html']),

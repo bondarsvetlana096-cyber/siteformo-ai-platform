@@ -29,3 +29,13 @@ Applied fixes in this package:
 6. Env examples updated:
 - BYPASS_LIMIT_EMAILS added
 - local example uses STORAGE_BACKEND=auto
+
+
+## ChatGPT patch update
+- strengthened niche lock in `backend/app/services/generation.py`
+- added forbidden generic SaaS/agency/B2B wording penalties in scoring
+- increased preference for real source images in generated HTML
+- added AI logging for source analysis, final prompt, and scoring results
+- enforced mobile-first responsive requirements in generation prompts
+- hardened overlay CSS for phone screens and prevented overlay from covering content
+- kept CTA destination fixed to `https://siteformo.com`
