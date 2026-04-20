@@ -30,6 +30,25 @@ from app.services.storage import get_storage
 logger = logging.getLogger("siteformo.request_service")
 
 
+def _looks_like_url(value: str | None) -> bool:
+    if not value:
+        return False
+    value = str(value).strip().lower()
+    return value.startswith("http://") or value.startswith("https://") or value.startswith("www.")
+
+
+def _normalize_generation_inputs(source_url: str | None, business_description: str | None, business_type: str | None = None) -> tuple[str | None, str | None, str | None]:
+    normalized_source_url = str(source_url).strip() if source_url else None
+    normalized_business_description = str(business_description).strip() if business_description else None
+    normalized_business_type = str(business_type).strip().lower() if business_type else None
+
+    if not normalized_source_url and _looks_like_url(normalized_business_description):
+        normalized_source_url = normalized_business_description
+        normalized_business_description = None
+
+    return normalized_source_url or None, normalized_business_description or None, normalized_business_type or None
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -94,6 +113,7 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         usage = UserUsage(
             email_normalized=normalized_contact,
             fingerprint=payload.fingerprint,
+            generation_metadata={"business_type": normalized_business_type} if normalized_business_type else None,
             ip_hash=ip_hash,
             user_identity_hash=identity_hash,
             free_attempts_used=0,
@@ -106,13 +126,19 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         logger.info("[API] limit bypass applied: email=%s", normalized_email)
 
     if not bypass_limits and usage.free_attempts_used >= settings.free_attempt_limit:
+        normalized_source_url, normalized_business_description, normalized_business_type = _normalize_generation_inputs(
+            str(payload.source_url) if payload.source_url else None,
+            payload.business_description,
+            payload.business_type,
+        )
+
         req = Request(
             request_type=payload.request_type,
             email=normalized_email,
             contact_type=payload.contact_type,
             contact_value=normalized_contact,
-            source_url=str(payload.source_url) if payload.source_url else None,
-            business_description=payload.business_description,
+            source_url=normalized_source_url,
+            business_description=normalized_business_description,
             status=RequestStatus.LIMIT_REACHED,
             fingerprint=payload.fingerprint,
             ip_hash=ip_hash,
@@ -134,16 +160,30 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
 
     current_attempt_number = 1 if bypass_limits else usage.free_attempts_used + 1
 
+    normalized_source_url, normalized_business_description, normalized_business_type = _normalize_generation_inputs(
+        str(payload.source_url) if payload.source_url else None,
+        payload.business_description,
+        payload.business_type,
+    )
+
+    logger.info(
+        "[API] normalized payload source_url=%s business_type=%s business_description=%s",
+        normalized_source_url,
+        normalized_business_type,
+        normalized_business_description,
+    )
+
     req = Request(
         request_type=payload.request_type,
         email=normalized_email,
         contact_type=payload.contact_type,
         contact_value=normalized_contact,
-        source_url=str(payload.source_url) if payload.source_url else None,
-        business_description=payload.business_description,
+        source_url=normalized_source_url,
+        business_description=normalized_business_description,
         status=RequestStatus.QUEUED,
         contact_confirmation_token=secrets.token_urlsafe(12),
         fingerprint=payload.fingerprint,
+        generation_metadata={"business_type": normalized_business_type} if normalized_business_type else None,
         ip_hash=ip_hash,
         user_identity_hash=identity_hash,
         attempt_number=current_attempt_number,
@@ -202,9 +242,24 @@ async def process_generate_job(db: Session, request_id: str) -> None:
         db.commit()
         log_event(db, "generation_started", request_id=req.id, distinct_id=req.contact_value)
 
+        meta = req.generation_metadata or {}
+        source_url, business_description, business_type = _normalize_generation_inputs(
+            req.source_url,
+            req.business_description,
+            meta.get("business_type"),
+        )
+
+        logger.info(
+            "[WORKER] generate inputs request_id=%s source_url=%s business_type=%s business_description=%s",
+            request_id,
+            source_url,
+            business_type,
+            business_description,
+        )
+
         source = None
-        if req.source_url:
-            source = await scrape_site(req.source_url)
+        if source_url:
+            source = await scrape_site(source_url)
             logger.info(
                 "[WORKER] scraped source: request_id=%s title=%s headings=%s paragraphs=%s images=%s",
                 request_id,
@@ -216,7 +271,12 @@ async def process_generate_job(db: Session, request_id: str) -> None:
         else:
             logger.info("[WORKER] no source_url: request_id=%s", request_id)
 
-        result = generate_demo_page(req.request_type, source, req.business_description)
+        result = generate_demo_page(
+            req.request_type,
+            source,
+            business_description,
+            forced_business_type=business_type,
+        )
 
         req.status = RequestStatus.GENERATED
         req.generation_metadata = {

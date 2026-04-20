@@ -110,6 +110,13 @@ def _escape(value: str | None) -> str:
     return html.escape(value or "", quote=True)
 
 
+def _looks_like_url(value: str | None) -> bool:
+    if not value:
+        return False
+    value = str(value).strip().lower()
+    return value.startswith("http://") or value.startswith("https://") or value.startswith("www.")
+
+
 def _detect_language_from_text(text: str) -> str:
     if not text:
         return "en"
@@ -588,9 +595,9 @@ def _source_guided_fallback(source: dict | None, business_description: str | Non
     pack = _language_pack(language)
 
     title = ""
-    if source and source.get("title"):
+    if source and source.get("title") and not _looks_like_url(str(source.get("title"))):
         title = str(source["title"])
-    elif business_description:
+    elif business_description and not _looks_like_url(business_description):
         title = business_description[:80]
     else:
         title = pack["hero_fallback"]
@@ -743,9 +750,35 @@ def generate_demo_page(
     request_type: str,
     source: dict | None = None,
     business_description: str | None = None,
+    forced_business_type: str | None = None,
 ) -> dict:
     logger.info("[AI] generating high-conversion page...")
     profile = _infer_brand_profile(source, business_description)
+
+    forced_business_type = str(forced_business_type or "").strip().lower()
+    if forced_business_type:
+        profile["business_type"] = forced_business_type
+
+        if forced_business_type in {"salon", "hair salon", "beauty salon", "barbershop", "barber"}:
+            profile["business_type"] = "hair salon"
+            profile["style"] = "luxury_editorial"
+            profile["audience"] = "local beauty clients"
+            profile["tone"] = "elegant, warm, confidence-building"
+            profile["visual_direction"] = "large beauty imagery, premium editorial spacing, warm premium contrast"
+            profile["cta_style"] = "practical booking-focused"
+            profile["niche_keywords"] = ["salon", "beauty", "hair", "stylist", "booking", "appointment", "cut", "color"]
+            profile["forbidden_keywords"] = [
+                "strategy", "execution", "scale faster", "optimize operations", "business solutions",
+                "consultation", "agency", "saas", "software", "platform", "enterprise", "consulting",
+            ]
+
+    logger.info(
+        "[AI] forced business_type=%s resolved profile business_type=%s niche_keywords=%s forbidden_keywords=%s",
+        forced_business_type,
+        profile.get("business_type"),
+        profile.get("niche_keywords"),
+        profile.get("forbidden_keywords"),
+    )
     logger.info(
         "[AI] routed style=%s audience=%s tone=%s language=%s business_type=%s",
         profile["style"],

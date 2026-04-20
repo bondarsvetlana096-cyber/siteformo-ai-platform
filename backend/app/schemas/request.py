@@ -15,11 +15,12 @@ class CreateRequestPayload(BaseModel):
     email: EmailStr | None = None
     source_url: HttpUrl | None = None
     business_description: str | None = Field(default=None, max_length=5000)
+    business_type: str | None = Field(default=None, max_length=255)
     source_input: str | None = Field(default=None, max_length=5000)
     turnstile_token: str | None = None
     fingerprint: str | None = None
 
-    @field_validator('business_description', 'source_input')
+    @field_validator('business_description', 'source_input', 'business_type')
     @classmethod
     def strip_text_fields(cls, value: str | None) -> str | None:
         if value is None:
@@ -37,6 +38,11 @@ class CreateRequestPayload(BaseModel):
 
     @model_validator(mode='after')
     def derive_request_shape(self):
+        if self.business_description and (self.business_description.startswith('http://') or self.business_description.startswith('https://')):
+            if self.source_url is None:
+                self.source_url = self.business_description
+                self.business_description = None
+
         if self.source_input and not self.source_url and not self.business_description:
             source_input = self.source_input.strip()
             if source_input.startswith('http://') or source_input.startswith('https://'):
@@ -50,7 +56,7 @@ class CreateRequestPayload(BaseModel):
         if self.request_type == RequestType.REDESIGN and self.source_url is None:
             raise ValueError('source_url is required for redesign')
 
-        if self.request_type == RequestType.CREATE and self.business_description is None:
+        if self.request_type == RequestType.CREATE and self.business_description is None and self.source_url is None:
             raise ValueError('business_description is required for create')
 
         if self.contact_type == ContactType.EMAIL:
