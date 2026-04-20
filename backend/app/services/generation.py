@@ -5,10 +5,7 @@ import json
 import logging
 import re
 from textwrap import dedent
-<<<<<<< HEAD
-=======
 from urllib.parse import quote
->>>>>>> bd28258 (initial commit with fixes)
 
 from openai import OpenAI
 
@@ -38,11 +35,8 @@ Use the same language as the source website or business description.
 If the source website is a hair salon, it must stay a hair salon.
 If the source website is in Russian, the output must be in Russian.
 If source images are provided, reuse at least one real source image URL in the page.
-<<<<<<< HEAD
-=======
 Every final page must contain multiple images that clearly match the client's business theme.
 If suitable source images are missing, generate or compose theme-matching replacement visuals instead of leaving the page without images.
->>>>>>> bd28258 (initial commit with fixes)
 Do not invent WhatsApp or Messenger.
 The result must feel like a premium custom redesign of the SAME business, not generic AI output.
 Use complete HTML with inline CSS and small inline JS only.
@@ -113,17 +107,17 @@ STYLE_PROMPTS = {
 
 
 def _escape(value: str | None) -> str:
-    return html.escape(value or '', quote=True)
+    return html.escape(value or "", quote=True)
 
 
 def _detect_language_from_text(text: str) -> str:
     if not text:
-        return 'en'
-    cyr = sum(1 for ch in text if 'а' <= ch.lower() <= 'я' or ch.lower() == 'ё')
-    latin = sum(1 for ch in text if 'a' <= ch.lower() <= 'z')
+        return "en"
+    cyr = sum(1 for ch in text if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
+    latin = sum(1 for ch in text if "a" <= ch.lower() <= "z")
     if cyr > latin * 0.35:
-        return 'ru'
-    return 'en'
+        return "ru"
+    return "en"
 
 
 def _infer_brand_profile(source: dict | None, business_description: str | None) -> dict:
@@ -131,205 +125,224 @@ def _infer_brand_profile(source: dict | None, business_description: str | None) 
     if business_description:
         text_parts.append(business_description)
     if source:
-        text_parts.extend(source.get('headings', [])[:12])
-        text_parts.extend(source.get('paragraphs', [])[:24])
-        if source.get('title'):
-            text_parts.append(source['title'])
-    text = ' '.join(text_parts).lower()
+        text_parts.extend(source.get("headings", [])[:12])
+        text_parts.extend(source.get("paragraphs", [])[:24])
+        if source.get("title"):
+            text_parts.append(source["title"])
+    text = " ".join(text_parts).lower()
 
     patterns = [
-        ('beauty_salon', r'hair|salon|barber|beauty|stylist|colour|coloring|cut|blowout|парикмах|салон|стриж|окрашив|уклад'),
-        ('luxury_editorial', r'luxury|premium|exclusive|boutique|villa|interior|jewelry|aesthetic|spa|fine dining|resort'),
-        ('future_saas', r'saas|software|platform|ai|automation|crm|analytics|dashboard|api|cloud|workflow|productivity'),
-        ('executive_b2b', r'b2b|enterprise|industrial|procurement|logistics|manufacturing|consulting|compliance|operations'),
-        ('clean_trust', r'clinic|health|medical|dental|wellness|therapy|doctor|care|patient'),
-        ('bold_commerce', r'shop|store|ecommerce|fashion|product|shipping|cart|collection|shopify|dropshipping'),
-        ('architectural_premium', r'real estate|property|apartment|homes|estate|broker|architecture|residence|commercial property'),
-        ('creative_studio', r'agency|studio|creative|marketing|branding|design|production|content'),
+        ("beauty_salon", r"hair|salon|barber|beauty|stylist|colour|coloring|cut|blowout|парикмах|салон|стриж|окрашив|уклад"),
+        ("luxury_editorial", r"luxury|premium|exclusive|boutique|villa|interior|jewelry|aesthetic|spa|fine dining|resort"),
+        ("future_saas", r"saas|software|platform|ai|automation|crm|analytics|dashboard|api|cloud|workflow|productivity"),
+        ("executive_b2b", r"b2b|enterprise|industrial|procurement|logistics|manufacturing|consulting|compliance|operations"),
+        ("clean_trust", r"clinic|health|medical|dental|wellness|therapy|doctor|care|patient"),
+        ("bold_commerce", r"shop|store|ecommerce|fashion|product|shipping|cart|collection|shopify|dropshipping"),
+        ("architectural_premium", r"real estate|property|apartment|homes|estate|broker|architecture|residence|commercial property"),
+        ("creative_studio", r"agency|studio|creative|marketing|branding|design|production|content"),
     ]
 
-    style = 'premium_modern'
-    audience = 'broad'
-    tone = 'confident, persuasive, elevated'
-    visual_direction = 'premium gradients, layered depth, bold typography, subtle motion'
-    cta_style = 'strong, aspirational, action-oriented'
-    business_type = 'business service'
+    style = "premium_modern"
+    audience = "broad"
+    tone = "confident, persuasive, elevated"
+    visual_direction = "premium gradients, layered depth, bold typography, subtle motion"
+    cta_style = "strong, aspirational, action-oriented"
+    business_type = "business service"
     niche_keywords: list[str] = []
-    forbidden_keywords = ['strategy', 'execution', 'scale faster', 'optimize operations', 'business solutions', 'consultation']
+    forbidden_keywords = [
+        "strategy",
+        "execution",
+        "scale faster",
+        "optimize operations",
+        "business solutions",
+        "consultation",
+    ]
 
     for label, pattern in patterns:
         if re.search(pattern, text):
-            if label == 'beauty_salon':
-                business_type = 'hair salon'
-                style = 'luxury_editorial'
-                niche_keywords = ['salon', 'beauty', 'hair', 'stylist', 'booking', 'appointment', 'cut', 'color']
-                forbidden_keywords = ['strategy', 'execution', 'scale faster', 'optimize operations', 'business solutions', 'consultation', 'agency', 'saas', 'software', 'platform']
+            if label == "beauty_salon":
+                business_type = "hair salon"
+                style = "luxury_editorial"
+                niche_keywords = ["salon", "beauty", "hair", "stylist", "booking", "appointment", "cut", "color"]
+                forbidden_keywords = [
+                    "strategy",
+                    "execution",
+                    "scale faster",
+                    "optimize operations",
+                    "business solutions",
+                    "consultation",
+                    "agency",
+                    "saas",
+                    "software",
+                    "platform",
+                ]
             else:
                 style = label
             break
 
-    if 'hair salon' == business_type:
-        audience = 'local beauty clients'
-        tone = 'elegant, warm, confidence-building'
-        visual_direction = 'large beauty imagery, premium editorial spacing, warm premium contrast'
-        cta_style = 'practical booking-focused'
-    elif style == 'luxury_editorial':
-        business_type = business_type if business_type != 'business service' else 'premium service'
-        audience = 'high-end buyers'
-        tone = 'elegant, aspirational, exclusive'
-        visual_direction = 'editorial typography, luxury spacing, rich gradients, refined contrast'
-        cta_style = 'exclusive, invitation-based'
-    elif style == 'future_saas':
-        business_type = 'software product'
-        audience = 'modern tech buyers'
-        tone = 'clear, sharp, confident, outcome-driven'
-        visual_direction = 'product-led layouts, clean grids, futuristic glow, smooth motion'
-        cta_style = 'direct, high-clarity, high-intent'
-    elif style == 'executive_b2b':
-        business_type = 'business service'
-        audience = 'decision makers'
-        tone = 'credible, authoritative, efficient'
-        visual_direction = 'structured sections, proof-driven blocks, restrained premium design'
-        cta_style = 'trust-first, low-friction'
-    elif style == 'clean_trust':
-        business_type = 'wellness service'
-        audience = 'patients and families'
-        tone = 'calm, trustworthy, warm'
-        visual_direction = 'soft gradients, bright surfaces, trust signals, clarity'
-        cta_style = 'comforting, simple, reassuring'
-    elif style == 'bold_commerce':
-        business_type = 'consumer product'
-        audience = 'shoppers'
-        tone = 'desirable, energetic, benefit-driven'
-        visual_direction = 'strong product focus, bold cards, contrast, urgency'
-        cta_style = 'buy-now, desire-driven'
-    elif style == 'architectural_premium':
-        business_type = 'property business'
-        audience = 'buyers and investors'
-        tone = 'aspirational, polished, premium'
-        visual_direction = 'large imagery zones, elegant layout, confident whitespace'
-        cta_style = 'high-value, appointment-driven'
-    elif style == 'creative_studio':
-        business_type = 'creative service'
-        audience = 'brand-conscious clients'
-        tone = 'bold, premium, trend-aware'
-        visual_direction = 'high-contrast art direction, punchy sections, smooth transitions'
-        cta_style = 'portfolio-like, persuasive'
+    if business_type == "hair salon":
+        audience = "local beauty clients"
+        tone = "elegant, warm, confidence-building"
+        visual_direction = "large beauty imagery, premium editorial spacing, warm premium contrast"
+        cta_style = "practical booking-focused"
+    elif style == "luxury_editorial":
+        business_type = business_type if business_type != "business service" else "premium service"
+        audience = "high-end buyers"
+        tone = "elegant, aspirational, exclusive"
+        visual_direction = "editorial typography, luxury spacing, rich gradients, refined contrast"
+        cta_style = "exclusive, invitation-based"
+    elif style == "future_saas":
+        business_type = "software product"
+        audience = "modern tech buyers"
+        tone = "clear, sharp, confident, outcome-driven"
+        visual_direction = "product-led layouts, clean grids, futuristic glow, smooth motion"
+        cta_style = "direct, high-clarity, high-intent"
+    elif style == "executive_b2b":
+        business_type = "business service"
+        audience = "decision makers"
+        tone = "credible, authoritative, efficient"
+        visual_direction = "structured sections, proof-driven blocks, restrained premium design"
+        cta_style = "trust-first, low-friction"
+    elif style == "clean_trust":
+        business_type = "wellness service"
+        audience = "patients and families"
+        tone = "calm, trustworthy, warm"
+        visual_direction = "soft gradients, bright surfaces, trust signals, clarity"
+        cta_style = "comforting, simple, reassuring"
+    elif style == "bold_commerce":
+        business_type = "consumer product"
+        audience = "shoppers"
+        tone = "desirable, energetic, benefit-driven"
+        visual_direction = "strong product focus, bold cards, contrast, urgency"
+        cta_style = "buy-now, desire-driven"
+    elif style == "architectural_premium":
+        business_type = "property business"
+        audience = "buyers and investors"
+        tone = "aspirational, polished, premium"
+        visual_direction = "large imagery zones, elegant layout, confident whitespace"
+        cta_style = "high-value, appointment-driven"
+    elif style == "creative_studio":
+        business_type = "creative service"
+        audience = "brand-conscious clients"
+        tone = "bold, premium, trend-aware"
+        visual_direction = "high-contrast art direction, punchy sections, smooth transitions"
+        cta_style = "portfolio-like, persuasive"
 
-    raw_text = ' '.join(text_parts)
-    language = (source or {}).get('language') or _detect_language_from_text(raw_text)
+    raw_text = " ".join(text_parts)
+    language = (source or {}).get("language") or _detect_language_from_text(raw_text)
 
     return {
-        'style': style,
-        'audience': audience,
-        'tone': tone,
-        'visual_direction': visual_direction,
-        'cta_style': cta_style,
-        'business_type': business_type,
-        'language': language,
-        'niche_keywords': niche_keywords,
-        'forbidden_keywords': forbidden_keywords,
+        "style": style,
+        "audience": audience,
+        "tone": tone,
+        "visual_direction": visual_direction,
+        "cta_style": cta_style,
+        "business_type": business_type,
+        "language": language,
+        "niche_keywords": niche_keywords,
+        "forbidden_keywords": forbidden_keywords,
     }
 
 
 def _build_system_prompt(style: str) -> str:
-    style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS['premium_modern'])
-    return "\n\n".join([
-        BASE_RULES.strip(),
-        dedent("""
-        Your job is to redesign an EXISTING business page so it becomes clearer, more persuasive, and more premium.
-        It must still obviously be the same business.
+    style_prompt = STYLE_PROMPTS.get(style, STYLE_PROMPTS["premium_modern"])
+    return "\n\n".join(
+        [
+            BASE_RULES.strip(),
+            dedent("""
+            Your job is to redesign an EXISTING business page so it becomes clearer, more persuasive, and more premium.
+            It must still obviously be the same business.
 
-        Conversion rules:
-        - improve headlines aggressively, but keep the same business reality
-        - sell outcomes, not vague abstractions
-        - remove generic phrasing and empty luxury words
-        - increase clarity, trust, and desire
-        - reduce friction
-        - intensify CTA hierarchy
-        - make the offer feel more valuable without changing core facts
+            Conversion rules:
+            - improve headlines aggressively, but keep the same business reality
+            - sell outcomes, not vague abstractions
+            - remove generic phrasing and empty luxury words
+            - increase clarity, trust, and desire
+            - reduce friction
+            - intensify CTA hierarchy
+            - make the offer feel more valuable without changing core facts
 
-        Mandatory structure:
-        1. Hero
-        2. Services / offer summary
-        3. Transformation / benefits
-        4. Trust / proof
-        5. FAQ or objections
-        6. Final CTA
-        7. Preserved facts block if provided
+            Mandatory structure:
+            1. Hero
+            2. Services / offer summary
+            3. Transformation / benefits
+            4. Trust / proof
+            5. FAQ or objections
+            6. Final CTA
+            7. Preserved facts block if provided
 
-        Design rules:
-        - premium visual hierarchy
-        - strong first screen
-        - responsive production-presentable HTML
-        - mobile-first responsive layout for phones, then tablet, then desktop
-        - include viewport-friendly sizing, fluid images, stacked mobile sections, and tap-friendly controls
-        - no fixed-width blocks wider than the viewport and no horizontal scrolling
-        - no fake agency pitch about redesigning the website
-        - no references to Siteformo inside the generated page itself
-        - if real source images exist, use them in hero or gallery
-        - preserve links, videos, payment references, contact data, and other factual data exactly
-        """).strip(),
-        style_prompt,
-    ])
+            Design rules:
+            - premium visual hierarchy
+            - strong first screen
+            - responsive production-presentable HTML
+            - mobile-first responsive layout for phones, then tablet, then desktop
+            - include viewport-friendly sizing, fluid images, stacked mobile sections, and tap-friendly controls
+            - no fixed-width blocks wider than the viewport and no horizontal scrolling
+            - no fake agency pitch about redesigning the website
+            - no references to Siteformo inside the generated page itself
+            - if real source images exist, use them in hero or gallery
+            - preserve links, videos, payment references, contact data, and other factual data exactly
+            """).strip(),
+            style_prompt,
+        ]
+    )
 
 
-def _build_user_prompt(request_type: str, source: dict | None, business_description: str | None, profile: dict) -> str:
+def _build_user_prompt(
+    request_type: str,
+    source: dict | None,
+    business_description: str | None,
+    profile: dict,
+) -> str:
     source_summary = None
     if source:
         source_summary = {
-            'title': source.get('title'),
-            'meta_description': source.get('meta_description'),
-            'final_url': source.get('final_url'),
-            'language': source.get('language'),
-            'headings': source.get('headings', [])[:12],
-            'paragraphs': source.get('paragraphs', [])[:18],
-            'images': source.get('images', [])[:6],
-            'preserved_facts': source.get('preserved_facts', {}),
+            "title": source.get("title"),
+            "meta_description": source.get("meta_description"),
+            "final_url": source.get("final_url"),
+            "language": source.get("language"),
+            "headings": source.get("headings", [])[:12],
+            "paragraphs": source.get("paragraphs", [])[:18],
+            "images": source.get("images", [])[:6],
+            "preserved_facts": source.get("preserved_facts", {}),
         }
 
     payload = {
-        'request_type': request_type,
-        'brand_profile': profile,
-        'business_description': business_description,
-        'source': source_summary,
-        'requirements': {
-            'goal': 'premium redesign of the same business',
-            'must_preserve_real_facts': True,
-            'page_count': 1,
-            'must_be_complete_html': True,
-            'must_feel_custom': True,
-            'must_include_motion': True,
-            'must_upgrade_headlines': True,
-            'must_keep_business_type': True,
-            'must_keep_source_language': True,
-            'must_use_source_images_if_present': True,
-<<<<<<< HEAD
-=======
-            'must_contain_theme_matched_images': True,
-            'minimum_total_images': 3,
->>>>>>> bd28258 (initial commit with fixes)
+        "request_type": request_type,
+        "brand_profile": profile,
+        "business_description": business_description,
+        "source": source_summary,
+        "requirements": {
+            "goal": "premium redesign of the same business",
+            "must_preserve_real_facts": True,
+            "page_count": 1,
+            "must_be_complete_html": True,
+            "must_feel_custom": True,
+            "must_include_motion": True,
+            "must_upgrade_headlines": True,
+            "must_keep_business_type": True,
+            "must_keep_source_language": True,
+            "must_use_source_images_if_present": True,
+            "must_contain_theme_matched_images": True,
+            "minimum_total_images": 3,
         },
-        'extra_directions': [
-            'Write in the same language as the source material.',
-            'Keep the same niche and business type. Do not invent another concept.',
-            'Use clear practical CTA copy such as book, call, visit, request, reserve.',
-            'If the source is local, mention the location if it is available in the source.',
-            'Avoid abstract phrases like sanctuary, legacy, elevated excellence unless clearly supported by the source.',
-            'Do not output a site about website design or agency services unless the source business is actually an agency.',
-            'The generated page must be mobile-first responsive and visually correct on phone screens.',
-<<<<<<< HEAD
-=======
-            'Every page must include a hero image and additional theme-matched visuals for services or gallery blocks.',
->>>>>>> bd28258 (initial commit with fixes)
-            'Do not use generic B2B/SaaS/consulting wording unless that is clearly the source niche.',
+        "extra_directions": [
+            "Write in the same language as the source material.",
+            "Keep the same niche and business type. Do not invent another concept.",
+            "Use clear practical CTA copy such as book, call, visit, request, reserve.",
+            "If the source is local, mention the location if it is available in the source.",
+            "Avoid abstract phrases like sanctuary, legacy, elevated excellence unless clearly supported by the source.",
+            "Do not output a site about website design or agency services unless the source business is actually an agency.",
+            "The generated page must be mobile-first responsive and visually correct on phone screens.",
+            "Every page must include a hero image and additional theme-matched visuals for services or gallery blocks.",
+            "Do not use generic B2B/SaaS/consulting wording unless that is clearly the source niche.",
         ],
     }
-    payload['niche_lock'] = {
-        'required_business_type': profile.get('business_type'),
-        'required_keywords': profile.get('niche_keywords', []),
-        'forbidden_keywords': profile.get('forbidden_keywords', []),
-        'instruction': 'If the output drifts into a generic SaaS, agency, consulting, or unrelated niche, treat that output as invalid and regenerate internally before answering.'
+    payload["niche_lock"] = {
+        "required_business_type": profile.get("business_type"),
+        "required_keywords": profile.get("niche_keywords", []),
+        "forbidden_keywords": profile.get("forbidden_keywords", []),
+        "instruction": "If the output drifts into a generic SaaS, agency, consulting, or unrelated niche, treat that output as invalid and regenerate internally before answering.",
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -339,7 +352,7 @@ def _extract_candidate_content(response_text: str) -> dict | None:
         return json.loads(response_text)
     except Exception:
         pass
-    match = re.search(r'\{.*\}', response_text, re.S)
+    match = re.search(r"\{.*\}", response_text, re.S)
     if match:
         try:
             return json.loads(match.group(0))
@@ -348,38 +361,40 @@ def _extract_candidate_content(response_text: str) -> dict | None:
     return None
 
 
+def _count_images(html_text: str) -> int:
+    return len(re.findall(r"<img\b", html_text or "", flags=re.I))
+
+
 def _score_candidate(candidate: dict, source: dict | None = None, profile: dict | None = None) -> int:
-    html_text = str(candidate.get('html', ''))
+    html_text = str(candidate.get("html", ""))
     lowered = html_text.lower()
     score = 0
-    for needle in ['<section', 'hero', 'faq', 'contact', 'cta', 'button', 'hover']:
+    for needle in ["<section", "hero", "faq", "contact", "cta", "button", "hover"]:
         if needle in lowered:
             score += 1
-<<<<<<< HEAD
-    if '<img' in lowered:
-        score += 2
-=======
+
     image_count = _count_images(html_text)
     if image_count:
         score += 2 + min(image_count, 4)
     else:
         score -= 18
->>>>>>> bd28258 (initial commit with fixes)
-    for responsive_signal in ['viewport', '@media', 'max-width', 'width:100%', 'clamp(', 'grid-template-columns', 'flex-wrap']:
+
+    for responsive_signal in ["viewport", "@media", "max-width", "width:100%", "clamp(", "grid-template-columns", "flex-wrap"]:
         if responsive_signal in lowered:
             score += 2
+
     if source:
-        for image_url in source.get('images', [])[:4]:
+        for image_url in source.get("images", [])[:4]:
             if image_url and image_url in html_text:
                 score += 6
                 break
-        language = (source.get('language') or (profile or {}).get('language') or 'en')
-        if language == 'ru' and re.search(r'[А-Яа-яЁё]', html_text):
+        language = (source.get("language") or (profile or {}).get("language") or "en")
+        if language == "ru" and re.search(r"[А-Яа-яЁё]", html_text):
             score += 3
 
-    niche_keywords = [str(x).lower() for x in ((profile or {}).get('niche_keywords') or [])]
-    forbidden_keywords = [str(x).lower() for x in ((profile or {}).get('forbidden_keywords') or [])]
-    business_type = str((profile or {}).get('business_type') or '')
+    niche_keywords = [str(x).lower() for x in ((profile or {}).get("niche_keywords") or [])]
+    forbidden_keywords = [str(x).lower() for x in ((profile or {}).get("forbidden_keywords") or [])]
+    business_type = str((profile or {}).get("business_type") or "")
 
     if niche_keywords:
         matches = sum(1 for word in niche_keywords if word in lowered)
@@ -391,80 +406,86 @@ def _score_candidate(candidate: dict, source: dict | None = None, profile: dict 
         if word and word in lowered:
             score -= 6
 
-    if business_type == 'hair salon':
-        for bad in ['strategy', 'execution', 'scale faster', 'optimize operations', 'business solutions', 'enterprise', 'saas', 'software', 'consulting', 'consultation']:
+    if business_type == "hair salon":
+        for bad in [
+            "strategy",
+            "execution",
+            "scale faster",
+            "optimize operations",
+            "business solutions",
+            "enterprise",
+            "saas",
+            "software",
+            "consulting",
+            "consultation",
+        ]:
             if bad in lowered:
                 score -= 8
-        for good in ['book', 'appointment', 'stylist', 'salon', 'hair', 'beauty', 'cut', 'color']:
+        for good in ["book", "appointment", "stylist", "salon", "hair", "beauty", "cut", "color"]:
             if good in lowered:
                 score += 2
 
-<<<<<<< HEAD
-=======
     if not _page_has_theme_images(html_text, profile or {}, source=source):
         score -= 20
->>>>>>> bd28258 (initial commit with fixes)
-    if 'agency' in lowered and business_type != 'creative service':
+
+    if "agency" in lowered and business_type != "creative service":
         score -= 8
-    if 'siteformo' in lowered:
+    if "siteformo" in lowered:
         score -= 4
     return score
 
 
 def _pick_hero_image(source: dict | None) -> str:
     if not source:
-        return ''
-    for image in source.get('images', []) or []:
+        return ""
+    for image in source.get("images", []) or []:
         if image:
             return str(image)
-    return ''
+    return ""
 
-
-<<<<<<< HEAD
-=======
 
 THEME_IMAGE_LIBRARY: dict[str, list[dict[str, str]]] = {
-    'hair salon': [
-        {'title': 'Salon interior', 'caption': 'Elegant salon interior with mirrors, styling chairs, warm light and premium beauty atmosphere', 'palette': '#1f1a17|#c08b5c|#f5dcc3'},
-        {'title': 'Hair styling', 'caption': 'Professional hairstylist creating a modern haircut with scissors, combs and glossy hair detail', 'palette': '#251a1f|#d26f7b|#f6d3c7'},
-        {'title': 'Beauty products', 'caption': 'Premium beauty products and hair care bottles arranged on a salon counter with soft glow', 'palette': '#201e28|#8f75ff|#e7defc'},
+    "hair salon": [
+        {"title": "Salon interior", "caption": "Elegant salon interior with mirrors, styling chairs, warm light and premium beauty atmosphere", "palette": "#1f1a17|#c08b5c|#f5dcc3"},
+        {"title": "Hair styling", "caption": "Professional hairstylist creating a modern haircut with scissors, combs and glossy hair detail", "palette": "#251a1f|#d26f7b|#f6d3c7"},
+        {"title": "Beauty products", "caption": "Premium beauty products and hair care bottles arranged on a salon counter with soft glow", "palette": "#201e28|#8f75ff|#e7defc"},
     ],
-    'wellness service': [
-        {'title': 'Wellness reception', 'caption': 'Clean welcoming wellness clinic reception with plants, light walls and calming premium details', 'palette': '#0f3d46|#5fc5c8|#d5fbf6'},
-        {'title': 'Care treatment', 'caption': 'Professional care treatment room with reassuring atmosphere, towels and thoughtful service details', 'palette': '#19434b|#7fd0b1|#e9fff4'},
-        {'title': 'Wellness detail', 'caption': 'Spa and wellness product close-up with natural textures, stones and premium clean styling', 'palette': '#1e3b2f|#8fd2a1|#eff9ed'},
+    "wellness service": [
+        {"title": "Wellness reception", "caption": "Clean welcoming wellness clinic reception with plants, light walls and calming premium details", "palette": "#0f3d46|#5fc5c8|#d5fbf6"},
+        {"title": "Care treatment", "caption": "Professional care treatment room with reassuring atmosphere, towels and thoughtful service details", "palette": "#19434b|#7fd0b1|#e9fff4"},
+        {"title": "Wellness detail", "caption": "Spa and wellness product close-up with natural textures, stones and premium clean styling", "palette": "#1e3b2f|#8fd2a1|#eff9ed"},
     ],
-    'consumer product': [
-        {'title': 'Product showcase', 'caption': 'Premium product arranged for ecommerce hero shot with clean background and strong lighting', 'palette': '#171a2a|#ff8f4d|#ffe3c7'},
-        {'title': 'Lifestyle product', 'caption': 'Lifestyle product photo showing packaging, use case and desirable modern styling', 'palette': '#15243a|#50b7ff|#d7f0ff'},
-        {'title': 'Collection display', 'caption': 'Collection of featured products displayed in a premium retail composition', 'palette': '#2a1f17|#ffb547|#fff0ca'},
+    "consumer product": [
+        {"title": "Product showcase", "caption": "Premium product arranged for ecommerce hero shot with clean background and strong lighting", "palette": "#171a2a|#ff8f4d|#ffe3c7"},
+        {"title": "Lifestyle product", "caption": "Lifestyle product photo showing packaging, use case and desirable modern styling", "palette": "#15243a|#50b7ff|#d7f0ff"},
+        {"title": "Collection display", "caption": "Collection of featured products displayed in a premium retail composition", "palette": "#2a1f17|#ffb547|#fff0ca"},
     ],
-    'property business': [
-        {'title': 'Modern property', 'caption': 'Architectural exterior of a premium modern property with elegant lines and large windows', 'palette': '#18232f|#7da6c7|#e7f2ff'},
-        {'title': 'Interior living space', 'caption': 'Bright premium interior with furniture, natural light and spacious architectural feel', 'palette': '#2b211c|#d1a87e|#f8ecd8'},
-        {'title': 'Property detail', 'caption': 'Curated architectural detail with materials, textures and luxury finish', 'palette': '#1d252d|#8f9fb4|#edf2f8'},
+    "property business": [
+        {"title": "Modern property", "caption": "Architectural exterior of a premium modern property with elegant lines and large windows", "palette": "#18232f|#7da6c7|#e7f2ff"},
+        {"title": "Interior living space", "caption": "Bright premium interior with furniture, natural light and spacious architectural feel", "palette": "#2b211c|#d1a87e|#f8ecd8"},
+        {"title": "Property detail", "caption": "Curated architectural detail with materials, textures and luxury finish", "palette": "#1d252d|#8f9fb4|#edf2f8"},
     ],
-    'creative service': [
-        {'title': 'Creative workspace', 'caption': 'Creative studio workspace with design boards, color samples and premium production mood', 'palette': '#27172c|#c56bff|#f6dbff'},
-        {'title': 'Brand concepts', 'caption': 'Brand concept presentation table with sketches, materials and vivid studio energy', 'palette': '#12253b|#55b6ff|#ddf4ff'},
-        {'title': 'Production scene', 'caption': 'Creative production scene with camera, lighting and polished behind the scenes aesthetic', 'palette': '#281a14|#ff9b52|#ffe7d3'},
+    "creative service": [
+        {"title": "Creative workspace", "caption": "Creative studio workspace with design boards, color samples and premium production mood", "palette": "#27172c|#c56bff|#f6dbff"},
+        {"title": "Brand concepts", "caption": "Brand concept presentation table with sketches, materials and vivid studio energy", "palette": "#12253b|#55b6ff|#ddf4ff"},
+        {"title": "Production scene", "caption": "Creative production scene with camera, lighting and polished behind the scenes aesthetic", "palette": "#281a14|#ff9b52|#ffe7d3"},
     ],
-    'software product': [
-        {'title': 'Product dashboard', 'caption': 'Futuristic software dashboard on a sleek device with clear data visualization and glow accents', 'palette': '#101828|#6a7bff|#dbe2ff'},
-        {'title': 'Automation workflow', 'caption': 'Abstract product workflow interface with connected nodes and premium dark UI style', 'palette': '#111827|#00c2ff|#def9ff'},
-        {'title': 'Platform experience', 'caption': 'Modern app screens floating in a polished SaaS product composition', 'palette': '#14162a|#7c3aed|#ece6ff'},
+    "software product": [
+        {"title": "Product dashboard", "caption": "Futuristic software dashboard on a sleek device with clear data visualization and glow accents", "palette": "#101828|#6a7bff|#dbe2ff"},
+        {"title": "Automation workflow", "caption": "Abstract product workflow interface with connected nodes and premium dark UI style", "palette": "#111827|#00c2ff|#def9ff"},
+        {"title": "Platform experience", "caption": "Modern app screens floating in a polished SaaS product composition", "palette": "#14162a|#7c3aed|#ece6ff"},
     ],
-    'business service': [
-        {'title': 'Professional service', 'caption': 'Professional service environment with premium materials, confident atmosphere and real-world context', 'palette': '#1a2231|#61a5ff|#e3efff'},
-        {'title': 'Client experience', 'caption': 'Real client-facing service moment showing premium support, welcome and expertise', 'palette': '#2a1f1c|#d29b73|#fbe9d9'},
-        {'title': 'Service details', 'caption': 'Close-up of service details, tools and environment that clearly communicate the business type', 'palette': '#1f2831|#6fd3c4|#e7fff9'},
+    "business service": [
+        {"title": "Professional service", "caption": "Professional service environment with premium materials, confident atmosphere and real-world context", "palette": "#1a2231|#61a5ff|#e3efff"},
+        {"title": "Client experience", "caption": "Real client-facing service moment showing premium support, welcome and expertise", "palette": "#2a1f1c|#d29b73|#fbe9d9"},
+        {"title": "Service details", "caption": "Close-up of service details, tools and environment that clearly communicate the business type", "palette": "#1f2831|#6fd3c4|#e7fff9"},
     ],
 }
 
 
 def _svg_data_uri(title: str, caption: str, palette: str) -> str:
-    c1, c2, c3 = (palette.split('|') + ['#1f2937', '#6b7280', '#e5e7eb'])[:3]
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-label="{_escape(title)}">
+    c1, c2, c3 = (palette.split("|") + ["#1f2937", "#6b7280", "#e5e7eb"])[:3]
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-label="{_escape(title)}">
   <defs>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0%" stop-color="{c1}"/>
@@ -490,143 +511,140 @@ def _svg_data_uri(title: str, caption: str, palette: str) -> str:
   <text x="774" y="504" fill="rgba(255,255,255,0.78)" font-family="Arial, Helvetica, sans-serif" font-size="28">Responsive by default, safe for hero, gallery and cards.</text>
   <text x="774" y="660" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700">Generated fallback visual</text>
   <text x="774" y="716" fill="rgba(255,255,255,0.78)" font-family="Arial, Helvetica, sans-serif" font-size="28">Use when source assets are missing or irrelevant.</text>
-</svg>'''
-    return 'data:image/svg+xml;charset=UTF-8,' + quote(svg, safe='')
+</svg>"""
+    return "data:image/svg+xml;charset=UTF-8," + quote(svg, safe="")
 
 
 def _themed_image_assets(profile: dict, source: dict | None = None) -> list[dict[str, str]]:
-    source_images = [str(img) for img in ((source or {}).get('images') or []) if img][:3]
-    business_type = str(profile.get('business_type') or 'business service')
-    presets = THEME_IMAGE_LIBRARY.get(business_type) or THEME_IMAGE_LIBRARY['business service']
+    source_images = [str(img) for img in ((source or {}).get("images") or []) if img][:3]
+    business_type = str(profile.get("business_type") or "business service")
+    presets = THEME_IMAGE_LIBRARY.get(business_type) or THEME_IMAGE_LIBRARY["business service"]
     themed_assets: list[dict[str, str]] = []
     for idx, item in enumerate(presets):
-        themed_assets.append({
-            'src': source_images[idx] if idx < len(source_images) else _svg_data_uri(item['title'], item['caption'], item['palette']),
-            'alt': item['caption'],
-            'kind': 'source' if idx < len(source_images) else 'generated',
-        })
+        themed_assets.append(
+            {
+                "src": source_images[idx] if idx < len(source_images) else _svg_data_uri(item["title"], item["caption"], item["palette"]),
+                "alt": item["caption"],
+                "kind": "source" if idx < len(source_images) else "generated",
+            }
+        )
     return themed_assets
-
-
-def _count_images(html_text: str) -> int:
-    return len(re.findall(r'<img\b', html_text or '', flags=re.I))
 
 
 def _page_has_theme_images(html_text: str, profile: dict, source: dict | None = None) -> bool:
     if _count_images(html_text) == 0:
         return False
-    for image_url in ((source or {}).get('images') or [])[:3]:
-        if image_url and str(image_url) in (html_text or ''):
+    for image_url in ((source or {}).get("images") or [])[:3]:
+        if image_url and str(image_url) in (html_text or ""):
             return True
-    lowered = (html_text or '').lower()
-    themed_signals = [str(x).lower() for x in (profile.get('niche_keywords') or [])]
-    business_type = str(profile.get('business_type') or '')
-    if business_type == 'hair salon':
-        themed_signals.extend(['salon', 'beauty', 'hair', 'stylist', 'gallery'])
+    lowered = (html_text or "").lower()
+    themed_signals = [str(x).lower() for x in (profile.get("niche_keywords") or [])]
+    business_type = str(profile.get("business_type") or "")
+    if business_type == "hair salon":
+        themed_signals.extend(["salon", "beauty", "hair", "stylist", "gallery"])
     return any(signal in lowered for signal in themed_signals if signal)
 
 
->>>>>>> bd28258 (initial commit with fixes)
 def _language_pack(language: str) -> dict[str, str]:
-    if language == 'ru':
+    if language == "ru":
         return {
-            'badge': 'Новый дизайн',
-            'primary_cta': 'Оставить заявку',
-            'secondary_cta': 'Посмотреть услуги',
-            'services': 'Услуги',
-            'benefits': 'Почему выбирают нас',
-            'proof': 'Почему это удобно',
-            'faq': 'Частые вопросы',
-            'facts': 'Сохранённые данные',
-            'contact': 'Контакты',
-            'faq_q1': 'Как записаться?',
-            'faq_a1': 'Оставьте заявку через форму или свяжитесь по указанным контактам.',
-            'faq_q2': 'Сохраняются ли контакты и цены?',
-            'faq_a2': 'Да, ключевые фактические данные сохраняются без изменений.',
-            'hero_fallback': 'Современный сайт для вашего бизнеса',
-            'hero_sub_fallback': 'Более ясная структура, сильнее оффер и понятный следующий шаг для клиента.',
+            "badge": "Новый дизайн",
+            "primary_cta": "Оставить заявку",
+            "secondary_cta": "Посмотреть услуги",
+            "services": "Услуги",
+            "benefits": "Почему выбирают нас",
+            "proof": "Почему это удобно",
+            "faq": "Частые вопросы",
+            "facts": "Сохранённые данные",
+            "contact": "Контакты",
+            "faq_q1": "Как записаться?",
+            "faq_a1": "Оставьте заявку через форму или свяжитесь по указанным контактам.",
+            "faq_q2": "Сохраняются ли контакты и цены?",
+            "faq_a2": "Да, ключевые фактические данные сохраняются без изменений.",
+            "hero_fallback": "Современный сайт для вашего бизнеса",
+            "hero_sub_fallback": "Более ясная структура, сильнее оффер и понятный следующий шаг для клиента.",
         }
     return {
-        'badge': 'Refreshed design',
-        'primary_cta': 'Request a consultation',
-        'secondary_cta': 'View services',
-        'services': 'Services',
-        'benefits': 'Why clients choose this business',
-        'proof': 'Why this works',
-        'faq': 'Frequently asked questions',
-        'facts': 'Preserved facts',
-        'contact': 'Contact',
-        'faq_q1': 'How do I get started?',
-        'faq_a1': 'Use the main contact path on the page to request the service.',
-        'faq_q2': 'Are prices and contacts preserved?',
-        'faq_a2': 'Yes. Key factual data is kept intact.',
-        'hero_fallback': 'A clearer, stronger website for this business',
-        'hero_sub_fallback': 'Sharper positioning, better structure, and a more persuasive next step for visitors.',
+        "badge": "Refreshed design",
+        "primary_cta": "Request a consultation",
+        "secondary_cta": "View services",
+        "services": "Services",
+        "benefits": "Why clients choose this business",
+        "proof": "Why this works",
+        "faq": "Frequently asked questions",
+        "facts": "Preserved facts",
+        "contact": "Contact",
+        "faq_q1": "How do I get started?",
+        "faq_a1": "Use the main contact path on the page to request the service.",
+        "faq_q2": "Are prices and contacts preserved?",
+        "faq_a2": "Yes. Key factual data is kept intact.",
+        "hero_fallback": "A clearer, stronger website for this business",
+        "hero_sub_fallback": "Sharper positioning, better structure, and a more persuasive next step for visitors.",
     }
 
 
 def _source_guided_fallback(source: dict | None, business_description: str | None, profile: dict) -> dict:
-    language = profile.get('language', 'en')
+    language = profile.get("language", "en")
     pack = _language_pack(language)
 
-    title = ''
-    if source and source.get('title'):
-        title = str(source['title'])
+    title = ""
+    if source and source.get("title"):
+        title = str(source["title"])
     elif business_description:
         title = business_description[:80]
     else:
-        title = pack['hero_fallback']
+        title = pack["hero_fallback"]
 
-    headings = source.get('headings', [])[:6] if source else []
-    paragraphs = source.get('paragraphs', [])[:10] if source else []
-    facts = (source or {}).get('preserved_facts', {})
-<<<<<<< HEAD
-    image_url = _pick_hero_image(source)
-=======
+    headings = source.get("headings", [])[:6] if source else []
+    paragraphs = source.get("paragraphs", [])[:10] if source else []
+    facts = (source or {}).get("preserved_facts", {})
     themed_assets = _themed_image_assets(profile, source=source)
-    image_url = themed_assets[0]['src'] if themed_assets else _pick_hero_image(source)
->>>>>>> bd28258 (initial commit with fixes)
+    image_url = themed_assets[0]["src"] if themed_assets else _pick_hero_image(source)
 
     hero_title = headings[0] if headings else title
-    hero_subtitle = paragraphs[0] if paragraphs else pack['hero_sub_fallback']
+    hero_subtitle = paragraphs[0] if paragraphs else pack["hero_sub_fallback"]
 
-    service_items = headings[1:4] or paragraphs[1:4] or [business_description or profile.get('business_type', 'service')]
-    benefit_items = paragraphs[2:5] or headings[1:4] or [pack['hero_sub_fallback']]
+    service_items = headings[1:4] or paragraphs[1:4] or [business_description or profile.get("business_type", "service")]
+    benefit_items = paragraphs[2:5] or headings[1:4] or [pack["hero_sub_fallback"]]
 
-    links = facts.get('links', [])[:3]
-    prices = facts.get('prices', [])[:4]
-    phones = facts.get('phones', [])[:2]
-    emails = facts.get('emails', [])[:2]
-    videos = facts.get('videos', [])[:2]
+    links = facts.get("links", [])[:3]
+    prices = facts.get("prices", [])[:4]
+    phones = facts.get("phones", [])[:2]
+    emails = facts.get("emails", [])[:2]
+    videos = facts.get("videos", [])[:2]
 
-    link_markup = ''.join(
+    link_markup = "".join(
         f'<li><a href="{_escape(item.get("href"))}">{_escape(item.get("text") or item.get("href"))}</a></li>'
-        for item in links if item.get('href')
+        for item in links
+        if item.get("href")
     )
-    price_markup = ''.join(f'<li>{_escape(item)}</li>' for item in prices)
-    phone_markup = ''.join(f'<li>{_escape(item)}</li>' for item in phones)
-    email_markup = ''.join(f'<li>{_escape(item)}</li>' for item in emails)
-    video_markup = ''.join(f'<li><a href="{_escape(item)}">{_escape(item)}</a></li>' for item in videos)
+    price_markup = "".join(f"<li>{_escape(item)}</li>" for item in prices)
+    phone_markup = "".join(f"<li>{_escape(item)}</li>" for item in phones)
+    email_markup = "".join(f"<li>{_escape(item)}</li>" for item in emails)
+    video_markup = "".join(f'<li><a href="{_escape(item)}">{_escape(item)}</a></li>' for item in videos)
 
-<<<<<<< HEAD
-    service_markup = ''.join(f'<div class="mini-card"><h3>{_escape(str(item)[:80])}</h3></div>' for item in service_items if item)
-    benefit_markup = ''.join(f'<li>{_escape(str(item)[:180])}</li>' for item in benefit_items if item)
-    hero_image_markup = f'<img src="{_escape(image_url)}" alt="{_escape(hero_title)}" />' if image_url else ''
-=======
     gallery_assets = themed_assets[1:] if len(themed_assets) > 1 else themed_assets
-    service_markup = ''.join(
+    service_markup = "".join(
         f'<div class="mini-card">'
-        + (f'<img src="{_escape(gallery_assets[idx % len(gallery_assets)]["src"])}" alt="{_escape(gallery_assets[idx % len(gallery_assets)]["alt"])}" />' if gallery_assets else '')
-        + f'<h3>{_escape(str(item)[:80])}</h3></div>'
-        for idx, item in enumerate(service_items) if item
+        + (
+            f'<img src="{_escape(gallery_assets[idx % len(gallery_assets)]["src"])}" alt="{_escape(gallery_assets[idx % len(gallery_assets)]["alt"])}" />'
+            if gallery_assets
+            else ""
+        )
+        + f"<h3>{_escape(str(item)[:80])}</h3></div>"
+        for idx, item in enumerate(service_items)
+        if item
     )
-    gallery_markup = ''.join(
+    gallery_markup = "".join(
         f'<figure class="gallery-card"><img src="{_escape(asset["src"])}" alt="{_escape(asset["alt"])}" /><figcaption>{_escape(asset["alt"])}</figcaption></figure>'
         for asset in themed_assets[:3]
     )
-    benefit_markup = ''.join(f'<li>{_escape(str(item)[:180])}</li>' for item in benefit_items if item)
-    hero_image_markup = f'<img src="{_escape(image_url)}" alt="{_escape(themed_assets[0]["alt"] if themed_assets else hero_title)}" />' if image_url else ''
->>>>>>> bd28258 (initial commit with fixes)
+    benefit_markup = "".join(f"<li>{_escape(str(item)[:180])}</li>" for item in benefit_items if item)
+    hero_image_markup = (
+        f'<img src="{_escape(image_url)}" alt="{_escape(themed_assets[0]["alt"] if themed_assets else hero_title)}" />'
+        if image_url
+        else ""
+    )
 
     html_doc = f"""<!doctype html>
 <html lang="{language}">
@@ -652,13 +670,6 @@ h1{{font-size:clamp(42px,6vw,78px);line-height:.95;margin:20px 0 16px;letter-spa
 .hero-visual img{{display:block;width:100%;height:100%;object-fit:cover}}
 section{{padding:40px 0}}
 .grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}}
-<<<<<<< HEAD
-.card,.mini-card{{padding:22px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.04)}}
-.list{{margin:0;padding-left:20px;color:var(--muted);line-height:1.7}}
-.two-col{{display:grid;grid-template-columns:1fr 1fr;gap:18px}}
-.kicker{{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#f3d08b;margin-bottom:10px;font-weight:700}}
-@media (max-width: 900px){{.hero{{grid-template-columns:1fr;min-height:auto;padding:70px 0 24px}}.hero-visual{{min-height:320px}}.grid,.two-col{{grid-template-columns:1fr}}h1{{font-size:46px}}}}
-=======
 .card,.mini-card,.gallery-card{{padding:22px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.04)}}
 .list{{margin:0;padding-left:20px;color:var(--muted);line-height:1.7}}
 .mini-card img,.gallery-card img{{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:16px;margin-bottom:14px}}
@@ -668,50 +679,46 @@ section{{padding:40px 0}}
 .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:18px}}
 .kicker{{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#f3d08b;margin-bottom:10px;font-weight:700}}
 @media (max-width: 900px){{.hero{{grid-template-columns:1fr;min-height:auto;padding:70px 0 24px}}.hero-visual{{min-height:320px}}.grid,.two-col,.gallery-grid{{grid-template-columns:1fr}}h1{{font-size:46px}}}}
->>>>>>> bd28258 (initial commit with fixes)
 </style>
 </head>
 <body>
 <div class="wrap">
 <section class="hero">
   <div>
-    <span class="badge">{_escape(pack['badge'])}</span>
+    <span class="badge">{_escape(pack["badge"])}</span>
     <h1>{_escape(hero_title)}</h1>
     <p class="lead">{_escape(hero_subtitle)}</p>
     <div class="cta-row">
-      <a class="btn primary" href="#contact">{_escape(pack['primary_cta'])}</a>
-      <a class="btn secondary" href="#services">{_escape(pack['secondary_cta'])}</a>
+      <a class="btn primary" href="#contact">{_escape(pack["primary_cta"])}</a>
+      <a class="btn secondary" href="#services">{_escape(pack["secondary_cta"])}</a>
     </div>
   </div>
   <div class="hero-visual">{hero_image_markup}</div>
 </section>
 <section id="services">
-  <div class="kicker">{_escape(pack['services'])}</div>
+  <div class="kicker">{_escape(pack["services"])}</div>
   <div class="grid">{service_markup}</div>
 </section>
 <section>
-<<<<<<< HEAD
-=======
   <div class="kicker">Gallery</div>
   <div class="gallery-grid">{gallery_markup}</div>
 </section>
 <section>
->>>>>>> bd28258 (initial commit with fixes)
   <div class="two-col">
     <div class="card">
-      <div class="kicker">{_escape(pack['benefits'])}</div>
+      <div class="kicker">{_escape(pack["benefits"])}</div>
       <ul class="list">{benefit_markup}</ul>
     </div>
     <div class="card">
-      <div class="kicker">{_escape(pack['faq'])}</div>
-      <p><strong>{_escape(pack['faq_q1'])}</strong><br />{_escape(pack['faq_a1'])}</p>
-      <p><strong>{_escape(pack['faq_q2'])}</strong><br />{_escape(pack['faq_a2'])}</p>
+      <div class="kicker">{_escape(pack["faq"])}</div>
+      <p><strong>{_escape(pack["faq_q1"])}</strong><br />{_escape(pack["faq_a1"])}</p>
+      <p><strong>{_escape(pack["faq_q2"])}</strong><br />{_escape(pack["faq_a2"])}</p>
     </div>
   </div>
 </section>
 <section id="contact">
   <div class="card">
-    <div class="kicker">{_escape(pack['facts'])}</div>
+    <div class="kicker">{_escape(pack["facts"])}</div>
     <div class="two-col">
       <div>
         {'<h3>Links</h3><ul class="list">' + link_markup + '</ul>' if link_markup else ''}
@@ -729,21 +736,40 @@ section{{padding:40px 0}}
 </body>
 </html>"""
 
-    return {'title': title or 'Siteformo Demo', 'html': html_doc}
+    return {"title": title or "Siteformo Demo", "html": html_doc}
 
 
-def generate_demo_page(request_type: str, source: dict | None = None, business_description: str | None = None) -> dict:
-    logger.info('[AI] generating high-conversion page...')
+def generate_demo_page(
+    request_type: str,
+    source: dict | None = None,
+    business_description: str | None = None,
+) -> dict:
+    logger.info("[AI] generating high-conversion page...")
     profile = _infer_brand_profile(source, business_description)
-    logger.info('[AI] routed style=%s audience=%s tone=%s language=%s business_type=%s', profile['style'], profile['audience'], profile['tone'], profile['language'], profile['business_type'])
-    logger.info('[AI] source analysis: title=%s headings=%s paragraphs=%s images=%s niche_keywords=%s forbidden_keywords=%s', (source or {}).get('title'), len((source or {}).get('headings', []) or []), len((source or {}).get('paragraphs', []) or []), len((source or {}).get('images', []) or []), profile.get('niche_keywords'), profile.get('forbidden_keywords'))
+    logger.info(
+        "[AI] routed style=%s audience=%s tone=%s language=%s business_type=%s",
+        profile["style"],
+        profile["audience"],
+        profile["tone"],
+        profile["language"],
+        profile["business_type"],
+    )
+    logger.info(
+        "[AI] source analysis: title=%s headings=%s paragraphs=%s images=%s niche_keywords=%s forbidden_keywords=%s",
+        (source or {}).get("title"),
+        len((source or {}).get("headings", []) or []),
+        len((source or {}).get("paragraphs", []) or []),
+        len((source or {}).get("images", []) or []),
+        profile.get("niche_keywords"),
+        profile.get("forbidden_keywords"),
+    )
 
     if not settings.openai_api_key:
         return _source_guided_fallback(source, business_description, profile)
 
-    system_prompt = _build_system_prompt(profile['style'])
+    system_prompt = _build_system_prompt(profile["style"])
     user_prompt = _build_user_prompt(request_type, source, business_description, profile)
-    logger.info('[AI] final generation prompt=%s', user_prompt)
+    logger.info("[AI] final generation prompt=%s", user_prompt)
     client = OpenAI(api_key=settings.openai_api_key)
 
     candidates: list[dict] = []
@@ -752,39 +778,35 @@ def generate_demo_page(request_type: str, source: dict | None = None, business_d
             model=settings.openai_model,
             temperature=0.7,
             messages=[
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': user_prompt},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ],
         )
-        content = response.choices[0].message.content or ''
+        content = response.choices[0].message.content or ""
         data = _extract_candidate_content(content)
-        if data and data.get('html'):
+        if data and data.get("html"):
             candidates.append(data)
 
     if not candidates:
-        logger.info('[AI] generation fallback used')
+        logger.info("[AI] generation fallback used")
         return _source_guided_fallback(source, business_description, profile)
 
     scored_candidates = [(item, _score_candidate(item, source=source, profile=profile)) for item in candidates]
     for idx, (_, candidate_score) in enumerate(scored_candidates, start=1):
-        logger.info('[AI] scoring result candidate=%s score=%s', idx, candidate_score)
+        logger.info("[AI] scoring result candidate=%s score=%s", idx, candidate_score)
+
     best, best_score = max(scored_candidates, key=lambda pair: pair[1])
     if best_score < 6:
-        logger.info('[AI] best candidate score too low (%s), using source-guided fallback', best_score)
+        logger.info("[AI] best candidate score too low (%s), using source-guided fallback", best_score)
         return _source_guided_fallback(source, business_description, profile)
-<<<<<<< HEAD
-    logger.info('[AI] generation complete score=%s', best_score)
-    return {
-        'title': str(best.get('title') or 'Siteformo Demo'),
-        'html': str(best.get('html') or _source_guided_fallback(source, business_description, profile)['html']),
-=======
-    best_html = str(best.get('html') or '')
+
+    best_html = str(best.get("html") or "")
     if not _page_has_theme_images(best_html, profile, source=source) or _count_images(best_html) < 3:
-        logger.info('[AI] candidate missing required theme-matched images, using source-guided fallback')
+        logger.info("[AI] candidate missing required theme-matched images, using source-guided fallback")
         return _source_guided_fallback(source, business_description, profile)
-    logger.info('[AI] generation complete score=%s images=%s', best_score, _count_images(best_html))
+
+    logger.info("[AI] generation complete score=%s images=%s", best_score, _count_images(best_html))
     return {
-        'title': str(best.get('title') or 'Siteformo Demo'),
-        'html': best_html or _source_guided_fallback(source, business_description, profile)['html'],
->>>>>>> bd28258 (initial commit with fixes)
+        "title": str(best.get("title") or "Siteformo Demo"),
+        "html": best_html or _source_guided_fallback(source, business_description, profile)["html"],
     }
