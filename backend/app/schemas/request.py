@@ -10,7 +10,7 @@ from app.models.request import ContactType, RequestType
 
 class CreateRequestPayload(BaseModel):
     request_type: Literal['redesign', 'create'] | None = None
-    contact_type: Literal['email', 'telegram'] = ContactType.EMAIL
+    contact_type: Literal['email', 'telegram', 'whatsapp', 'messenger'] = ContactType.EMAIL
     contact_value: str | None = Field(default=None, max_length=320)
     email: EmailStr | None = None
     source_url: HttpUrl | None = None
@@ -69,6 +69,8 @@ class CreateRequestPayload(BaseModel):
         else:
             if not self.contact_value:
                 raise ValueError('contact_value is required for non-email contact types')
+            if self.contact_type == ContactType.TELEGRAM and self.contact_value and not self.contact_value.strip().startswith('@'):
+                self.contact_value = '@' + self.contact_value.strip().lstrip('@')
 
         return self
 

@@ -62,7 +62,7 @@ def _demo_headers() -> dict[str, str]:
         "cross-origin-resource-policy": "same-origin",
         "cross-origin-opener-policy": "same-origin",
         "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=()",
-        "content-security-policy": "default-src 'self' 'unsafe-inline' data: blob: https:; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; script-src 'self' 'unsafe-inline'; font-src 'self' data: https:; frame-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; connect-src 'self' https:;",
+        "content-security-policy": "default-src 'self' data: blob: https:; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://*.cloudflare.com https://*.challenges.cloudflare.com; font-src 'self' data: https:; frame-src 'self' https://challenges.cloudflare.com https://*.cloudflare.com https://*.challenges.cloudflare.com https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https:; connect-src 'self' https://challenges.cloudflare.com https://*.cloudflare.com https://*.challenges.cloudflare.com https:;",
     }
 
 

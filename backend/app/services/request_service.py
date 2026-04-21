@@ -81,7 +81,13 @@ def _normalize_contact(contact_type: str, contact_value: str) -> tuple[str | Non
     if contact_type == ContactType.EMAIL:
         email = normalize_email(value)
         return email, email
-    return None, value.lstrip("@").lower()
+    if contact_type == ContactType.TELEGRAM:
+        return None, '@' + value.lstrip('@').lower()
+    if contact_type == ContactType.WHATSAPP:
+        digits = ''.join(ch for ch in value if ch.isdigit())
+        normalized = '+' + digits if digits else value
+        return None, normalized
+    return None, value
 
 
 def _build_user_identity(contact_type: str, normalized_contact: str, ip: str, fingerprint: str | None) -> str:
@@ -108,6 +114,12 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
 
     bypass_limits = _is_limit_bypass_email(normalized_email)
 
+    normalized_source_url, normalized_business_description, normalized_business_type = _normalize_generation_inputs(
+        str(payload.source_url) if payload.source_url else None,
+        payload.business_description,
+        payload.business_type,
+    )
+
     usage = db.execute(select(UserUsage).where(UserUsage.user_identity_hash == identity_hash)).scalar_one_or_none()
     if usage is None:
         usage = UserUsage(
@@ -126,12 +138,6 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         logger.info("[API] limit bypass applied: email=%s", normalized_email)
 
     if not bypass_limits and usage.free_attempts_used >= settings.free_attempt_limit:
-        normalized_source_url, normalized_business_description, normalized_business_type = _normalize_generation_inputs(
-            str(payload.source_url) if payload.source_url else None,
-            payload.business_description,
-            payload.business_type,
-        )
-
         req = Request(
             request_type=payload.request_type,
             email=normalized_email,
@@ -159,12 +165,6 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         return RequestStatus.LIMIT_REACHED, req, None
 
     current_attempt_number = 1 if bypass_limits else usage.free_attempts_used + 1
-
-    normalized_source_url, normalized_business_description, normalized_business_type = _normalize_generation_inputs(
-        str(payload.source_url) if payload.source_url else None,
-        payload.business_description,
-        payload.business_type,
-    )
 
     logger.info(
         "[API] normalized payload source_url=%s business_type=%s business_description=%s",

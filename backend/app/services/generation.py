@@ -6,6 +6,7 @@ import logging
 import re
 from textwrap import dedent
 from urllib.parse import quote
+import base64
 
 from openai import OpenAI
 
@@ -452,6 +453,44 @@ def _pick_hero_image(source: dict | None) -> str:
     return ""
 
 
+
+
+def _generate_image_data_uri(client: OpenAI | None, prompt: str, fallback_title: str, fallback_caption: str, fallback_palette: str) -> str:
+    if client and settings.openai_api_key:
+        try:
+            response = client.images.generate(
+                model='gpt-image-1',
+                prompt=(
+                    'Create a premium, photorealistic website hero image. '
+                    'No text, no logos, no UI, no watermark. '
+                    'Match this business theme exactly: ' + prompt
+                ),
+                size='1536x1024',
+            )
+            data = None
+            if getattr(response, 'data', None):
+                item = response.data[0]
+                data = getattr(item, 'b64_json', None) or (item.get('b64_json') if isinstance(item, dict) else None)
+            if data:
+                return 'data:image/png;base64,' + data
+        except Exception as exc:
+            logger.warning('[AI] image generation failed, using fallback svg: %s', exc)
+    return _svg_data_uri(fallback_title, fallback_caption, fallback_palette)
+
+
+def _build_image_generation_prompt(profile: dict, business_description: str | None, source: dict | None, item: dict[str, str]) -> str:
+    parts = [
+        str(profile.get('business_type') or 'business service'),
+        str(profile.get('visual_direction') or ''),
+        str(item.get('caption') or ''),
+    ]
+    if business_description:
+        parts.append(str(business_description)[:300])
+    if source:
+        parts.extend([str(x) for x in (source.get('headings') or [])[:3]])
+        if source.get('title'):
+            parts.append(str(source.get('title')))
+    return '. '.join(part for part in parts if part)
 THEME_IMAGE_LIBRARY: dict[str, list[dict[str, str]]] = {
     "hair salon": [
         {"title": "Salon interior", "caption": "Elegant salon interior with mirrors, styling chairs, warm light and premium beauty atmosphere", "palette": "#1f1a17|#c08b5c|#f5dcc3"},
@@ -564,6 +603,8 @@ def _themed_image_assets(
     profile: dict,
     source: dict | None = None,
     allow_source_images: bool = False,
+    client: OpenAI | None = None,
+    business_description: str | None = None,
 ) -> list[dict[str, str]]:
     source_images: list[str] = []
     if allow_source_images:
@@ -580,7 +621,7 @@ def _themed_image_assets(
         use_source = idx < len(source_images)
         themed_assets.append(
             {
-                "src": source_images[idx] if use_source else _svg_data_uri(item["title"], item["caption"], item["palette"]),
+                "src": source_images[idx] if use_source else _generate_image_data_uri(client, _build_image_generation_prompt(profile, business_description, source, item), item["title"], item["caption"], item["palette"]),
                 "alt": item["caption"],
                 "kind": "source" if use_source else "generated",
             }
@@ -640,7 +681,7 @@ def _language_pack(language: str) -> dict[str, str]:
     }
 
 
-def _source_guided_fallback(source: dict | None, business_description: str | None, profile: dict) -> dict:
+def _source_guided_fallback(source: dict | None, business_description: str | None, profile: dict, client: OpenAI | None = None) -> dict:
     language = profile.get("language", "en")
     pack = _language_pack(language)
 
@@ -655,7 +696,7 @@ def _source_guided_fallback(source: dict | None, business_description: str | Non
     headings = source.get("headings", [])[:6] if source else []
     paragraphs = source.get("paragraphs", [])[:10] if source else []
     facts = (source or {}).get("preserved_facts", {})
-    themed_assets = _themed_image_assets(profile, source=source, allow_source_images=False)
+    themed_assets = _themed_image_assets(profile, source=source, allow_source_images=True, client=client, business_description=business_description)
     image_url = themed_assets[0]["src"] if themed_assets else _pick_hero_image(source)
 
     hero_title = headings[0] if headings else title
@@ -710,24 +751,24 @@ def _source_guided_fallback(source: dict | None, business_description: str | Non
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{_escape(title)}</title>
 <style>
-:root{{--bg:#0f1115;--panel:#171a21;--line:rgba(255,255,255,.12);--text:#f8fafc;--muted:#c9d1df;--accent:#d4a24c;--accent2:#f3d08b}}
+:root{{--bg:#090b11;--panel:rgba(255,255,255,.06);--line:rgba(255,255,255,.12);--text:#f8fafc;--muted:#cfd7e6;--accent:#7c3aed;--accent2:#22d3ee;--accent3:#f59e0b}}
 *{{box-sizing:border-box}}
-body{{margin:0;font-family:Inter,Arial,sans-serif;background:linear-gradient(180deg,#0f1115,#151922 55%,#111318);color:var(--text)}}
+body{{margin:0;font-family:Inter,Arial,sans-serif;background:radial-gradient(circle at top,rgba(124,58,237,.22),transparent 22%),radial-gradient(circle at 80% 10%,rgba(34,211,238,.18),transparent 20%),linear-gradient(180deg,#090b11,#0f172a 52%,#10131b);color:var(--text)}}
 a{{color:inherit}}
 .wrap{{max-width:1180px;margin:0 auto;padding:28px}}
-.hero{{display:grid;grid-template-columns:1.05fr .95fr;gap:32px;align-items:center;min-height:100vh}}
-.badge{{display:inline-flex;align-items:center;gap:10px;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:#fff}}
+.hero{{display:grid;grid-template-columns:1.02fr .98fr;gap:34px;align-items:center;min-height:100vh;padding-top:34px}}
+.badge{{display:inline-flex;align-items:center;gap:10px;padding:10px 16px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid var(--line);color:#fff;box-shadow:0 16px 38px rgba(0,0,0,.18)}}
 h1{{font-size:clamp(42px,6vw,78px);line-height:.95;margin:20px 0 16px;letter-spacing:-.04em;max-width:720px}}
 .lead{{font-size:clamp(18px,2vw,24px);line-height:1.6;color:var(--muted);max-width:720px}}
 .cta-row{{display:flex;gap:14px;flex-wrap:wrap;margin-top:28px}}
 .btn{{display:inline-flex;align-items:center;justify-content:center;padding:16px 22px;border-radius:16px;text-decoration:none;font-weight:800}}
-.btn.primary{{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#141414}}
+.btn.primary{{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#081018;box-shadow:0 18px 40px rgba(34,211,238,.2)}}
 .btn.secondary{{border:1px solid var(--line);background:rgba(255,255,255,.04);color:#fff}}
-.hero-visual{{min-height:540px;border-radius:28px;overflow:hidden;background:radial-gradient(circle at 40% 30%,rgba(212,162,76,.35),transparent 36%),linear-gradient(135deg,#1c1208,#6b4a18);box-shadow:0 30px 80px rgba(0,0,0,.28)}}
+.hero-visual{{min-height:560px;border-radius:32px;overflow:hidden;background:linear-gradient(135deg,#1d1b32,#15364b);box-shadow:0 34px 100px rgba(0,0,0,.34);border:1px solid rgba(255,255,255,.12)}}
 .hero-visual img{{display:block;width:100%;height:100%;object-fit:cover}}
 section{{padding:40px 0}}
 .grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}}
-.card,.mini-card,.gallery-card{{padding:22px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.04)}}
+.card,.mini-card,.gallery-card{{padding:22px;border-radius:24px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.04));backdrop-filter:blur(8px);box-shadow:0 20px 50px rgba(0,0,0,.18)}}
 .list{{margin:0;padding-left:20px;color:var(--muted);line-height:1.7}}
 .mini-card img,.gallery-card img{{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:16px;margin-bottom:14px}}
 .gallery-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}}
@@ -753,11 +794,12 @@ section{{padding:40px 0}}
   <div class="hero-visual">{hero_image_markup}</div>
 </section>
 <section id="services">
+  <div class="card" style="margin-bottom:18px;background:linear-gradient(135deg,rgba(124,58,237,.18),rgba(34,211,238,.10));"><strong>Premium demo preview.</strong> This page is generated for review, contains only the homepage concept, and preserves core business facts from the original source.</div>
   <div class="kicker">{_escape(pack["services"])}</div>
   <div class="grid">{service_markup}</div>
 </section>
 <section>
-  <div class="kicker">Gallery</div>
+  <div class="kicker">Visual preview</div>
   <div class="gallery-grid">{gallery_markup}</div>
 </section>
 <section>
@@ -847,32 +889,36 @@ def generate_demo_page(
         profile.get("forbidden_keywords"),
     )
 
+    client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
     if not settings.openai_api_key:
-        return _source_guided_fallback(source, business_description, profile)
+        return _source_guided_fallback(source, business_description, profile, client=None)
 
     system_prompt = _build_system_prompt(profile["style"])
     user_prompt = _build_user_prompt(request_type, source, business_description, profile)
     logger.info("[AI] final generation prompt=%s", user_prompt)
-    client = OpenAI(api_key=settings.openai_api_key)
 
     candidates: list[dict] = []
-    for _ in range(2):
-        response = client.chat.completions.create(
-            model=settings.openai_model,
-            temperature=0.7,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        content = response.choices[0].message.content or ""
-        data = _extract_candidate_content(content)
-        if data and data.get("html"):
-            candidates.append(data)
+    try:
+        for _ in range(2):
+            response = client.chat.completions.create(
+                model=settings.openai_model,
+                temperature=0.7,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            content = response.choices[0].message.content or ""
+            data = _extract_candidate_content(content)
+            if data and data.get("html"):
+                candidates.append(data)
+    except Exception as exc:
+        logger.warning("[AI] chat generation failed, using source-guided fallback: %s", exc)
+        return _source_guided_fallback(source, business_description, profile, client=client)
 
     if not candidates:
         logger.info("[AI] generation fallback used")
-        return _source_guided_fallback(source, business_description, profile)
+        return _source_guided_fallback(source, business_description, profile, client=client)
 
     scored_candidates = [(item, _score_candidate(item, source=source, profile=profile)) for item in candidates]
     for idx, (_, candidate_score) in enumerate(scored_candidates, start=1):
@@ -881,15 +927,15 @@ def generate_demo_page(
     best, best_score = max(scored_candidates, key=lambda pair: pair[1])
     if best_score < 6:
         logger.info("[AI] best candidate score too low (%s), using source-guided fallback", best_score)
-        return _source_guided_fallback(source, business_description, profile)
+        return _source_guided_fallback(source, business_description, profile, client=client)
 
     best_html = str(best.get("html") or "")
     if not _page_has_theme_images(best_html, profile, source=source) or _count_images(best_html) < 3:
         logger.info("[AI] candidate missing required theme-matched images, using source-guided fallback")
-        return _source_guided_fallback(source, business_description, profile)
+        return _source_guided_fallback(source, business_description, profile, client=client)
 
     logger.info("[AI] generation complete score=%s images=%s", best_score, _count_images(best_html))
     return {
         "title": str(best.get("title") or "Siteformo Demo"),
-        "html": best_html or _source_guided_fallback(source, business_description, profile)["html"],
+        "html": best_html or _source_guided_fallback(source, business_description, profile, client=client)["html"],
     }

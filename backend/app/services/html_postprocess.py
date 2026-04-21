@@ -17,16 +17,17 @@ PROTECTION_BLOCK = '''
 <style>
 html{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 img,video{pointer-events:none}
+iframe[src*='challenges.cloudflare.com'], .cf-turnstile, [name='cf-turnstile-response']{pointer-events:auto !important}
 @media print { html,body{display:none !important} }
 body::before{
-  content:"SITEFORMO DEMO • PRIVATE PREVIEW • SITEFORMO DEMO • PRIVATE PREVIEW • SITEFORMO DEMO";
+  content:"SITEFORMO DEMO • PRIVATE PREVIEW • ORDER ON SITEFORMO • NO SCREENSHOTS • SITEFORMO DEMO";
   position:fixed;inset:0;z-index:2147483645;pointer-events:none;
   display:flex;align-items:center;justify-content:center;
   font:700 28px/1.2 Inter,Arial,sans-serif;letter-spacing:.18em;
-  color:rgba(255,255,255,.045);transform:rotate(-24deg);white-space:nowrap;
+  color:rgba(255,255,255,.085);transform:rotate(-24deg);white-space:nowrap;text-shadow:0 2px 18px rgba(0,0,0,.22);
 }
 body::after{
-  content:"Siteformo Demo";
+  content:"Siteformo Demo • Private Preview";
   position:fixed;right:16px;bottom:12px;z-index:2147483647;
   font:600 12px/1.2 Inter,Arial,sans-serif;color:rgba(255,255,255,.58);
   background:rgba(0,0,0,.28);padding:8px 10px;border:1px solid rgba(255,255,255,.12);

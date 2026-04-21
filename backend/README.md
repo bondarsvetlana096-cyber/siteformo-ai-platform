@@ -27,7 +27,7 @@ Backend for the updated Siteformo funnel:
 
 ## Important changes
 - No mandatory pre-confirmation step for Telegram before generation.
-- Additional messaging channels are intentionally disabled until their integrations are implemented.
+- Supported contact channels in this build: email, Telegram, WhatsApp, and Facebook Messenger. Additional channels can be added later.
 - No automatic "demo ready" email at generation time.
 - Reminder logic now depends on unfinished actions on the main site.
 - API and worker must use the same storage backend.
@@ -37,6 +37,8 @@ Backend for the updated Siteformo funnel:
 ## Main API
 ### Create request
 `POST /api/requests`
+
+Supported `contact_type` values in this build: `email`, `telegram`, `whatsapp`, `messenger`.
 
 Compatible payloads:
 ```json
@@ -129,3 +131,12 @@ Run:
 1. `supabase/setup_queues.sql`
 2. `supabase/storage_and_cleanup.sql`
 3. `alembic upgrade head`
+
+
+## Channel env
+- `TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_CONTACT_LABEL`
+- `WHATSAPP_CONTACT_NUMBER`
+- `WHATSAPP_CONTACT_LABEL`
+- `MESSENGER_CONTACT_URL`
+- `MESSENGER_CONTACT_LABEL`

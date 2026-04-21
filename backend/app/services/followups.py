@@ -63,4 +63,8 @@ def build_outbound_followup_text(req: Request, reason: str) -> str:
     channel_hint = ""
     if req.contact_type == ContactType.TELEGRAM:
         channel_hint = " Reply in Telegram if you would like help finishing your request."
+    elif req.contact_type == ContactType.WHATSAPP:
+        channel_hint = " Reply in WhatsApp if you would like help finishing your request."
+    elif req.contact_type == ContactType.MESSENGER:
+        channel_hint = " Reply in Messenger if you would like help finishing your request."
     return f"{headline}. {text} Link: {cta_url}.{channel_hint}"
