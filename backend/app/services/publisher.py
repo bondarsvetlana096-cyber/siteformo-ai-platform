@@ -1,0 +1,526 @@
+from __future__ import annotations
+
+import re
+import secrets
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
+
+from app.core.config import settings
+from app.core.security import sign_asset
+from app.services.storage import get_storage
+from app.services.html_postprocess import rewrite_asset_urls
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def publish_demo(request_id: str, html: str) -> tuple[str, str, datetime, datetime, str]:
+    now = _utcnow()
+    html = rewrite_asset_urls(html)
+
+    expires_at = now + timedelta(minutes=settings.demo_ttl_minutes)
+    retention_expires_at = now + timedelta(hours=settings.demo_retention_hours)
+
+    token = secrets.token_urlsafe(16)
+    master_storage_key = f"demos/{request_id}/master/index.html"
+
+    get_storage().put_text(
+        master_storage_key,
+        html,
+        content_type="text/html; charset=utf-8",
+    )
+
+    public_base_url = str(settings.public_base_url).rstrip("/")
+    demo_url = f"{public_base_url}/demo/{token}"
+
+    return token, master_storage_key, expires_at, retention_expires_at, demo_url
+
+
+def build_demo_delivery_html(
+    request_id: str,
+    demo_token: str,
+    html: str,
+    continue_url: str,
+    free_limit_text: str = "You can generate 2 free demos before placing an order.",
+) -> str:
+    base_url = str(settings.public_base_url).rstrip("/")
+
+    def asset_url(storage_key: str) -> str:
+        token = sign_asset(storage_key)
+        return f"{base_url}/demo-assets/{quote(token, safe='')}"
+
+    rewritten_html = html
+
+    rewritten_html = rewritten_html.replace('src="/', f'src="{base_url}/')
+    rewritten_html = rewritten_html.replace("src='/", f"src='{base_url}/")
+    rewritten_html = rewritten_html.replace('href="/', f'href="{base_url}/')
+    rewritten_html = rewritten_html.replace("href='/", f"href='{base_url}/")
+
+    # Optional signed asset rewrite support if later you emit internal storage keys.
+    rewritten_html = re.sub(
+        r'src="(demos/[^"]+|masters/[^"]+)"',
+        lambda m: f'src="{asset_url(m.group(1))}"',
+        rewritten_html,
+        flags=re.I,
+    )
+    rewritten_html = re.sub(
+        r"src='(demos/[^']+|masters/[^']+)'",
+        lambda m: f"src='{asset_url(m.group(1))}'",
+        rewritten_html,
+        flags=re.I,
+    )
+
+    overlay_block = f"""
+<div id="siteformo-demo-topnote" aria-live="polite">
+  <div class="sf-note-badge">
+    <span class="sf-note-dot"></span>
+    <span>{free_limit_text}</span>
+  </div>
+</div>
+
+<div id="siteformo-demo-watermark-rail" aria-hidden="true">
+  <span>SITEFORMO DEMO</span><span>PRIVATE PREVIEW</span><span>NO SCREENSHOTS</span><span>ORDER ON SITEFORMO</span>
+</div>
+
+<div id="siteformo-demo-gate" role="dialog" aria-modal="true" aria-labelledby="sfGateTitle">
+  <div class="sf-gate-card">
+    <div class="sf-gate-kicker">Protected access</div>
+    <h2 id="sfGateTitle">This demo is intentionally restricted</h2>
+    <p class="sf-gate-copy">To continue, complete every step below. The page stays watermarked and protected during viewing.</p>
+    <ol class="sf-gate-steps">
+      <li>Tick the confirmation checkbox.</li>
+      <li>Type <strong>VIEW DEMO</strong> exactly.</li>
+      <li>Press and hold the unlock button for 4 seconds.</li>
+    </ol>
+    <label class="sf-gate-check"><input id="sfGateCheck" type="checkbox" /> I understand this preview is temporary, watermarked, and protected.</label>
+    <label class="sf-gate-input-wrap">
+      <span>Confirmation phrase</span>
+      <input id="sfGatePhrase" class="sf-gate-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Type VIEW DEMO" />
+    </label>
+    <button id="sfGateButton" class="sf-gate-button" type="button">Press and hold to unlock</button>
+    <div id="sfGateStatus" class="sf-gate-status" aria-live="polite">Waiting for confirmation steps.</div>
+  </div>
+</div>
+
+<div id="siteformo-demo-cta">
+  <div class="sf-cta-card">
+    <div class="sf-cta-text">
+      <div class="sf-cta-label">Siteformo</div>
+      <div class="sf-cta-title">Ready to order your website?</div>
+      <div class="sf-cta-subtitle">Continue on the main Siteformo website.</div>
+    </div>
+    <a
+      href="{continue_url}"
+      target="_blank"
+      rel="noopener noreferrer"
+      onclick="return window.siteformoTrackCta ? window.siteformoTrackCta(event) : true;"
+      class="sf-cta-button"
+    >
+      Order on Siteformo
+    </a>
+  </div>
+</div>
+
+<script>
+(function() {{
+  var endpoint = '/api/requests/{request_id}/events';
+
+  window.siteformoTrackCta = function(event) {{
+    var destination = {continue_url!r};
+    var payload = JSON.stringify({{
+      event_type: 'demo_cta_clicked',
+      metadata: {{
+        source: 'demo_overlay',
+        demo_token: '{demo_token}',
+        destination: destination
+      }}
+    }});
+
+    try {{
+      if (navigator.sendBeacon) {{
+        navigator.sendBeacon(endpoint, new Blob([payload], {{ type: 'application/json' }}));
+      }} else {{
+        fetch(endpoint, {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: payload,
+          keepalive: true
+        }}).catch(function(){{}});
+      }}
+    }} catch (e) {{}}
+
+    return true;
+  }};
+
+  var gate = document.getElementById('siteformo-demo-gate');
+  var gateCheck = document.getElementById('sfGateCheck');
+  var gatePhrase = document.getElementById('sfGatePhrase');
+  var gateButton = document.getElementById('sfGateButton');
+  var gateStatus = document.getElementById('sfGateStatus');
+  var holdTimer = null;
+  var holdStart = 0;
+  var holdDuration = 4000;
+
+  function gateValid() {{
+    return !!(gateCheck && gateCheck.checked && gatePhrase && gatePhrase.value.trim().toUpperCase() === 'VIEW DEMO');
+  }}
+
+  function gateMessage(text) {{
+    if (gateStatus) gateStatus.textContent = text;
+  }}
+
+  function releaseGate() {{
+    if (!gate) return;
+    document.documentElement.classList.add('sf-demo-gate-open');
+    gate.setAttribute('aria-hidden', 'true');
+    gate.style.opacity = '0';
+    gate.style.pointerEvents = 'none';
+    setTimeout(function() {{ gate.remove(); }}, 500);
+  }}
+
+  function clearHold() {{
+    if (holdTimer) {{ clearTimeout(holdTimer); holdTimer = null; }}
+    holdStart = 0;
+    if (gateButton) gateButton.classList.remove('is-holding');
+  }}
+
+  function beginHold() {{
+    if (!gateValid()) {{
+      gateMessage('Complete the checkbox and exact phrase first.');
+      return;
+    }}
+    clearHold();
+    holdStart = Date.now();
+    if (gateButton) gateButton.classList.add('is-holding');
+    gateMessage('Keep holding… 4 seconds required.');
+    holdTimer = setTimeout(function() {{
+      releaseGate();
+      gateMessage('Unlocked.');
+      clearHold();
+    }}, holdDuration);
+  }}
+
+  if (gateButton) {{
+    ['mousedown','touchstart','pointerdown'].forEach(function(name) {{
+      gateButton.addEventListener(name, function(ev) {{
+        ev.preventDefault();
+        beginHold();
+      }}, {{passive:false}});
+    }});
+    ['mouseup','mouseleave','touchend','touchcancel','pointerup','pointercancel'].forEach(function(name) {{
+      gateButton.addEventListener(name, function() {{
+        if (Date.now() - holdStart < holdDuration) {{
+          gateMessage('Hold interrupted. Start again and keep pressing for 4 seconds.');
+        }}
+        clearHold();
+      }});
+    }});
+  }}
+
+  if (gateCheck) gateCheck.addEventListener('change', function() {{
+    gateMessage(gateValid() ? 'Phrase accepted. Hold the button for 4 seconds.' : 'Waiting for all confirmation steps.');
+  }});
+  if (gatePhrase) gatePhrase.addEventListener('input', function() {{
+    gateMessage(gateValid() ? 'Phrase accepted. Hold the button for 4 seconds.' : 'Waiting for exact phrase VIEW DEMO.');
+  }});
+
+  document.addEventListener('visibilitychange', function() {{
+    if (document.hidden) document.documentElement.classList.remove('sf-demo-gate-open');
+  }});
+}})();
+</script>
+"""
+
+    overlay_styles = """
+<style id="siteformo-demo-overlay-styles">
+  html:not(.sf-demo-gate-open) body > *:not(#siteformo-demo-gate) {
+    filter: blur(14px) saturate(.72) !important;
+    pointer-events: none !important;
+    user-select: none !important;
+  }
+
+  #siteformo-demo-watermark-rail {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 2147483644 !important;
+    pointer-events: none !important;
+    display: grid !important;
+    grid-template-rows: repeat(4, 1fr) !important;
+    opacity: 1 !important;
+  }
+
+  #siteformo-demo-watermark-rail span {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font: 900 clamp(20px, 4vw, 44px)/1 Inter, Arial, sans-serif !important;
+    letter-spacing: .28em !important;
+    text-transform: uppercase !important;
+    color: rgba(255,255,255,.075) !important;
+    transform: rotate(-18deg) scale(1.08) !important;
+    white-space: nowrap !important;
+  }
+
+  #siteformo-demo-gate {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 2147483647 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 22px !important;
+    background: rgba(2, 6, 23, 0.78) !important;
+    backdrop-filter: blur(18px) !important;
+  }
+
+  .sf-gate-card {
+    width: min(560px, calc(100vw - 24px)) !important;
+    padding: 22px !important;
+    border-radius: 24px !important;
+    background: linear-gradient(180deg, rgba(15,23,42,.96), rgba(2,6,23,.92)) !important;
+    border: 1px solid rgba(255,255,255,.14) !important;
+    box-shadow: 0 30px 100px rgba(0,0,0,.42) !important;
+    color: #fff !important;
+    font-family: Inter, Arial, sans-serif !important;
+  }
+  .sf-gate-kicker { font-size: 12px !important; text-transform: uppercase !important; letter-spacing: .14em !important; color: rgba(255,255,255,.68) !important; margin-bottom: 8px !important; font-weight: 800 !important; }
+  .sf-gate-card h2 { margin: 0 0 12px !important; font-size: clamp(26px, 4vw, 38px) !important; line-height: 1.05 !important; }
+  .sf-gate-copy { margin: 0 0 14px !important; color: rgba(255,255,255,.82) !important; line-height: 1.6 !important; }
+  .sf-gate-steps { margin: 0 0 18px 18px !important; color: rgba(255,255,255,.82) !important; line-height: 1.75 !important; }
+  .sf-gate-check { display: block !important; margin: 0 0 16px !important; font-size: 14px !important; line-height: 1.5 !important; color: rgba(255,255,255,.9) !important; }
+  .sf-gate-check input { margin-right: 10px !important; }
+  .sf-gate-input-wrap { display: block !important; margin: 0 0 16px !important; }
+  .sf-gate-input-wrap span { display: block !important; margin-bottom: 8px !important; font-size: 13px !important; color: rgba(255,255,255,.72) !important; font-weight: 700 !important; text-transform: uppercase !important; letter-spacing: .08em !important; }
+  .sf-gate-input { width: 100% !important; min-height: 50px !important; border-radius: 16px !important; border: 1px solid rgba(255,255,255,.16) !important; background: rgba(255,255,255,.06) !important; color: #fff !important; padding: 0 16px !important; font: 700 16px/1 Inter, Arial, sans-serif !important; }
+  .sf-gate-button { width: 100% !important; min-height: 54px !important; border: 0 !important; border-radius: 16px !important; background: linear-gradient(90deg,#7c3aed,#06b6d4) !important; color: #fff !important; font: 900 15px/1 Inter, Arial, sans-serif !important; letter-spacing: .04em !important; cursor: pointer !important; box-shadow: 0 18px 46px rgba(12,74,110,.34) !important; }
+  .sf-gate-button.is-holding { transform: scale(.985) !important; filter: brightness(1.05) !important; }
+  .sf-gate-status { margin-top: 12px !important; min-height: 22px !important; font-size: 13px !important; color: rgba(255,255,255,.75) !important; }
+  #siteformo-demo-topnote {
+    position: fixed !important;
+    top: 14px !important;
+    left: 14px !important;
+    z-index: 2147483646 !important;
+    max-width: min(560px, calc(100vw - 28px)) !important;
+    pointer-events: none !important;
+  }
+
+  .sf-note-badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 10px 14px !important;
+    border-radius: 999px !important;
+    background: rgba(15, 23, 42, 0.88) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,0.16) !important;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.22) !important;
+    backdrop-filter: blur(10px) !important;
+    font: 600 13px/1.35 Inter, Arial, sans-serif !important;
+  }
+
+  .sf-note-dot {
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 999px !important;
+    background: #22c55e !important;
+    flex: 0 0 auto !important;
+  }
+
+  html, body {
+    max-width: 100% !important;
+    overflow-x: clip !important;
+  }
+
+  body {
+    padding-bottom: max(120px, env(safe-area-inset-bottom)) !important;
+  }
+
+  img, video, iframe {
+    max-width: 100% !important;
+  }
+
+  img {
+    image-rendering: auto !important;
+    object-fit: cover;
+  }
+
+  a[class*="btn"],
+  a[class*="button"],
+  a[class*="cta"],
+  button,
+  input[type="button"],
+  input[type="submit"] {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 46px;
+    max-width: 100%;
+    padding: 14px 20px;
+    border-radius: 16px;
+    text-decoration: none;
+    white-space: normal;
+    text-align: center;
+    cursor: pointer;
+    transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
+  }
+
+  a[class*="btn"]:hover,
+  a[class*="button"]:hover,
+  a[class*="cta"]:hover,
+  button:hover,
+  input[type="button"]:hover,
+  input[type="submit"]:hover {
+    transform: translateY(-1px);
+  }
+
+  a[class*="btn"]:focus-visible,
+  a[class*="button"]:focus-visible,
+  a[class*="cta"]:focus-visible,
+  button:focus-visible,
+  input[type="button"]:focus-visible,
+  input[type="submit"]:focus-visible {
+    outline: 2px solid rgba(255,255,255,.78);
+    outline-offset: 2px;
+  }
+
+  #siteformo-demo-cta {
+    position: fixed !important;
+    right: 18px !important;
+    bottom: 18px !important;
+    z-index: 2147483647 !important;
+    width: min(420px, calc(100vw - 24px)) !important;
+  }
+
+  .sf-cta-card {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 14px !important;
+    padding: 16px !important;
+    border-radius: 18px !important;
+    background: rgba(15, 23, 42, 0.92) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.28) !important;
+    backdrop-filter: blur(12px) !important;
+    font-family: Inter, Arial, sans-serif !important;
+  }
+
+  .sf-cta-label {
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: .08em !important;
+    color: rgba(255,255,255,.72) !important;
+    margin-bottom: 4px !important;
+  }
+
+  .sf-cta-title {
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    line-height: 1.2 !important;
+    color: #ffffff !important;
+  }
+
+  .sf-cta-subtitle {
+    margin-top: 4px !important;
+    font-size: 14px !important;
+    line-height: 1.45 !important;
+    color: rgba(255,255,255,.78) !important;
+  }
+
+  .sf-cta-button {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 48px !important;
+    padding: 0 18px !important;
+    border-radius: 14px !important;
+    text-decoration: none !important;
+    font: 800 14px/1 Inter, Arial, sans-serif !important;
+    color: #ffffff !important;
+    background: linear-gradient(90deg, #7c3aed, #06b6d4) !important;
+    box-shadow: 0 12px 30px rgba(12, 74, 110, 0.30) !important;
+    border: 0 !important;
+    cursor: pointer !important;
+  }
+
+  @media (max-width: 640px) {
+    body {
+      padding-bottom: max(156px, env(safe-area-inset-bottom)) !important;
+    }
+
+    #siteformo-demo-topnote {
+      top: 10px !important;
+      left: 10px !important;
+      right: 10px !important;
+      max-width: none !important;
+    }
+
+    #siteformo-demo-cta {
+      left: 10px !important;
+      right: 10px !important;
+      bottom: 10px !important;
+      width: auto !important;
+    }
+
+    .sf-cta-card {
+      padding: 12px !important;
+      border-radius: 16px !important;
+      gap: 10px !important;
+    }
+
+    .sf-cta-title {
+      font-size: 16px !important;
+    }
+
+    .sf-cta-subtitle {
+      font-size: 13px !important;
+    }
+
+    .sf-cta-button {
+      width: 100% !important;
+      min-height: 48px !important;
+    }
+  }
+</style>
+"""
+
+    if re.search(r"</head\s*>", rewritten_html, flags=re.I):
+        rewritten_html = re.sub(
+            r"</head\s*>",
+            overlay_styles + "\n</head>",
+            rewritten_html,
+            count=1,
+            flags=re.I,
+        )
+    else:
+        rewritten_html = overlay_styles + rewritten_html
+
+    if re.search(r"</body\s*>", rewritten_html, flags=re.I):
+        rewritten_html = re.sub(
+            r"</body\s*>",
+            overlay_block + "\n</body>",
+            rewritten_html,
+            count=1,
+            flags=re.I,
+        )
+        return rewritten_html
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex" />
+  <title>Demo Preview</title>
+  {overlay_styles}
+</head>
+<body>
+{rewritten_html}
+{overlay_block}
+</body>
+</html>"""
