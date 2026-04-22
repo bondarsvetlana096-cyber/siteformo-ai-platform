@@ -1,67 +1,51 @@
 # SiteFormo AI Sales Platform
 
-Новый проект-каркас для ручной проверки перед подключением реальных сервисов, новой базы данных, нового GitHub-репозитория и реальных ботов.
+SiteFormo is a FastAPI-based sales intake backend for website leads from Telegram, WhatsApp, and web chat.
 
-## Что фиксирует этот проект
-- бизнес-логику продаж на 600 / 900 / 1500+ евро
-- роль бота как продавца и квалификатора, а не просто опросника
-- единый intake pipeline для Web / WhatsApp / Telegram
-- многоязычный опросник с поддержкой EN / DE / FR / IT / ES
-- правило повторного использования данных за последние 96 часов
-- генерацию двух разных концепций только главной страницы
-- ручное подтверждение оплаты владельцем через email
-- финальную сборку материалов для Divi 5
-- вечное хранение заказов и результатов
-- low-friction intake: клиент участвует минимально, а система сама достраивает бриф
-- систему из 1-3 референс-сайтов с автоматической интерпретацией стиля, эффектов и сложности
+## Current status
+- FastAPI app runs from `backend/app/main.py`
+- Telegram webhook route is active at `/channels/telegram/webhook`
+- Correct channel router is connected in `main.py`
+- Database tables are created automatically on startup
+- Legacy Telegram webhook router has been removed
+- `.env` is excluded and `.env.example` is included
+- Bot flow is now English-first
+- AI concept generation supports a real OpenAI call when `OPENAI_API_KEY` is configured
 
-## Главная бизнес-идея
-- **600 евро** — простой лендинг на 1-3 страницы для локального бизнеса
-- **900 евро** — основной целевой продукт; бот должен вести клиента именно сюда, если сайт требует более продуманной структуры
-- **1500+ евро** — сложные проекты: e-commerce, корзина, каталог, бронирования, сложные интеграции
+## Run locally
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-## Важный UX-принцип
-Опросник не должен ощущаться как длинная анкета на час.
-Клиент должен:
-- быстро выбрать язык;
-- кратко описать бизнес;
-- при желании вставить 1-3 сайта, которые ему нравятся;
-- минимально комментировать, что понравилось;
-- получить мягкое объяснение цены без отпугивания.
+## Railway start command
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
 
-Система должна сама:
-- анализировать сигналы из референсов;
-- предполагать уровень визуальной сложности;
-- понимать, что эффекты, переходы, popups и premium-подача увеличивают трудоемкость;
-- при дорогом референсе не пугать ценой, а объяснять, что это дорогой уровень и при желании предлагать более бюджетный вариант.
+## Required environment variables
+See `backend/.env.example`.
 
-## Что лежит внутри
-- `docs/MASTER_LOGIC_RU.md` — единый основной документ со всей зафиксированной логикой
-- `docs/QUESTIONNAIRE_RU.md` — компактная русскоязычная master-версия анкеты для клиента
-- `docs/QUESTIONNAIRE_MULTILINGUAL.md` — многоязычный опросник (EN / DE / FR / IT / ES)
-- `docs/PRICING_RULES_RU.md` — правила расчёта цены и мягкой подачи стоимости
-- `docs/BOT_DIALOGUE_RU.md` — сценарий общения бота
-- `docs/MANUAL_TEST_PLAN_RU.md` — ручная проверка проекта до подключения реальных сервисов
-- `backend/` — backend scaffold на FastAPI
-- `scripts/bootstrap_local.sh` — локальный запуск
+Main values:
+- `TELEGRAM_BOT_TOKEN`
+- `OWNER_EMAIL`
+- `OPENAI_API_KEY`
+- `DATABASE_URL` (optional; SQLite is used by default)
 
-## Текущий статус
-Это **подготовленный к ручной проверке scaffold**.
+## Main flow
+```text
+User
+→ Telegram / WhatsApp / Web chat
+→ FastAPI webhook
+→ ChatbotService
+→ IntakeService
+→ GenerationService
+→ Pricing / status
+→ database
+```
 
-В нём специально:
-- нет подключения к реальному WhatsApp API
-- нет подключения к реальному Telegram API
-- нет подключения к реальному email-провайдеру
-- нет подключения к боевой БД
-- нет подключения к реальному OpenAI workflow
-- нет live-fetch анализа сайтов по URL
-
-Но уже заложены:
-- поля и документы для 1-3 референсов;
-- сервис-заглушка для автоматической интерпретации сигналов по референсам;
-- мягкая pricing-коммуникация;
-- логика budget fallback, если клиенту нравится дорогой пример, но нужен более доступный вариант.
-
-
-## Дополнение по UX анкеты
-Опросник построен по принципу either-or: клиент либо даёт 1–3 референс-сайта, либо коротко описывает желаемый сайт. Это сокращает трение и ускоряет вход в заказ.
+## Next recommended step
+Move from SQLite/local persistence to PostgreSQL or Supabase for production and store all sessions, requests, and outputs persistently.

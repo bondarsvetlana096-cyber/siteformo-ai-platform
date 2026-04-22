@@ -1,17 +1,22 @@
 from fastapi import FastAPI
 
-from app.services.telegram_service import router as telegram_router
+from app.api.channel_routes import router as channel_router
+from app.api.routes import router as api_router
+from app.db.session import Base, engine
 
-app = FastAPI(title="SiteFormo AI Sales Platform")
+Base.metadata.create_all(bind=engine)
 
-app.include_router(telegram_router, prefix="/channels/telegram", tags=["telegram"])
+app = FastAPI(title='SiteFormo AI Sales Platform')
+
+app.include_router(channel_router)
+app.include_router(api_router)
 
 
-@app.get("/")
+@app.get('/')
 async def root():
-    return {"ok": True}
+    return {'ok': True}
 
 
-@app.get("/health")
+@app.get('/health')
 async def health():
-    return {"status": "ok"}
+    return {'status': 'ok'}

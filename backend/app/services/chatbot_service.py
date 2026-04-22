@@ -58,7 +58,7 @@ class ChatbotService:
     def _normalize_language(text: str) -> str | None:
         value = text.strip().lower()
         mapping = {
-            'ru': 'ru', 'рус': 'ru', 'русский': 'ru', 'russian': 'ru',
+            'ru': 'en', 'рус': 'en', 'русский': 'en', 'russian': 'en',
             'en': 'en', 'english': 'en',
             'de': 'de', 'german': 'de',
             'fr': 'fr', 'french': 'fr',
@@ -70,52 +70,57 @@ class ChatbotService:
     @staticmethod
     def _initial_prompt() -> str:
         return (
-            'Привет! Я помогу быстро собрать заявку на сайт.\n\n'
-            'Сначала выбери язык: RU / EN / DE / FR / IT / ES'
+            'Hi! I will help you quickly create a website request.\n\n'
+            'Choose a language: EN / DE / FR / IT / ES\n'
+            'Note: the current bot flow replies in English.'
         )
 
     @staticmethod
     def _mode_prompt(lang: str) -> str:
         return (
-            'Отлично. Выбери удобный формат:\n'
-            '1) пришли 1-3 сайта, которые нравятся\n'
-            '2) просто опиши, какой сайт хочешь\n\n'
-            'Ответь: 1 или 2'
+            'Great. Choose the easiest format:\n'
+            '1) send 1-3 websites you like\n'
+            '2) describe the site you want\n\n'
+            'Reply with: 1 or 2'
         )
 
     @staticmethod
     def _business_prompt() -> str:
-        return 'Как называется бизнес или проект?' 
+        return 'What is the name of your business or project?'
 
     @staticmethod
     def _site_type_prompt() -> str:
-        return 'Какой сайт нужен? Например: landing, business site, portfolio, ecommerce.'
+        return 'What kind of website do you need? Example: landing page, business site, portfolio, ecommerce.'
 
     @staticmethod
     def _reference_or_description_prompt(mode: str) -> str:
         if mode == 'reference_sites':
-            return 'Пришли 1-3 ссылки на сайты, которые тебе нравятся. Можно в одном сообщении.'
-        return 'Коротко опиши, какой сайт ты хочешь. Например: современный, дорогой, минималистичный, с акцентом на заявки.'
+            return 'Send 1-3 website links you like. You can paste them in one message.'
+        return 'Briefly describe the website you want. Example: modern, premium, minimalist, focused on leads.'
 
     @staticmethod
     def _features_prompt() -> str:
-        return 'Нужны ли специальные функции? Напиши коротко, например: booking, catalog, cart, popup, animations. Если ничего особенного нет — напиши: no.'
+        return 'Do you need any special features? Example: booking, catalog, cart, popup, animations. If not, reply: no.'
 
     @staticmethod
     def _contact_prompt() -> str:
-        return 'Оставь email или телефон, чтобы сохранить заявку и потом вернуться к ней.'
+        return 'Leave your email or phone number so I can save your request and you can return to it later.'
 
     @staticmethod
     def _completion_text(order_id: str, price: int, tier: str, reasoning: str, status: str, bypassed: bool) -> str:
-        status_line = 'Оплата не требуется: для этого email заявка автоматически переведена дальше.' if bypassed else ('Статус: подтверждение оплаты ожидается.' if status != 'approved' else 'Статус: заявка уже одобрена.')
+        status_line = (
+            'Payment is not required for this email. The request has been moved forward automatically.'
+            if bypassed
+            else ('Status: payment approval is pending.' if status != 'approved' else 'Status: the request is already approved.')
+        )
         return (
-            f'Готово. Заявка создана.\n\n'
+            f'Done. Your request has been created.\n\n'
             f'Order ID: {order_id}\n'
-            f'Ориентировочный уровень: {tier}\n'
-            f'Ориентировочная стоимость: {price}€\n'
-            f'Комментарий: {reasoning}\n'
+            f'Recommended tier: {tier}\n'
+            f'Estimated price: {price} EUR\n'
+            f'Pricing note: {reasoning}\n'
             f'{status_line}\n\n'
-            'Дальше можно править именно опросник и смотреть, где люди тормозят.'
+            'Next step: we can improve the intake flow and connect AI generation.'
         )
 
     @staticmethod
@@ -188,7 +193,7 @@ class ChatbotService:
         if session.state == ChatbotService.STATE_LANGUAGE:
             language = ChatbotService._normalize_language(normalized)
             if not language:
-                return ChatbotService._reply(db, session, 'Напиши один из вариантов: RU / EN / DE / FR / IT / ES')
+                return ChatbotService._reply(db, session, 'Please reply with one of these options: EN / DE / FR / IT / ES')
             data['preferred_language'] = language
             session.collected_data = data
             session.state = ChatbotService.STATE_MODE
@@ -197,7 +202,7 @@ class ChatbotService:
 
         if session.state == ChatbotService.STATE_MODE:
             if normalized not in {'1', '2'}:
-                return ChatbotService._reply(db, session, 'Ответь 1 или 2.')
+                return ChatbotService._reply(db, session, 'Please reply with 1 or 2.')
             data['intake_mode'] = 'reference_sites' if normalized == '1' else 'describe'
             session.collected_data = data
             session.state = ChatbotService.STATE_BUSINESS
@@ -222,7 +227,7 @@ class ChatbotService:
             if data.get('intake_mode') == 'reference_sites':
                 urls = ChatbotService._extract_urls(normalized)
                 if not urls:
-                    return ChatbotService._reply(db, session, 'Нужна хотя бы одна ссылка вида https://...')
+                    return ChatbotService._reply(db, session, 'Please send at least one link like https://example.com')
                 data['reference_sites'] = urls
             else:
                 data['desired_site_description'] = normalized
@@ -260,10 +265,10 @@ class ChatbotService:
             db.commit()
             fallback = ChatbotService._completion_text(order.id, order.estimated_price_eur, order.recommended_tier, order.pricing_reasoning or '', order.status, bypassed)
             polished = OpenAIService.refine_reply(
-                system_prompt='You rewrite chatbot confirmations for a website-sales intake flow. Keep it short, warm, and clear. Do not invent facts. Preserve order id, price, tier, reasoning, and status. Output in Russian.',
+                system_prompt='You rewrite chatbot confirmations for a website sales intake flow. Keep it short, warm, and clear. Do not invent facts. Preserve order id, price, tier, reasoning, and status. Output in English only.',
                 user_text=fallback,
                 fallback_text=fallback,
             )
             return ChatbotService._reply(db, session, polished)
 
-        return ChatbotService._reply(db, session, 'Заявка уже создана. Напиши /restart чтобы пройти опрос ещё раз.')
+        return ChatbotService._reply(db, session, 'A request has already been created. Send /restart to start a new one.')
