@@ -1,155 +1,194 @@
-from __future__ import annotations
+import os
+import logging
+from typing import Any, Dict, Optional
 
-import json
-from textwrap import dedent
+from openai import OpenAI
 
-from app.services.openai_service import OpenAIService
+
+logger = logging.getLogger(__name__)
 
 
 class GenerationService:
-    @staticmethod
-    def build_brief_context(order) -> str:
-        answers = order.brief_answers or {}
-        lines = [f'- {k}: {v}' for k, v in answers.items()]
-        if getattr(order, 'intake_mode', None):
-            lines.append(f'- intake_mode: {order.intake_mode}')
-        if getattr(order, 'business_name', None):
-            lines.append(f'- business_name: {order.business_name}')
-        if getattr(order, 'site_type', None):
-            lines.append(f'- site_type: {order.site_type}')
-        if getattr(order, 'desired_site_description', None):
-            lines.append(f'- desired_site_description: {order.desired_site_description}')
-        if getattr(order, 'reference_sites', None):
-            lines.append(f'- reference_sites: {order.reference_sites}')
-        if getattr(order, 'reference_analysis_summary', None):
-            lines.append(f'- reference_analysis_summary: {order.reference_analysis_summary}')
-        if getattr(order, 'reference_site_url', None):
-            lines.append(f'- reference_site_url: {order.reference_site_url}')
-        if getattr(order, 'reference_site_notes', None):
-            lines.append(f'- reference_site_notes: {order.reference_site_notes}')
-        return '\n'.join(lines)
+    """
+    Generates a website concept for Telegram users.
 
-    @staticmethod
-    def _fallback_concepts(order, brief: str, reused_context: dict | None = None) -> tuple[dict, dict]:
-        reused_note = f'\nReused context: {json.dumps(reused_context, ensure_ascii=False)}' if reused_context else ''
-        concept_a = {
-            'art_direction': 'bold-premium-conversion',
-            'summary': 'Bold premium direction focused on strong conversion, trust, and clear calls to action.',
-            'html': dedent(
-                f'''
-                <section class="hero hero-a">
-                  <h1>{order.business_name or 'Future website concept A'}</h1>
-                  <p>Conversion-focused design with strong positioning and a clear CTA.</p>
-                  <pre>{brief}{reused_note}</pre>
-                </section>
-                '''
-            ).strip(),
-        }
-        concept_b = {
-            'art_direction': 'clean-editorial-luxury',
-            'summary': 'Calm editorial direction with a premium visual tone and a more refined presentation.',
-            'html': dedent(
-                f'''
-                <section class="hero hero-b">
-                  <h1>{order.business_name or 'Future website concept B'}</h1>
-                  <p>Editorial premium design with elegant structure and softer persuasion.</p>
-                  <pre>{brief}{reused_note}</pre>
-                </section>
-                '''
-            ).strip(),
-        }
-        return concept_a, concept_b
+    Behavior:
+    - Uses OpenAI if OPENAI_API_KEY is present
+    - Falls back to a local template if OpenAI is not configured
+    - Returns user-friendly plain text suitable for Telegram
+    """
 
-    @staticmethod
-    def _try_ai_concepts(order, brief: str, reused_context: dict | None = None) -> tuple[dict, dict] | None:
-        if not OpenAIService.is_configured():
-            return None
+    def __init__(self) -> None:
+        self.api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        self.model = os.getenv("OPENAI_MODEL", "gpt-5").strip()
+        self.client: Optional[OpenAI] = OpenAI(api_key=self.api_key) if self.api_key else None
 
-        prompt = dedent(
-            f'''
-            Create two different homepage concepts for a website sales intake.
+    def generate_site_concept(
+        self,
+        user_input: str,
+        mode: str = "describe_site",
+        intake_data: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Main public method.
 
-            Return valid JSON only in this exact structure:
-            {{
-              "concept_a": {{"art_direction": "...", "summary": "...", "headline": "...", "subheadline": "...", "cta": "..."}},
-              "concept_b": {{"art_direction": "...", "summary": "...", "headline": "...", "subheadline": "...", "cta": "..."}}
-            }}
+        Args:
+            user_input: Raw user text or collected flow text
+            mode: Flow mode, e.g. 'describe_site' or 'send_websites'
+            intake_data: Optional structured dict with parsed fields
 
-            Rules:
-            - Output in English.
-            - Keep each summary under 30 words.
-            - Make the concepts meaningfully different.
-            - Reflect the client brief, site type, and references.
-            - Do not use markdown fences.
+        Returns:
+            Telegram-friendly generated concept text
+        """
+        normalized_input = (user_input or "").strip()
+        intake_data = intake_data or {}
 
-            Brief:
-            {brief}
+        if not normalized_input and not intake_data:
+            return (
+                "I need a bit more information before I can generate a website concept.\n\n"
+                "Please describe the business, goal, style, and what pages you need."
+            )
 
-            Reused context:
-            {json.dumps(reused_context, ensure_ascii=False) if reused_context else 'none'}
-            '''
-        ).strip()
+        if not self.client:
+            logger.warning("OPENAI_API_KEY is missing. Using fallback generation.")
+            return self._fallback_response(normalized_input, mode, intake_data)
 
-        raw = OpenAIService.refine_reply(
-            system_prompt='You are a website concept generator that returns strict JSON only.',
-            user_text=prompt,
-            fallback_text='',
-        )
-        if not raw:
-            return None
+        system_prompt = self._build_system_prompt()
+        user_prompt = self._build_user_prompt(normalized_input, mode, intake_data)
+
         try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return None
+            response = self.client.responses.create(
+                model=self.model,
+                input=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
 
-        def to_concept(item: dict, css_class: str) -> dict:
-            headline = item.get('headline') or (order.business_name or 'Website concept')
-            subheadline = item.get('subheadline') or 'Homepage concept draft'
-            cta = item.get('cta') or 'Get started'
-            return {
-                'art_direction': item.get('art_direction') or css_class,
-                'summary': item.get('summary') or subheadline,
-                'html': dedent(
-                    f'''
-                    <section class="hero {css_class}">
-                      <h1>{headline}</h1>
-                      <p>{subheadline}</p>
-                      <a href="#contact">{cta}</a>
-                    </section>
-                    '''
-                ).strip(),
-            }
+            output_text = getattr(response, "output_text", None)
+            if output_text and output_text.strip():
+                return output_text.strip()
 
-        a = data.get('concept_a')
-        b = data.get('concept_b')
-        if not isinstance(a, dict) or not isinstance(b, dict):
-            return None
-        return to_concept(a, 'hero-a'), to_concept(b, 'hero-b')
+            logger.warning("OpenAI response returned empty output_text. Using fallback.")
+            return self._fallback_response(normalized_input, mode, intake_data)
 
-    @staticmethod
-    def generate_two_concepts(order, reused_context: dict | None = None) -> tuple[dict, dict]:
-        brief = GenerationService.build_brief_context(order)
-        ai_concepts = GenerationService._try_ai_concepts(order, brief, reused_context=reused_context)
-        if ai_concepts:
-            return ai_concepts
-        return GenerationService._fallback_concepts(order, brief, reused_context=reused_context)
+        except Exception as exc:
+            logger.exception("OpenAI generation failed: %s", exc)
+            return (
+                "I couldn't generate the website concept with AI right now.\n\n"
+                "Here is a draft concept instead:\n\n"
+                f"{self._fallback_response(normalized_input, mode, intake_data)}"
+            )
 
-    @staticmethod
-    def build_final_divi_package(order, selected_html: str) -> tuple[str, str]:
-        answers = order.brief_answers or {}
-        lines = [f'- **{k}**: {v}' for k, v in answers.items()]
-        if getattr(order, 'intake_mode', None):
-            lines.append(f'- **intake_mode**: {order.intake_mode}')
-        if getattr(order, 'desired_site_description', None):
-            lines.append(f'- **desired_site_description**: {order.desired_site_description}')
-        if getattr(order, 'reference_sites', None):
-            lines.append(f'- **reference_sites**: {order.reference_sites}')
-        if getattr(order, 'reference_analysis_summary', None):
-            lines.append(f'- **reference_analysis_summary**: {order.reference_analysis_summary}')
-        if getattr(order, 'reference_site_url', None):
-            lines.append(f'- **reference_site_url**: {order.reference_site_url}')
-        if getattr(order, 'reference_site_notes', None):
-            lines.append(f'- **reference_site_notes**: {order.reference_site_notes}')
-        brief_markdown = '\n'.join(lines)
-        divi_html = f'<!-- Divi 5 compatible export -->\n{selected_html}'
-        return divi_html, brief_markdown
+    def _build_system_prompt(self) -> str:
+        return (
+            "You are a senior AI website strategist for a website sales platform.\n"
+            "Your job is to generate a concise, practical website concept in English.\n\n"
+            "Output rules:\n"
+            "- Keep the answer client-friendly and easy to read in Telegram.\n"
+            "- Be practical, not fluffy.\n"
+            "- Do not mention technical implementation details.\n"
+            "- Do not mention OpenAI, models, prompts, or internal reasoning.\n"
+            "- Focus on business value, website structure, and conversion.\n"
+            "- Keep the answer structured and compact.\n\n"
+            "Return exactly these sections:\n"
+            "1. Business Summary\n"
+            "2. Recommended Website Structure\n"
+            "3. Main Headline\n"
+            "4. CTA\n"
+            "5. Offer Direction\n"
+            "6. Next Best Step\n"
+        )
+
+    def _build_user_prompt(
+        self,
+        user_input: str,
+        mode: str,
+        intake_data: Dict[str, Any],
+    ) -> str:
+        business_type = intake_data.get("business_type", "")
+        goal = intake_data.get("goal", "")
+        style = intake_data.get("style", "")
+        pages = intake_data.get("pages", "")
+        audience = intake_data.get("audience", "")
+        notes = intake_data.get("notes", "")
+
+        return (
+            f"Flow mode: {mode}\n\n"
+            "Structured intake:\n"
+            f"- Business type: {business_type}\n"
+            f"- Goal: {goal}\n"
+            f"- Style: {style}\n"
+            f"- Pages: {pages}\n"
+            f"- Target audience: {audience}\n"
+            f"- Notes: {notes}\n\n"
+            "Raw user input:\n"
+            f"{user_input}\n\n"
+            "Create a strong website concept for this business."
+        )
+
+    def _fallback_response(
+        self,
+        user_input: str,
+        mode: str,
+        intake_data: Dict[str, Any],
+    ) -> str:
+        business_type = intake_data.get("business_type") or "service business"
+        goal = intake_data.get("goal") or "get more qualified leads"
+        style = intake_data.get("style") or "clean and modern"
+        pages = intake_data.get("pages") or "Home, Services, About, Reviews, Contact"
+        audience = intake_data.get("audience") or "potential customers"
+        notes = intake_data.get("notes") or user_input or "No extra notes provided."
+
+        headline = self._suggest_headline(business_type, goal)
+        cta = self._suggest_cta(goal)
+
+        return (
+            "1. Business Summary\n"
+            f"This project is for a {business_type} that wants to {goal}. "
+            f"The website should feel {style} and speak clearly to {audience}.\n\n"
+            "2. Recommended Website Structure\n"
+            f"{pages}\n\n"
+            "3. Main Headline\n"
+            f"{headline}\n\n"
+            "4. CTA\n"
+            f"{cta}\n\n"
+            "5. Offer Direction\n"
+            "The website should build trust quickly, explain the value clearly, "
+            "and guide visitors to one main action without friction.\n\n"
+            "6. Next Best Step\n"
+            "Confirm the business niche, target audience, and key offer so the final site "
+            "structure and copy direction can be generated more precisely.\n\n"
+            f"Notes used: {notes}\n"
+            f"Flow mode: {mode}"
+        )
+
+    def _suggest_headline(self, business_type: str, goal: str) -> str:
+        bt = business_type.lower()
+
+        if "beauty" in bt or "salon" in bt or "studio" in bt:
+            return "Feel confident with a beauty experience designed around you"
+        if "restaurant" in bt or "cafe" in bt:
+            return "A place worth coming back to"
+        if "agency" in bt or "marketing" in bt:
+            return "Growth-focused solutions that turn attention into results"
+        if "real estate" in bt:
+            return "Find the right property with confidence"
+        if "clinic" in bt or "medical" in bt or "dental" in bt:
+            return "Professional care with a personal approach"
+
+        return f"A smarter website designed to help you {goal}"
+
+    def _suggest_cta(self, goal: str) -> str:
+        gl = goal.lower()
+
+        if "booking" in gl or "book" in gl:
+            return "Book your consultation"
+        if "lead" in gl or "client" in gl:
+            return "Get your free consultation"
+        if "sale" in gl or "sell" in gl:
+            return "Request your custom offer"
+        if "call" in gl:
+            return "Schedule a call"
+
+        return "Get started today"
