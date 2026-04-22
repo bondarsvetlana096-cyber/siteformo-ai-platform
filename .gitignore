@@ -10,3 +10,5 @@ venv/
 .env.*
 !.env.example
 .pytest_cache/
+.idea/
+.vscode/
