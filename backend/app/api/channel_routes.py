@@ -1,169 +1,47 @@
-from __future__ import annotations
-
-import logging
-
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse, Response
-from sqlalchemy.orm import Session
-
-from app.core.config import settings
-from app.db.session import get_db
-from app.models.order import ChannelType
-from app.services.chatbot_service import ChatbotService
-from app.services.launch_link_service import LaunchLinkService
-from app.services.telegram_service import TelegramService
-from app.services.whatsapp_service import WhatsAppService
-
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, Request
+from fastapi.responses import Response
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
 
 @router.get("/health")
-def channel_health() -> dict:
-    return {
-        "ok": True,
-        "telegram_configured": TelegramService.is_configured(),
-        "whatsapp_configured": WhatsAppService.is_configured(),
-        "whatsapp_provider": WhatsAppService.provider(),
-        "openai_configured": bool(settings.openai_api_key),
-    }
-
-
-@router.get("/launch-links")
-def channel_launch_links() -> dict:
-    return LaunchLinkService.build_launch_links()
-
-
-@router.post("/web-chat/message")
-async def web_chat_message(request: Request, db: Session = Depends(get_db)):
-    payload = await request.json()
-    user_id = str(payload.get("user_id") or payload.get("session_id") or "anonymous-web-user")
-    text = str(payload.get("text") or "").strip()
-
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-
-    try:
-        reply = ChatbotService.process_message(
-            db=db,
-            channel=ChannelType.WEB,
-            external_user_id=user_id,
-            text=text,
-        )
-        return {"reply": reply}
-    except Exception as exc:
-        logger.exception("Web chat processing failed: %s", exc)
-        raise HTTPException(status_code=500, detail="web chat processing failed")
+async def channels_health():
+    return {"status": "channels ok"}
 
 
 @router.post("/telegram/webhook")
-async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
-    payload = await request.json()
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    message = data.get("message", {})
+    text = message.get("text", "")
 
-    message = payload.get("message") or payload.get("edited_message")
-    callback_query = payload.get("callback_query")
-
-    chat_id = None
-    text = ""
-
-    if message:
-        chat_id = message.get("chat", {}).get("id")
-        text = (message.get("text") or "").strip()
-    elif callback_query:
-        chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
-        text = (callback_query.get("data") or "").strip()
-
-    if not chat_id or not text:
-        return {"ok": True}
-
-    try:
-        reply = ChatbotService.process_message(
-            db=db,
-            channel=ChannelType.TELEGRAM,
-            external_user_id=str(chat_id),
-            text=text,
-        )
-        TelegramService.send_text(chat_id, reply)
-        return {"ok": True}
-    except Exception as exc:
-        logger.exception("Telegram webhook processing failed: %s", exc)
-        try:
-            TelegramService.send_text(chat_id, "Извини, произошла ошибка. Попробуй ещё раз.")
-        except Exception:
-            logger.exception("Failed to send Telegram fallback message")
-        return {"ok": False, "error": "telegram processing failed"}
+    return {
+        "method": "sendMessage",
+        "text": f"Ты написал: {text}",
+    }
 
 
 @router.get("/whatsapp/webhook")
-async def whatsapp_verify(
-    hub_mode: str | None = Query(default=None, alias="hub.mode"),
-    hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
-    hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
-):
-    if WhatsAppService.provider() == "twilio":
-        return {"ok": True, "provider": "twilio", "message": "POST only webhook is ready"}
-
-    if (
-        hub_mode == "subscribe"
-        and hub_verify_token == settings.whatsapp_webhook_verify_token
-        and hub_challenge is not None
-    ):
-        return PlainTextResponse(hub_challenge)
-
-    raise HTTPException(status_code=403, detail="verification failed")
+async def whatsapp_webhook_get():
+    return {"ok": True, "provider": "twilio"}
 
 
 @router.post("/whatsapp/webhook")
-async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
-    provider = WhatsAppService.provider()
+async def whatsapp_webhook(request: Request):
+    form = await request.form()
+    text = form.get("Body", "")
 
-    try:
-        content_type = (request.headers.get("content-type") or "").lower()
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Message>Ты написал: {text}</Message>
+</Response>"""
 
-        if provider == "twilio" or "application/x-www-form-urlencoded" in content_type:
-            form = await request.form()
-            from_number = str(form.get("From") or "").strip()
-            text = str(form.get("Body") or "").strip()
+    return Response(content=twiml, media_type="application/xml")
 
-            if not from_number or not text:
-                return Response(content=WhatsAppService.build_twiml(""), media_type="application/xml")
 
-            reply = ChatbotService.process_message(
-                db=db,
-                channel=ChannelType.WHATSAPP,
-                external_user_id=from_number,
-                text=text,
-            )
-            return Response(content=WhatsAppService.build_twiml(reply), media_type="application/xml")
+@router.post("/web-chat/message")
+async def web_chat_message(request: Request):
+    data = await request.json()
+    text = data.get("message", "")
 
-        payload = await request.json()
-
-        for entry in payload.get("entry", []):
-            for change in entry.get("changes", []):
-                value = change.get("value", {})
-                for message in value.get("messages", []):
-                    from_number = message.get("from")
-                    text = (message.get("text") or {}).get("body", "").strip()
-
-                    if not from_number or not text:
-                        continue
-
-                    reply = ChatbotService.process_message(
-                        db=db,
-                        channel=ChannelType.WHATSAPP,
-                        external_user_id=from_number,
-                        text=text,
-                    )
-                    WhatsAppService.send_text(from_number, reply)
-
-        return {"ok": True}
-
-    except Exception as exc:
-        logger.exception("WhatsApp webhook processing failed: %s", exc)
-        if provider == "twilio":
-            return Response(
-                content=WhatsAppService.build_twiml("Извини, произошла ошибка. Попробуй ещё раз."),
-                media_type="application/xml",
-            )
-        return {"ok": False, "error": "whatsapp processing failed"}
+    return {"reply": f"Ты написал: {text}"}

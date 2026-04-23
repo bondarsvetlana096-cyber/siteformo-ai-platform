@@ -12,15 +12,6 @@ app.include_router(channel_router)
 app.include_router(api_router)
 
 
-@app.on_event("startup")
-def log_routes() -> None:
-    for route in app.routes:
-        methods = getattr(route, "methods", None)
-        path = getattr(route, "path", None)
-        if methods and path:
-            print(f"ROUTE {path} -> {sorted(methods)}")
-
-
 @app.get("/")
 async def root():
     return {"ok": True}
