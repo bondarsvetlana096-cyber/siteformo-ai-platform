@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -24,6 +25,7 @@ def channel_health() -> dict:
         "ok": True,
         "telegram_configured": TelegramService.is_configured(),
         "whatsapp_configured": WhatsAppService.is_configured(),
+        "whatsapp_provider": WhatsAppService.provider(),
         "openai_configured": bool(settings.openai_api_key),
     }
 
@@ -43,7 +45,12 @@ async def web_chat_message(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="text is required")
 
     try:
-        reply = ChatbotService.process_message(db, ChannelType.WEB, user_id, text)
+        reply = ChatbotService.process_message(
+            db=db,
+            channel=ChannelType.WEB,
+            external_user_id=user_id,
+            text=text,
+        )
         return {"reply": reply}
     except Exception as exc:
         logger.exception("Web chat processing failed: %s", exc)
@@ -63,7 +70,6 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     if message:
         chat_id = message.get("chat", {}).get("id")
         text = (message.get("text") or "").strip()
-
     elif callback_query:
         chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
         text = (callback_query.get("data") or "").strip()
@@ -75,47 +81,67 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
         reply = ChatbotService.process_message(
             db=db,
             channel=ChannelType.TELEGRAM,
-            user_id=str(chat_id),
-            message=text,
+            external_user_id=str(chat_id),
+            text=text,
         )
         TelegramService.send_text(chat_id, reply)
         return {"ok": True}
-
     except Exception as exc:
         logger.exception("Telegram webhook processing failed: %s", exc)
-
         try:
-            TelegramService.send_text(
-                chat_id,
-                "Sorry, something went wrong while processing your request. Please try again."
-            )
+            TelegramService.send_text(chat_id, "Извини, произошла ошибка. Попробуй ещё раз.")
         except Exception:
             logger.exception("Failed to send Telegram fallback message")
-
         return {"ok": False, "error": "telegram processing failed"}
 
 
 @router.get("/whatsapp/webhook")
 async def whatsapp_verify(
-    hub_mode: str = Query(alias="hub.mode"),
-    hub_verify_token: str = Query(alias="hub.verify_token"),
-    hub_challenge: str = Query(alias="hub.challenge"),
+    hub_mode: str | None = Query(default=None, alias="hub.mode"),
+    hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
+    hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
 ):
-    if hub_mode == "subscribe" and hub_verify_token == settings.whatsapp_webhook_verify_token:
-        return int(hub_challenge)
+    if WhatsAppService.provider() == "twilio":
+        return {"ok": True, "provider": "twilio", "message": "POST only webhook is ready"}
+
+    if (
+        hub_mode == "subscribe"
+        and hub_verify_token == settings.whatsapp_webhook_verify_token
+        and hub_challenge is not None
+    ):
+        return PlainTextResponse(hub_challenge)
 
     raise HTTPException(status_code=403, detail="verification failed")
 
 
 @router.post("/whatsapp/webhook")
 async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
-    payload = await request.json()
+    provider = WhatsAppService.provider()
 
     try:
+        content_type = (request.headers.get("content-type") or "").lower()
+
+        if provider == "twilio" or "application/x-www-form-urlencoded" in content_type:
+            form = await request.form()
+            from_number = str(form.get("From") or "").strip()
+            text = str(form.get("Body") or "").strip()
+
+            if not from_number or not text:
+                return Response(content=WhatsAppService.build_twiml(""), media_type="application/xml")
+
+            reply = ChatbotService.process_message(
+                db=db,
+                channel=ChannelType.WHATSAPP,
+                external_user_id=from_number,
+                text=text,
+            )
+            return Response(content=WhatsAppService.build_twiml(reply), media_type="application/xml")
+
+        payload = await request.json()
+
         for entry in payload.get("entry", []):
             for change in entry.get("changes", []):
                 value = change.get("value", {})
-
                 for message in value.get("messages", []):
                     from_number = message.get("from")
                     text = (message.get("text") or {}).get("body", "").strip()
@@ -126,8 +152,8 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
                     reply = ChatbotService.process_message(
                         db=db,
                         channel=ChannelType.WHATSAPP,
-                        user_id=from_number,
-                        message=text,
+                        external_user_id=from_number,
+                        text=text,
                     )
                     WhatsAppService.send_text(from_number, reply)
 
@@ -135,4 +161,9 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
 
     except Exception as exc:
         logger.exception("WhatsApp webhook processing failed: %s", exc)
+        if provider == "twilio":
+            return Response(
+                content=WhatsAppService.build_twiml("Извини, произошла ошибка. Попробуй ещё раз."),
+                media_type="application/xml",
+            )
         return {"ok": False, "error": "whatsapp processing failed"}

@@ -6,17 +6,26 @@ from app.db.session import Base, engine
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title='SiteFormo AI Sales Platform')
+app = FastAPI(title="SiteFormo AI Sales Platform")
 
 app.include_router(channel_router)
 app.include_router(api_router)
 
 
-@app.get('/')
+@app.on_event("startup")
+def log_routes() -> None:
+    for route in app.routes:
+        methods = getattr(route, "methods", None)
+        path = getattr(route, "path", None)
+        if methods and path:
+            print(f"ROUTE {path} -> {sorted(methods)}")
+
+
+@app.get("/")
 async def root():
-    return {'ok': True}
+    return {"ok": True}
 
 
-@app.get('/health')
+@app.get("/health")
 async def health():
-    return {'status': 'ok'}
+    return {"status": "ok"}

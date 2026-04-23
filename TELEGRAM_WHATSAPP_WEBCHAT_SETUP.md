@@ -1,77 +1,69 @@
 # Telegram + WhatsApp + Web Chat setup
 
-## Что уже добавлено
-- единый движок опросника для 3 каналов;
-- Telegram webhook endpoint: `/channels/telegram/webhook`;
-- WhatsApp webhook verify + inbound endpoint: `/channels/whatsapp/webhook`;
-- Web chat endpoint для сайта: `/channels/web-chat/message`;
-- сохранение сессий и сообщений в БД;
-- создание заказа через существующий `IntakeService`.
+## Что настроено в этой сборке
+- Telegram webhook: `/channels/telegram/webhook`
+- WhatsApp webhook для Twilio Sandbox: `/channels/whatsapp/webhook`
+- Web chat endpoint: `/channels/web-chat/message`
+- Все каналы сейчас работают как echo-бот:
+  - вход: `привет`
+  - ответ: `Ты написал: привет`
 
-## .env
-Добавь в `.env`:
+## Railway
+Запусти backend командой:
 
-```env
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.1-mini
-TELEGRAM_BOT_TOKEN=
-WHATSAPP_API_KEY=
-WHATSAPP_PHONE_NUMBER_ID=
-WHATSAPP_WEBHOOK_VERIFY_TOKEN=
-PUBLIC_BASE_URL=https://your-domain.com
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
+
+Заполни переменные из файла `backend/.env.railway.example`.
 
 ## Telegram
 1. Создай бота через `@BotFather`.
 2. Возьми токен.
-3. Поставь webhook:
+3. Заполни в Railway:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_BOT_USERNAME`
+4. Поставь webhook:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://your-domain.com/channels/telegram/webhook"}'
+  -d '{"url":"https://siteformo-ai-platform-production.up.railway.app/channels/telegram/webhook"}'
 ```
 
-## WhatsApp Cloud API
-1. Создай app в Meta Developers.
-2. Подключи WhatsApp product.
-3. Возьми permanent/system-user token.
-4. Укажи callback URL:
-   `https://your-domain.com/channels/whatsapp/webhook`
-5. Укажи verify token = `WHATSAPP_WEBHOOK_VERIFY_TOKEN`.
-6. Подпишись минимум на поле `messages`.
+## WhatsApp via Twilio Sandbox
+1. Открой Twilio Console → Messaging → Try it out → Send a WhatsApp message.
+2. Подключи Sandbox командой `join ...` из Twilio.
+3. В поле webhook URL укажи:
 
-## Web chat на сайте
-Кнопка может открывать простой виджет или твой front-end chat.
-Запросы идут так:
+```text
+https://siteformo-ai-platform-production.up.railway.app/channels/whatsapp/webhook
+```
 
+4. Метод: `POST`.
+5. В Railway поставь:
+   - `WHATSAPP_PROVIDER=twilio`
+   - `WHATSAPP_PUBLIC_NUMBER=whatsapp:+14155238886`
+   - `WHATSAPP_TWILIO_NUMBER=whatsapp:+14155238886`
+
+## Проверка
+### Web chat
 ```bash
-curl -X POST https://your-domain.com/channels/web-chat/message \
+curl -X POST http://127.0.0.1:8000/channels/web-chat/message \
   -H "Content-Type: application/json" \
-  -d '{"user_id":"demo-user-1","text":"/start"}'
+  -d '{"user_id":"demo-user-1","text":"привет"}'
 ```
 
-## Первый тест
-1. `/channels/health`
-2. `/channels/web-chat/message`
-3. Telegram `/start`
-4. WhatsApp message `start`
+### WhatsApp Twilio local test
+```bash
+curl -X POST http://127.0.0.1:8000/channels/whatsapp/webhook \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "From=whatsapp:+1234567890" \
+  --data-urlencode "Body=привет"
+```
 
-## Что редактировать дальше
-Если хочешь менять только опросник, редактируй один файл:
-- `backend/app/services/chatbot_service.py`
+Ожидаемый XML-ответ содержит:
 
-Именно там хранятся:
-- шаги сценария;
-- тексты вопросов;
-- переходы между шагами;
-- момент создания заявки.
-
-
-## Launch behavior and bypass emails
-
-Use `GET /channels/launch-links` to render site buttons for Telegram and WhatsApp.
-
-- WhatsApp should use the returned `wa.me` link with prefilled text.
-- Telegram should use the returned `t.me/<bot>?start=siteformo_intake` link.
-- Payment approval bypass emails are configured via `PAYMENT_APPROVAL_BYPASS_EMAILS`, for example `klon97048@gmail.com`.
+```text
+Ты написал: привет
+```
