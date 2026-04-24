@@ -81,3 +81,23 @@ docs/MISSING_FILES_INSERTED_AND_PROD_READY.md
 ```text
 docs/CRM_AND_NOTIFICATIONS.md
 ```
+
+## Guided web-chat / квиз-бот
+
+Свободный AI-chat отключён. Основной продажный сценарий теперь работает через:
+
+- `POST /channels/web-chat/start`
+- `POST /channels/web-chat`
+
+Готовый UI-виджет находится здесь:
+
+- `/static/web-chat-widget.js`
+- `/static/web-chat-demo.html`
+
+Подключение на сайт:
+
+```html
+<script src="https://YOUR_BACKEND_DOMAIN/static/web-chat-widget.js" data-api-base="https://YOUR_BACKEND_DOMAIN"></script>
+```
+
+Подробнее: `docs/GUIDED_WEB_CHAT_FLOW_RU.md`.

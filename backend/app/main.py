@@ -7,6 +7,7 @@ from app.channels.web_chat import router as web_chat_router  # ✅ ДОБАВИ�
 from app.services.db.init_db import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.channel_routes import router as channel_router
 from app.api.routes import router as api_router
@@ -28,6 +29,7 @@ app.add_middleware(
 
 # ✅ ОСНОВНЫЕ API
 app.include_router(api_router)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # ✅ КАНАЛЫ
 app.include_router(channel_router)

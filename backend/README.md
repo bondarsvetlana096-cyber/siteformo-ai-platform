@@ -78,3 +78,16 @@ backend/.env.railway.example
 - `WHATSAPP_TWILIO_NUMBER=whatsapp:+14155238886`
 
 Для текущего Twilio echo-ответа `ACCOUNT_SID` и `AUTH_TOKEN` не обязательны, потому что ответ уходит напрямую через webhook как TwiML.
+
+## Guided web-chat вместо свободного /chat
+
+Продажный бот переведён на сценарный flow с кнопками:
+
+- `POST /channels/web-chat/start` — старт/восстановление сессии.
+- `POST /channels/web-chat` — отправка выбранного варианта или контакта.
+- `POST /channels/web-chat/message` — legacy alias, теперь тоже guided flow.
+- `POST /chat` — отключён, возвращает `410 Gone`.
+
+Сессии сохраняются в `conversation_sessions`, сообщения — в `conversation_messages`, финальные лиды — в `leads`.
+
+Локальная demo-страница виджета: `/static/web-chat-demo.html`.
