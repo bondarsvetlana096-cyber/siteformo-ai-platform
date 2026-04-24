@@ -3,6 +3,7 @@ from app.api.leads import router as leads_router
 from app.channels.health import router as health_router
 from app.channels.telegram import router as telegram_router
 from app.channels.whatsapp import router as whatsapp_router
+from app.channels.web_chat import router as web_chat_router  # ✅ ДОБАВИЛИ
 from app.services.db.init_db import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +17,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS (на всякий случай)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,8 +29,11 @@ app.add_middleware(
 # ✅ ОСНОВНЫЕ API
 app.include_router(api_router)
 
-# ✅ КАНАЛЫ (ВАЖНО!)
+# ✅ КАНАЛЫ
 app.include_router(channel_router)
+
+# ✅ ЧАТ (НОВОЕ)
+app.include_router(web_chat_router)
 
 
 @app.get("/")
@@ -41,16 +45,15 @@ def root():
 def health():
     return {"status": "ok"}
 
+
 @app.on_event("startup")
 async def startup_event():
     init_db()
 
+
+# Остальные роуты
 app.include_router(health_router)
-
 app.include_router(telegram_router)
-
 app.include_router(whatsapp_router)
-
 app.include_router(leads_router)
-
 app.include_router(admin_router)
