@@ -1,47 +1,20 @@
 from fastapi import APIRouter, Request
-from fastapi.responses import Response
 
-router = APIRouter(prefix="/channels", tags=["channels"])
+from app.services.ai.ai_service import generate_ai_reply
 
-
-@router.get("/health")
-async def channels_health():
-    return {"status": "channels ok"}
-
-
-@router.post("/telegram/webhook")
-async def telegram_webhook(request: Request):
-    data = await request.json()
-    message = data.get("message", {})
-    text = message.get("text", "")
-
-    return {
-        "method": "sendMessage",
-        "text": f"Ты написал: {text}",
-    }
-
-
-@router.get("/whatsapp/webhook")
-async def whatsapp_webhook_get():
-    return {"ok": True, "provider": "twilio"}
-
-
-@router.post("/whatsapp/webhook")
-async def whatsapp_webhook(request: Request):
-    form = await request.form()
-    text = form.get("Body", "")
-
-    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>Ты написал: {text}</Message>
-</Response>"""
-
-    return Response(content=twiml, media_type="application/xml")
+router = APIRouter(prefix="/channels", tags=["web-chat"])
 
 
 @router.post("/web-chat/message")
 async def web_chat_message(request: Request):
     data = await request.json()
     text = data.get("message", "")
+    user_id = str(data.get("user_id") or data.get("session_id") or "web_chat_unknown")
 
-    return {"reply": f"Ты написал: {text}"}
+    reply = await generate_ai_reply(
+        user_text=text,
+        user_id=f"web-chat:{user_id}",
+        channel="web-chat",
+    )
+
+    return {"reply": reply}

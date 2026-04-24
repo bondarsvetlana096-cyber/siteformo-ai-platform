@@ -60,3 +60,24 @@ HTTP method: `POST`
 ```text
 docs/AI_SALES_PLATFORM_CHANGES_AND_GITHUB_COMMANDS.md
 ```
+
+## Production AI Sales Bot
+
+В проект вставлены недостающие production-файлы для Telegram + WhatsApp AI sales bot.
+
+Документация:
+
+```text
+docs/MISSING_FILES_INSERTED_AND_PROD_READY.md
+```
+
+
+## CRM + Notifications
+
+Добавлены API лидов, мини-админка `/admin`, статусы лидов и Telegram-уведомления владельцу.
+
+Документация:
+
+```text
+docs/CRM_AND_NOTIFICATIONS.md
+```

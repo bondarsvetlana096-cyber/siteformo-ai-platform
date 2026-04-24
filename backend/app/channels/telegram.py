@@ -1,13 +1,10 @@
-import os
-
 import httpx
 from fastapi import APIRouter, Request
 
+from app.core.config import settings
 from app.services.ai.ai_service import generate_ai_reply
 
 router = APIRouter()
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 
 @router.post("/telegram/webhook")
@@ -34,10 +31,10 @@ async def telegram_webhook(request: Request):
         channel="telegram",
     )
 
-    if TELEGRAM_BOT_TOKEN:
+    if settings.telegram_bot_token:
         async with httpx.AsyncClient(timeout=15) as client:
             await client.post(
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
                 json={"chat_id": chat_id, "text": ai_reply},
             )
 
