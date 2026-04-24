@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     app_name: str = "SiteFormo AI Sales Platform"
     app_env: str = Field(default="production", validation_alias=AliasChoices("APP_ENV", "ENV"))
     public_base_url: str = "http://127.0.0.1:8000"
-    database_url: str = DEFAULT_DATABASE_URL
+    database_url: str | None = None
     log_level: str = Field(default="info", validation_alias=AliasChoices("LOG_LEVEL", "LOGLEVEL"))
 
     # Security/admin
@@ -32,11 +32,11 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_per_hour: int = 60
     free_attempt_limit: int = 1
-    bypass_limit_emails: str = ""
-    payment_approval_bypass_emails: str = "klon97048@gmail.com"
+    bypass_limit_emails: str | None = None
+    payment_approval_bypass_emails: str | None = "klon97048@gmail.com"
 
     # Owner/contact notifications
-    owner_email: str = "klon97048@gmail.com"
+    owner_email: str | None = "klon97048@gmail.com"
     owner_telegram_chat_id: str | None = None
     enable_owner_notifications: bool = True
     divi_export_email: str | None = None
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     telegram_contact_label: str | None = None
 
     # WhatsApp / Messenger
-    whatsapp_provider: str = "twilio"
+    whatsapp_provider: str | None = "twilio"
     whatsapp_webhook_verify_token: str | None = None
     whatsapp_public_number: str | None = None
     whatsapp_contact_number: str | None = None
@@ -80,12 +80,12 @@ class Settings(BaseSettings):
     smtp_from: str | None = None
 
     # Demo/publishing/follow-ups
-    main_site_base_url: str = "https://siteformo.com"
-    main_site_continue_path: str = "/continue"
-    main_site_checkout_path: str = "/checkout"
+    main_site_base_url: str | None = "https://siteformo.com"
+    main_site_continue_path: str | None = "/continue"
+    main_site_checkout_path: str | None = "/checkout"
     demo_ttl_minutes: int = 60
     demo_retention_hours: int = 72
-    demo_storage_dir: str = "./demo_storage"
+    demo_storage_dir: str | None = "./demo_storage"
     demo_protection_enabled: bool = True
     demo_ready_followup_delay_minutes: int = 30
     demo_cta_followup_delay_minutes: int = 180
@@ -93,25 +93,37 @@ class Settings(BaseSettings):
     max_followup_count: int = 3
 
     # Queue/storage/Supabase/S3
-    queue_backend: str = "inline"
+    queue_backend: str | None = "inline"
     queue_poll_seconds: int = 5
     queue_visibility_timeout_seconds: int = 60
-    storage_backend: str = "auto"
+    storage_backend: str | None = "auto"
+
+    redis_url: str | None = None
+    redis_host: str | None = None
+    redis_port: int | None = 6379
+    redis_password: str | None = None
+
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
     supabase_storage_bucket: str | None = None
+
     s3_endpoint_url: str | None = None
     s3_access_key_id: str | None = None
     s3_secret_access_key: str | None = None
     s3_region: str | None = None
     s3_bucket: str | None = None
 
+    postgres_url: str | None = None
+    postgresql_url: str | None = None
+    supabase_db_url: str | None = None
+
     # Telemetry
     sentry_dsn: str | None = None
     posthog_api_key: str | None = None
-    posthog_host: str = "https://app.posthog.com"
+    posthog_host: str | None = None
 
     @field_validator(
+        "app_name",
         "app_env",
         "database_url",
         "public_base_url",
@@ -148,6 +160,9 @@ class Settings(BaseSettings):
         "demo_storage_dir",
         "queue_backend",
         "storage_backend",
+        "redis_url",
+        "redis_host",
+        "redis_password",
         "supabase_url",
         "supabase_service_role_key",
         "supabase_storage_bucket",
@@ -156,6 +171,9 @@ class Settings(BaseSettings):
         "s3_secret_access_key",
         "s3_region",
         "s3_bucket",
+        "postgres_url",
+        "postgresql_url",
+        "supabase_db_url",
         "sentry_dsn",
         "posthog_api_key",
         "posthog_host",
@@ -167,7 +185,7 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_blank_strings(cls, value: object):
         if value is None:
-            return value
+            return None
         if isinstance(value, str):
             cleaned = value.strip()
             if not cleaned:
@@ -179,6 +197,16 @@ class Settings(BaseSettings):
     @classmethod
     def default_database_url(cls, value: str | None) -> str:
         return value or DEFAULT_DATABASE_URL
+
+    @field_validator("bypass_limit_emails", "payment_approval_bypass_emails", mode="after")
+    @classmethod
+    def default_empty_string(cls, value: str | None) -> str:
+        return value or ""
+
+    @field_validator("posthog_host", mode="after")
+    @classmethod
+    def default_posthog_host(cls, value: str | None) -> str:
+        return value or "https://app.posthog.com"
 
     @field_validator("whatsapp_provider", "queue_backend", "storage_backend", mode="after")
     @classmethod
