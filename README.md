@@ -50,3 +50,13 @@ HTTP method: `POST`
 
 ## Railway variables
 Смотри файл `backend/.env.railway.example`.
+
+## AI Sales Bot Layer
+
+Проект обновлён под единую AI-логику для Telegram и WhatsApp.
+
+Подробности:
+
+```text
+docs/AI_SALES_PLATFORM_CHANGES_AND_GITHUB_COMMANDS.md
+```

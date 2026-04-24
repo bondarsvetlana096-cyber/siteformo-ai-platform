@@ -1,3 +1,7 @@
+from app.channels.health import router as health_router
+from app.channels.telegram import router as telegram_router
+from app.channels.whatsapp import router as whatsapp_router
+from app.services.db.init_db import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -34,3 +38,13 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.on_event("startup")
+async def startup_event():
+    init_db()
+
+app.include_router(health_router)
+
+app.include_router(telegram_router)
+
+app.include_router(whatsapp_router)
