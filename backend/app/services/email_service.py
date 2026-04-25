@@ -174,3 +174,48 @@ class OwnerEmailComposer:
             "subject": subject,
             "html": html,
         }
+
+async def send_demo_email(
+    to: str,
+    subject: str,
+    title: str,
+    body_text: str,
+    cta_label: str | None = None,
+    cta_url: str | None = None,
+    footer_text: str | None = None,
+):
+    """Send a branded SiteFormo demo/follow-up email via the configured email provider."""
+    safe_title = escape(title or subject or "SiteFormo")
+    safe_body = escape(body_text or "").replace("\n", "<br>")
+    safe_footer = escape(footer_text or "")
+
+    button_html = ""
+    if cta_label and cta_url:
+        safe_cta_label = escape(cta_label)
+        safe_cta_url = escape(cta_url, quote=True)
+        button_html = f'''
+            <p style="margin-top:24px;">
+                <a href="{safe_cta_url}" style="background:#111827;color:white;padding:13px 18px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:bold;">
+                    {safe_cta_label}
+                </a>
+            </p>
+        '''
+
+    footer_html = ""
+    if safe_footer:
+        footer_html = f'''
+            <p style="margin-top:28px;color:#6b7280;font-size:13px;">
+                {safe_footer}
+            </p>
+        '''
+
+    html = f'''
+    <div style="font-family:Arial,sans-serif;line-height:1.55;color:#111827;max-width:640px;margin:0 auto;">
+        <h2>{safe_title}</h2>
+        <p>{safe_body}</p>
+        {button_html}
+        {footer_html}
+    </div>
+    '''
+
+    return await send_email(to=to, subject=subject, html=html)
