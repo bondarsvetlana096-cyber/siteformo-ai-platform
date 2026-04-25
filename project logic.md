@@ -187,3 +187,7 @@ Final Divi 5-ready output
 7. Generate exactly two homepage/page concepts before payment.
 8. Generate final owner delivery after extended questionnaire.
 9. Keep the flow mobile-friendly and simple for clients.
+
+## Owner email exception
+
+`klon97048@gmail.com` is the project owner email. If this email is used in the full-page order quiz, payment approval is skipped and the order is generated immediately as a ready Divi package.

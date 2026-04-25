@@ -13,6 +13,7 @@ from app.schemas.order import ApprovalResponse, IntakePayload, IntakeResponse
 from app.services.approval_service import ApprovalService
 from app.services.email_service import OwnerEmailComposer, send_email
 from app.services.intake_service import IntakeService
+from app.services.launch_link_service import LaunchLinkService
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -61,17 +62,53 @@ def _serialize_concepts(order: Order) -> list[dict]:
     ]
 
 
+def _is_owner_bypass_order(order: Order) -> bool:
+    client_email = getattr(getattr(order, "client", None), "email", None)
+    return LaunchLinkService.should_bypass_payment_approval(client_email)
+
+
+def _build_final_package_from_current_brief(db: Session, order: Order, note: str) -> None:
+    selected = "A"
+    concept = next((c for c in order.concepts if c.concept_label == selected), None) or (order.concepts[0] if order.concepts else None)
+    divi_html = concept.html_code if concept else _concept_html(order, "A", "Owner bypass ready page")
+    brief_answers = order.brief_answers or {}
+    brief_markdown = "\n".join(f"- {key}: {value}" for key, value in brief_answers.items()) or "- Generated from the first SiteFormo brief."
+
+    db.add(FinalPackage(
+        order_id=order.id,
+        selected_concept_label=selected,
+        divi_html=divi_html,
+        brief_markdown=brief_markdown,
+        notes=note,
+    ))
+    order.status = OrderStatus.FINAL_READY
+    order.approved_at = datetime.now(timezone.utc)
+
+
 @router.post("/intake", response_model=IntakeResponse)
 def create_order_intake(payload: IntakePayload, db: Session = Depends(get_db)):
     order, reused_context, reused_order_id = IntakeService.create_order(db, payload)
+    owner_bypass = LaunchLinkService.should_bypass_payment_approval(payload.email)
+
     if not order.concepts:
         IntakeService.save_concepts(
             db,
             order,
             _concept(order, "A", "Clean premium conversion page"),
             _concept(order, "B", "Modern editorial landing page"),
+            keep_approved=owner_bypass,
         )
         db.refresh(order)
+
+    if owner_bypass and order.status != OrderStatus.FINAL_READY:
+        _build_final_package_from_current_brief(
+            db,
+            order,
+            "Owner bypass: klon97048@gmail.com can generate immediately without deposit approval.",
+        )
+        db.commit()
+        db.refresh(order)
+
     return IntakeResponse(
         client_id=order.client_id,
         order_id=order.id,
@@ -82,6 +119,8 @@ def create_order_intake(payload: IntakePayload, db: Session = Depends(get_db)):
         pricing_reasoning=order.pricing_reasoning or "",
         preferred_language=order.preferred_language,
         status=order.status,
+        owner_bypass=owner_bypass,
+        payment_required=not owner_bypass,
     )
 
 
@@ -90,24 +129,43 @@ def get_order(order_id: str, db: Session = Depends(get_db)):
     order = db.query(Order).options(joinedload(Order.concepts), joinedload(Order.client)).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    owner_bypass = _is_owner_bypass_order(order)
+    next_step = "Final package is ready. Owner bypass skipped payment approval." if owner_bypass and order.status == OrderStatus.FINAL_READY else "Pay 50% deposit. After owner approval, the extended brief becomes available."
     return {
         "order_id": order.id,
         "status": order.status,
+        "owner_bypass": owner_bypass,
+        "payment_required": not owner_bypass,
         "recommended_tier": order.recommended_tier,
         "estimated_price_eur": order.estimated_price_eur,
-        "deposit_due_eur": int(order.estimated_price_eur / 2),
+        "deposit_due_eur": 0 if owner_bypass else int(order.estimated_price_eur / 2),
         "pricing_reasoning": order.pricing_reasoning,
         "reused_context_from_order_id": order.reused_context_from_order_id,
         "concepts": _serialize_concepts(order),
-        "next_step": "Pay 50% deposit. After owner approval, the extended brief becomes available.",
+        "next_step": next_step,
     }
 
 
 @router.post("/{order_id}/payment-reported")
 async def payment_reported(order_id: str, db: Session = Depends(get_db)):
-    order = db.query(Order).options(joinedload(Order.client)).filter(Order.id == order_id).first()
+    order = db.query(Order).options(joinedload(Order.concepts), joinedload(Order.client)).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    if _is_owner_bypass_order(order):
+        if order.status != OrderStatus.FINAL_READY:
+            _build_final_package_from_current_brief(
+                db,
+                order,
+                "Owner bypass: payment report ignored because owner email does not require deposit approval.",
+            )
+            db.commit()
+        return {
+            "order_id": order.id,
+            "status": order.status,
+            "message": "Owner email detected. Payment approval was skipped and the final package is ready.",
+        }
+
     order.status = OrderStatus.PENDING_PAYMENT_APPROVAL
     db.commit()
     email = OwnerEmailComposer.compose_order_email(order)
@@ -160,16 +218,19 @@ async def submit_extended_brief(order_id: str, answers: dict, db: Session = Depe
     order = db.query(Order).options(joinedload(Order.concepts), joinedload(Order.client)).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.status != OrderStatus.APPROVED:
+    owner_bypass = _is_owner_bypass_order(order)
+    if order.status not in {OrderStatus.APPROVED, OrderStatus.FINAL_READY} and not owner_bypass:
         raise HTTPException(status_code=409, detail="Owner payment approval is required before final generation")
 
     brief_markdown = "\n".join(f"- {key}: {value}" for key, value in answers.items())
     selected = answers.get("selected_concept_label") or "A"
     concept = next((c for c in order.concepts if c.concept_label == selected), None) or (order.concepts[0] if order.concepts else None)
     divi_html = concept.html_code if concept else _concept_html(order, "A", "Final Divi-ready page")
-    package = FinalPackage(order_id=order.id, selected_concept_label=selected, divi_html=divi_html, brief_markdown=brief_markdown, notes="Generated from extended brief after owner payment approval.")
+    package = FinalPackage(order_id=order.id, selected_concept_label=selected, divi_html=divi_html, brief_markdown=brief_markdown, notes="Generated from extended brief after owner payment approval or owner bypass.")
     db.add(package)
     order.status = OrderStatus.FINAL_READY
+    if owner_bypass and not order.approved_at:
+        order.approved_at = datetime.now(timezone.utc)
     db.commit()
     email = OwnerEmailComposer.compose_delivery_email(order, brief_markdown)
     await send_email(email["to"], email["subject"], email["html"])

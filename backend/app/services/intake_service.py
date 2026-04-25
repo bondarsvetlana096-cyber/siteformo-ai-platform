@@ -110,8 +110,9 @@ class IntakeService:
         return order, bool(reused), (reused.id if reused else None)
 
     @staticmethod
-    def save_concepts(db: Session, order: Order, concept_a: dict, concept_b: dict) -> None:
+    def save_concepts(db: Session, order: Order, concept_a: dict, concept_b: dict, keep_approved: bool = False) -> None:
         db.add(HomepageConcept(order_id=order.id, concept_label='A', art_direction=concept_a.get('art_direction'), html_code=concept_a['html'], summary=concept_a.get('summary')))
         db.add(HomepageConcept(order_id=order.id, concept_label='B', art_direction=concept_b.get('art_direction'), html_code=concept_b['html'], summary=concept_b.get('summary')))
-        order.status = OrderStatus.PENDING_PAYMENT_APPROVAL
+        if not keep_approved:
+            order.status = OrderStatus.PENDING_PAYMENT_APPROVAL
         db.commit()

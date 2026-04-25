@@ -8,7 +8,8 @@ from app.core.config import settings
 class LaunchLinkService:
     @staticmethod
     def _normalized_bypass_emails() -> set[str]:
-        raw = settings.payment_approval_bypass_emails or ''
+        raw_items = [settings.payment_approval_bypass_emails or '', settings.owner_email or '']
+        raw = ','.join(raw_items)
         return {item.strip().lower() for item in raw.split(',') if item.strip()}
 
     @staticmethod
@@ -20,8 +21,8 @@ class LaunchLinkService:
     @staticmethod
     def whatsapp_prefill_text() -> str:
         return (
-            'Здравствуйте! Хочу быстро пройти короткий опрос по сайту. '
-            'Подскажите, пожалуйста, с чего начать?'
+            'Hello SiteFormo, I want to start a short website brief. '
+            'Please help me continue the website order process.'
         )
 
     @staticmethod
@@ -30,7 +31,7 @@ class LaunchLinkService:
 
     @staticmethod
     def telegram_start_hint() -> str:
-        return 'Нажмите Start, и бот сразу начнет короткий опрос по сайту.'
+        return 'Press Start and the bot will open the short website questionnaire.'
 
     @staticmethod
     def build_launch_links() -> dict:

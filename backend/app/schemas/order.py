@@ -44,6 +44,8 @@ class IntakeResponse(BaseModel):
     pricing_reasoning: str
     preferred_language: str
     status: str
+    owner_bypass: bool = False
+    payment_required: bool = True
 
 
 class ApprovalResponse(BaseModel):
