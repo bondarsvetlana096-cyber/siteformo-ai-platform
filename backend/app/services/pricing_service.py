@@ -11,17 +11,32 @@ class PricingService:
     @staticmethod
     def _style_text(payload) -> str:
         parts = []
+
         if getattr(payload, 'desired_site_description', None):
             parts.append(str(payload.desired_site_description))
+
         if getattr(payload, 'reference_site_notes', None):
             parts.append(str(payload.reference_site_notes))
+
         for item in getattr(payload, 'reference_sites', []) or []:
             if getattr(item, 'notes', None):
                 parts.append(str(item.notes))
+
         answers = getattr(payload, 'answers', {}) or {}
-        for key in ['reference_style_notes', 'desired_style_notes', 'desired_effects', 'visual_direction']:
+
+        for key in [
+            'reference_style_notes',
+            'desired_style_notes',
+            'desired_effects',
+            'visual_direction',
+            'style',
+            'goal',
+            'urgency',
+            'references',
+        ]:
             if answers.get(key):
                 parts.append(str(answers[key]))
+
         return ' '.join(parts).lower()
 
     @classmethod
@@ -40,21 +55,22 @@ class PricingService:
             payload.booking,
             payload.advanced_integrations,
         ])
+
         if premium:
             return (
                 PricingTier.PREMIUM,
                 1500,
-                'This project includes advanced functionality, so it fits a higher-complexity build. If that scope feels too large, SiteFormo can offer a simplified option with fewer advanced features.',
+                'This project includes advanced functionality, so it fits the Premium package. If that scope feels too large, SiteFormo can offer a simplified option.',
             )
 
         business = any([
             payload.pages_requested > 3,
             payload.services_count > 3,
             payload.has_service_pages,
-            payload.wants_leads,
             bool(payload.answers.get('needs_conversion_sections', False)),
             expensive_reference_signals,
         ])
+
         if business:
             if expensive_reference_signals:
                 return (
@@ -62,14 +78,15 @@ class PricingService:
                     900,
                     'The requested style suggests a stronger visual direction with effects or a more premium presentation. A simplified version can be offered if the client prefers a lower-budget route.',
                 )
+
             return (
                 PricingTier.BUSINESS,
                 900,
-                'This looks more complete than a basic landing page because it needs conversion structure and lead generation. The scope can be simplified if the client wants a leaner option.',
+                'This project needs a larger structure than a basic landing page, so the Business package is the best fit. The scope can be simplified if the client wants a leaner option.',
             )
 
         return (
             PricingTier.STARTER,
             600,
-            'This is a focused landing page without advanced functionality or premium effects, so the starter package is the best fit.',
+            'This is a focused landing page without advanced functionality or premium effects, so the Starter package is the best fit.',
         )
