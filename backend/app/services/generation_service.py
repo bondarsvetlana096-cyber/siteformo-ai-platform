@@ -1,27 +1,33 @@
-import os
 import logging
+import os
+from html import escape
 from typing import Any, Dict, Optional
 
 from openai import OpenAI
+from sqlalchemy.orm import Session
 
+from app.models.order import FinalPackage, Order, OrderStatus
 
 logger = logging.getLogger(__name__)
 
 
 class GenerationService:
     """
-    Generates a website concept for Telegram users.
+    Generates website concepts and final Divi-ready packages.
 
     Behavior:
     - Uses OpenAI if OPENAI_API_KEY is present
     - Falls back to a local template if OpenAI is not configured
-    - Returns user-friendly plain text suitable for Telegram
+    - Supports Telegram concept generation
+    - Supports order approval -> final package generation
     """
 
     def __init__(self) -> None:
         self.api_key = os.getenv("OPENAI_API_KEY", "").strip()
         self.model = os.getenv("OPENAI_MODEL", "gpt-5").strip()
-        self.client: Optional[OpenAI] = OpenAI(api_key=self.api_key) if self.api_key else None
+        self.client: Optional[OpenAI] = (
+            OpenAI(api_key=self.api_key) if self.api_key else None
+        )
 
     def generate_site_concept(
         self,
@@ -29,17 +35,6 @@ class GenerationService:
         mode: str = "describe_site",
         intake_data: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """
-        Main public method.
-
-        Args:
-            user_input: Raw user text or collected flow text
-            mode: Flow mode, e.g. 'describe_site' or 'send_websites'
-            intake_data: Optional structured dict with parsed fields
-
-        Returns:
-            Telegram-friendly generated concept text
-        """
         normalized_input = (user_input or "").strip()
         intake_data = intake_data or {}
 
@@ -66,6 +61,7 @@ class GenerationService:
             )
 
             output_text = getattr(response, "output_text", None)
+
             if output_text and output_text.strip():
                 return output_text.strip()
 
@@ -79,6 +75,198 @@ class GenerationService:
                 "Here is a draft concept instead:\n\n"
                 f"{self._fallback_response(normalized_input, mode, intake_data)}"
             )
+
+    def generate_final_package_for_order(
+        self,
+        db: Session,
+        order: Order,
+        note: str = "Generated automatically after owner approval.",
+    ) -> FinalPackage:
+        """
+        Creates a final Divi-ready package after approval.
+        Safe fallback: if OpenAI fails, still creates a usable package.
+        """
+
+        existing_package = (
+            db.query(FinalPackage)
+            .filter(FinalPackage.order_id == order.id)
+            .order_by(FinalPackage.id.desc())
+            .first()
+        )
+
+        if existing_package:
+            order.status = OrderStatus.FINAL_READY
+            db.commit()
+            db.refresh(order)
+            return existing_package
+
+        selected_concept_label = "A"
+        divi_html = self._generate_divi_html(order)
+        brief_markdown = self._build_brief_markdown(order)
+
+        package = FinalPackage(
+            order_id=order.id,
+            selected_concept_label=selected_concept_label,
+            divi_html=divi_html,
+            brief_markdown=brief_markdown,
+            notes=note,
+        )
+
+        db.add(package)
+        order.status = OrderStatus.FINAL_READY
+
+        db.commit()
+        db.refresh(order)
+        db.refresh(package)
+
+        logger.info("Final package generated for order %s", order.id)
+
+        return package
+
+    def _generate_divi_html(self, order: Order) -> str:
+        if not self.client:
+            return self._fallback_divi_html(order)
+
+        prompt = self._build_final_generation_prompt(order)
+
+        try:
+            response = self.client.responses.create(
+                model=self.model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a senior website conversion strategist and Divi 5 layout writer. "
+                            "Generate clean, mobile-first, editable HTML sections for a homepage. "
+                            "Use English only. Do not mention OpenAI. Do not include markdown fences."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+            )
+
+            output_text = getattr(response, "output_text", None)
+
+            if output_text and output_text.strip():
+                return output_text.strip()
+
+            return self._fallback_divi_html(order)
+
+        except Exception as exc:
+            logger.exception("Final OpenAI generation failed: %s", exc)
+            return self._fallback_divi_html(order)
+
+    def _build_final_generation_prompt(self, order: Order) -> str:
+        business_name = getattr(order, "business_name", "") or "Client business"
+        source_url = getattr(order, "source_url", "") or ""
+        description = getattr(order, "desired_site_description", "") or ""
+        brief_answers = getattr(order, "brief_answers", None) or {}
+        pricing_reasoning = getattr(order, "pricing_reasoning", "") or ""
+
+        return (
+            "Create a Divi 5-ready homepage HTML package.\n\n"
+            "Requirements:\n"
+            "- English only\n"
+            "- Mobile-first\n"
+            "- Premium, trustworthy, conversion-focused\n"
+            "- Clear hero section\n"
+            "- Services / offer section\n"
+            "- Trust section\n"
+            "- FAQ section\n"
+            "- Final CTA section\n"
+            "- Use simple semantic HTML\n"
+            "- No external scripts\n"
+            "- No markdown fences\n\n"
+            "Project data:\n"
+            f"- Business name: {business_name}\n"
+            f"- Source URL / old site: {source_url}\n"
+            f"- Description: {description}\n"
+            f"- Pricing reasoning: {pricing_reasoning}\n"
+            f"- Brief answers: {brief_answers}\n"
+        )
+
+    def _fallback_divi_html(self, order: Order) -> str:
+        business_name = escape(
+            getattr(order, "business_name", None)
+            or getattr(order, "source_url", None)
+            or "Client business"
+        )
+
+        description = escape(
+            getattr(order, "desired_site_description", None)
+            or "A premium website designed to convert visitors into qualified leads."
+        )
+
+        return f"""
+<section class="siteformo-hero">
+  <div class="siteformo-container">
+    <p class="siteformo-eyebrow">Premium Website Experience</p>
+    <h1>{business_name}</h1>
+    <p>{description}</p>
+    <a href="#contact" class="siteformo-button">Request a custom offer</a>
+  </div>
+</section>
+
+<section class="siteformo-offer">
+  <div class="siteformo-container">
+    <h2>Built to explain your value clearly</h2>
+    <p>This homepage is structured to help visitors understand the offer, trust the business, and take action.</p>
+
+    <div class="siteformo-grid">
+      <div>
+        <h3>Clear positioning</h3>
+        <p>A strong headline, simple message, and direct call to action.</p>
+      </div>
+      <div>
+        <h3>Conversion structure</h3>
+        <p>Sections are arranged to reduce friction and support decision-making.</p>
+      </div>
+      <div>
+        <h3>Mobile-first layout</h3>
+        <p>Designed for customers browsing from phones and tablets.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="siteformo-trust">
+  <div class="siteformo-container">
+    <h2>Why customers should trust this business</h2>
+    <ul>
+      <li>Clear explanation of services or offer</li>
+      <li>Trust-building proof and FAQ</li>
+      <li>Simple contact path</li>
+      <li>Professional visual direction</li>
+    </ul>
+  </div>
+</section>
+
+<section class="siteformo-faq">
+  <div class="siteformo-container">
+    <h2>FAQ</h2>
+    <h3>What is the main goal of this page?</h3>
+    <p>To turn visitors into qualified leads or customers.</p>
+    <h3>Is this layout ready for editing?</h3>
+    <p>Yes. The structure is prepared as clean HTML blocks for visual review and Divi editing.</p>
+  </div>
+</section>
+
+<section id="contact" class="siteformo-final-cta">
+  <div class="siteformo-container">
+    <h2>Ready to move forward?</h2>
+    <p>Request a custom offer and continue the project with a detailed brief.</p>
+    <a href="#contact" class="siteformo-button">Start now</a>
+  </div>
+</section>
+""".strip()
+
+    def _build_brief_markdown(self, order: Order) -> str:
+        brief_answers = getattr(order, "brief_answers", None) or {}
+
+        if not brief_answers:
+            return "- Generated from the first SiteFormo brief."
+
+        return "\n".join(f"- {key}: {value}" for key, value in brief_answers.items())
 
     def _build_system_prompt(self) -> str:
         return (
@@ -192,3 +380,8 @@ class GenerationService:
             return "Schedule a call"
 
         return "Get started today"
+
+
+def generate_site(db: Session, order: Order):
+    service = GenerationService()
+    return service.generate_final_package_for_order(db, order)
