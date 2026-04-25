@@ -1,31 +1,35 @@
 from fastapi import APIRouter, HTTPException
-from app.services.email_service import send_email
 from app.core.config import settings
+from app.services.approval_service import ApprovalService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 @router.get("/test-email")
 async def test_email():
-    await send_email(
-        settings.owner_email,
-        "SiteFormo test email",
-        "<h1>Email works ✅</h1><p>SMTP is configured correctly.</p>",
-    )
-
-    return {
-        "status": "sent",
-        "message": "Test email was sent",
-    }
+    return {"status": "ok"}
 
 
 @router.get("/approve/{order_id}")
 def approve(order_id: str, token: str):
-    if token != settings.admin_api_key:
-        raise HTTPException(status_code=403, detail="Unauthorized")
+    if not ApprovalService.verify(order_id, "approve", token):
+        raise HTTPException(status_code=403, detail="Invalid token")
 
+    # пока просто ответ, позже подключим генерацию
     return {
         "status": "approved",
         "order_id": order_id,
-        "message": "Approval endpoint works. Generation logic will be connected next.",
+        "message": "Approved ✅",
+    }
+
+
+@router.get("/reject/{order_id}")
+def reject(order_id: str, token: str):
+    if not ApprovalService.verify(order_id, "reject", token):
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    return {
+        "status": "rejected",
+        "order_id": order_id,
+        "message": "Rejected ❌",
     }
