@@ -8,7 +8,7 @@ router = APIRouter(tags=["admin"])
 def admin_page():
     return """
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Siteformo Leads Admin</title>
@@ -28,7 +28,7 @@ def admin_page():
 </head>
 <body>
   <h1>Siteformo Leads Admin</h1>
-  <p class="muted">Введите ADMIN_API_KEY из Railway Variables.</p>
+  <p class="muted">Enter ADMIN_API_KEY from Railway Variables.</p>
 
   <div class="card">
     <input id="key" placeholder="ADMIN_API_KEY" style="width: 260px;" />

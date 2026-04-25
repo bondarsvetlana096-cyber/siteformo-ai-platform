@@ -644,24 +644,6 @@ def _page_has_theme_images(html_text: str, profile: dict, source: dict | None = 
 
 
 def _language_pack(language: str) -> dict[str, str]:
-    if language == "ru":
-        return {
-            "badge": "Новый дизайн",
-            "primary_cta": "Оставить заявку",
-            "secondary_cta": "Посмотреть услуги",
-            "services": "Услуги",
-            "benefits": "Почему выбирают нас",
-            "proof": "Почему это удобно",
-            "faq": "Частые вопросы",
-            "facts": "Сохранённые данные",
-            "contact": "Контакты",
-            "faq_q1": "Как записаться?",
-            "faq_a1": "Оставьте заявку через форму или свяжитесь по указанным контактам.",
-            "faq_q2": "Сохраняются ли контакты и цены?",
-            "faq_a2": "Да, ключевые фактические данные сохраняются без изменений.",
-            "hero_fallback": "Современный сайт для вашего бизнеса",
-            "hero_sub_fallback": "Более ясная структура, сильнее оффер и понятный следующий шаг для клиента.",
-        }
     return {
         "badge": "Refreshed design",
         "primary_cta": "Request a consultation",
@@ -673,14 +655,12 @@ def _language_pack(language: str) -> dict[str, str]:
         "facts": "Preserved facts",
         "contact": "Contact",
         "faq_q1": "How do I get started?",
-        "faq_a1": "Use the main contact path on the page to request the service.",
-        "faq_q2": "Are prices and contacts preserved?",
-        "faq_a2": "Yes. Key factual data is kept intact.",
-        "hero_fallback": "A clearer, stronger website for this business",
-        "hero_sub_fallback": "Sharper positioning, better structure, and a more persuasive next step for visitors.",
+        "faq_a1": "Send a request through the form or contact the business directly.",
+        "faq_q2": "Are contacts and prices preserved?",
+        "faq_a2": "Yes, key factual data is preserved without changes.",
+        "hero_fallback": "A modern website for your business",
+        "hero_sub_fallback": "Clearer structure, stronger offer, and an easier next step for clients.",
     }
-
-
 def _source_guided_fallback(source: dict | None, business_description: str | None, profile: dict, client: OpenAI | None = None) -> dict:
     language = profile.get("language", "en")
     pack = _language_pack(language)

@@ -14,6 +14,7 @@ def init_db() -> None:
         from app.db.session import Base as AppBase, engine as app_engine
         from app.models import conversation  # noqa: F401
         from app.models import order  # noqa: F401
+        from app.models import request  # noqa: F401
 
         AppBase.metadata.create_all(bind=app_engine)
     except Exception as exc:

@@ -5,7 +5,7 @@ class PricingService:
     COMPLEX_REFERENCE_KEYWORDS = {
         'popup', 'pop-up', 'modal', 'animation', 'animated', 'effect', 'effects', 'transition', 'overlay',
         'premium', 'luxury', 'expensive', 'interactive', 'microinteraction', 'hero animation', 'scroll effect',
-        'floating', 'parallax', 'video', 'hover', 'дорог', 'эффект', 'анимац', 'переход', 'всплыва', 'люкс'
+        'floating', 'parallax', 'video', 'hover', 'exclusive', 'high-end', 'advanced'
     }
 
     @staticmethod
@@ -44,7 +44,7 @@ class PricingService:
             return (
                 PricingTier.PREMIUM,
                 1500,
-                'Похоже, проект включает более сложную функциональность. Такой уровень обычно относится к более дорогой разработке. Если этот формат вам подходит, мы продолжим обработку заказа. Если нет, можно упростить проект и перейти к более бюджетному варианту без части функций.',
+                'This project includes advanced functionality, so it fits a higher-complexity build. If that scope feels too large, SiteFormo can offer a simplified option with fewer advanced features.',
             )
 
         business = any([
@@ -60,16 +60,16 @@ class PricingService:
                 return (
                     PricingTier.BUSINESS,
                     900,
-                    'Похоже, вам нравится более дорогой уровень сайта — с сильной подачей, эффектами или более сложной визуальной структурой. Если вас устраивает такой уровень, мы продолжим обработку заказа в этом направлении. Если нет, я могу предложить более бюджетный вариант в похожем стиле.',
+                    'The requested style suggests a stronger visual direction with effects or a more premium presentation. A simplified version can be offered if the client prefers a lower-budget route.',
                 )
             return (
                 PricingTier.BUSINESS,
                 900,
-                'Похоже, вам нужен уже не просто базовый лендинг. С учетом структуры сайта и задачи на привлечение клиентов лучше подходит расширенный вариант. Если вас устраивает этот уровень, мы продолжим обработку заказа. Если нет, можно упростить проект и подобрать более бюджетную альтернативу.',
+                'This looks more complete than a basic landing page because it needs conversion structure and lead generation. The scope can be simplified if the client wants a leaner option.',
             )
 
         return (
             PricingTier.STARTER,
             600,
-            'Это базовый вариант без сложной логики и без дорогих эффектов, поэтому здесь подходит формат простого лендинга за 600 евро.',
+            'This is a focused landing page without advanced functionality or premium effects, so the starter package is the best fit.',
         )

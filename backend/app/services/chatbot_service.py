@@ -42,7 +42,7 @@ class ChatbotService:
         incoming_text = (text or "").strip()
         ChatbotService._save_message(db, session, "in", incoming_text)
 
-        reply = f"Ты написал: {incoming_text}" if incoming_text else "Ты написал пустое сообщение"
+        reply = f"You wrote: {incoming_text}" if incoming_text else "Please send a message to continue."
 
         ChatbotService._save_message(db, session, "out", reply)
         return reply

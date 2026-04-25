@@ -43,27 +43,25 @@ def generate_followup_message(lead: Lead, stage: int) -> str:
     answers = _parse_answers(lead.raw_text)
     is_hot = bool(getattr(lead, "is_hot", False) or lead.status == "qualified")
     fallback_by_stage = {
-        0: "Привет! Вы оставляли заявку на SiteFormo. Хотите, покажу пример решения под ваш бизнес?",
-        1: "Мы можем предложить быстрый план запуска сайта/AI-формы под вашу задачу. Написать детали?",
-        2: "Могу подготовить короткий план: структура, сроки и следующий шаг. Актуально?",
-        3: "Закрываю заявки на этой неделе. Если проект ещё актуален — напишите, и я помогу с запуском.",
+        0: "Hi! You started a SiteFormo website request. Would you like a quick plan for your business?",
+        1: "SiteFormo can prepare a fast launch plan for your page or AI form. Should I send the next step?",
+        2: "I can outline the page structure, timeline, and next step for your project. Is this still relevant?",
+        3: "I am closing this request for now. If the website project is still active, reply here and I will help you continue.",
     }
     if not settings.openai_api_key:
         return fallback_by_stage.get(stage, fallback_by_stage[3])
 
     prompt = f"""
-Ты — аккуратный менеджер по продажам SiteFormo. Сгенерируй короткое follow-up сообщение на русском до 3 строк.
-Без давления, без обещаний гарантий, с мягким CTA.
+You are a careful SiteFormo sales assistant. Generate a short English follow-up message up to 3 lines.
+No pressure, no guarantees, and include a soft call to action.
 
-Данные лида:
-- Услуга: {lead.service or answers.get('start')}
-- Тип бизнеса: {lead.city or answers.get('business_type')}
-- Срочность: {lead.urgency or answers.get('timeline')}
-- Бюджет: {answers.get('budget')}
-- Статус: {'горячий' if is_hot else 'обычный'}
-- Стадия дожима: {stage + 1}
-
-Если лид горячий — будь чуть прямее. Если обычный — дай больше ценности.
+Lead data:
+- Service: {lead.service or answers.get('start')}
+- Business type: {lead.city or answers.get('business_type')}
+- Urgency: {lead.urgency or answers.get('timeline')}
+- Budget: {answers.get('budget')}
+- Status: {'hot' if is_hot else 'standard'}
+- Follow-up stage: {stage + 1}
 """.strip()
     try:
         client = OpenAI(api_key=settings.openai_api_key, timeout=settings.openai_timeout_seconds, max_retries=settings.openai_max_retries)
@@ -73,8 +71,6 @@ def generate_followup_message(lead: Lead, stage: int) -> str:
     except Exception as exc:
         logger.warning("followup_ai_failed error=%s", mask_sensitive(str(exc)))
         return fallback_by_stage.get(stage, fallback_by_stage[3])
-
-
 async def _notify_owner_followup(lead: Lead, message: str, stage: int) -> None:
     lead_data = {
         "service": lead.service,

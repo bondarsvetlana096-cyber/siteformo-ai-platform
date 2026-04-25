@@ -106,12 +106,41 @@ def _is_limit_bypass_email(email: str | None) -> bool:
     return normalize_email(email) in settings.bypass_limit_emails
 
 
+def _localized_channel_message(contact_type: str, token: str, language: str | None) -> str:
+    phrases = {
+        "en": "Hello SiteFormo, I confirm I started this website demo. Code:",
+        "fr": "Bonjour SiteFormo, I confirm I started this website demo. Code:",
+        "it": "Ciao SiteFormo, I confirm I started this website demo. Code:",
+        "es": "Hola SiteFormo, I confirm I started this website demo. Code:",
+        "de": "Hallo SiteFormo, I confirm I started this website demo. Code:",
+        "da": "Hej SiteFormo, I confirm I started this website demo. Code:",
+        "no": "Hei SiteFormo, I confirm I started this website demo. Code:",
+        "fi": "Hei SiteFormo, I confirm I started this website demo. Code:",
+        "sv": "Hej SiteFormo, I confirm I started this website demo. Code:",
+    }
+    prefix = phrases.get((language or "en").lower(), phrases["en"])
+    return f"{prefix} SF-{token}. Channel: {contact_type.capitalize()}."
+
+
+def _channel_confirmation_meta(contact_type: str, message: str) -> dict:
+    from urllib.parse import quote
+    if contact_type == ContactType.WHATSAPP and settings.whatsapp_public_number:
+        phone = "".join(ch for ch in settings.whatsapp_public_number if ch.isdigit())
+        return {"confirmation_link": f"https://wa.me/{phone}?text={quote(message)}", "channel_contact": settings.whatsapp_public_number}
+    if contact_type == ContactType.TELEGRAM and settings.telegram_bot_username:
+        username = settings.telegram_bot_username.lstrip("@")
+        return {"confirmation_link": f"https://t.me/{username}?start=siteformo_demo", "channel_contact": f"@{username}"}
+    if contact_type == ContactType.MESSENGER and settings.messenger_contact_url:
+        return {"confirmation_link": settings.messenger_contact_url, "channel_contact": settings.messenger_contact_label or settings.messenger_contact_url}
+    return {"confirmation_link": None, "channel_contact": None}
+
+
+
 def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str, str]) -> tuple[str, Request | None, dict | None]:
     ip = _client_ip(headers)
     ip_hash = sha256_text(ip)
     normalized_email, normalized_contact = _normalize_contact(payload.contact_type, payload.contact_value or "")
     identity_hash = _build_user_identity(payload.contact_type, normalized_contact, ip, payload.fingerprint)
-
     bypass_limits = _is_limit_bypass_email(normalized_email)
 
     normalized_source_url, normalized_business_description, normalized_business_type = _normalize_generation_inputs(
@@ -125,7 +154,6 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         usage = UserUsage(
             email_normalized=normalized_contact,
             fingerprint=payload.fingerprint,
-            generation_metadata={"business_type": normalized_business_type} if normalized_business_type else None,
             ip_hash=ip_hash,
             user_identity_hash=identity_hash,
             free_attempts_used=0,
@@ -155,23 +183,12 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         db.commit()
         db.refresh(req)
         logger.warning("[API] limit reached: contact=%s", normalized_contact)
-        log_event(
-            db,
-            "request_limit_reached",
-            request_id=req.id,
-            payload={"contact_type": payload.contact_type},
-            distinct_id=normalized_contact,
-        )
+        log_event(db, "request_limit_reached", request_id=req.id, payload={"contact_type": payload.contact_type}, distinct_id=normalized_contact)
         return RequestStatus.LIMIT_REACHED, req, None
 
     current_attempt_number = 1 if bypass_limits else usage.free_attempts_used + 1
-
-    logger.info(
-        "[API] normalized payload source_url=%s business_type=%s business_description=%s",
-        normalized_source_url,
-        normalized_business_type,
-        normalized_business_description,
-    )
+    initial_status = RequestStatus.QUEUED if payload.contact_type == ContactType.EMAIL else RequestStatus.CREATED
+    generation_metadata = {"business_type": normalized_business_type} if normalized_business_type else {}
 
     req = Request(
         request_type=payload.request_type,
@@ -180,10 +197,10 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
         contact_value=normalized_contact,
         source_url=normalized_source_url,
         business_description=normalized_business_description,
-        status=RequestStatus.QUEUED,
+        status=initial_status,
         contact_confirmation_token=secrets.token_urlsafe(12),
         fingerprint=payload.fingerprint,
-        generation_metadata={"business_type": normalized_business_type} if normalized_business_type else None,
+        generation_metadata=generation_metadata,
         ip_hash=ip_hash,
         user_identity_hash=identity_hash,
         attempt_number=current_attempt_number,
@@ -193,18 +210,24 @@ def create_request(db: Session, payload: CreateRequestPayload, headers: dict[str
     if not bypass_limits:
         usage.free_attempts_used += 1
 
+    if req.contact_type != ContactType.EMAIL:
+        req.outbound_message_text = _localized_channel_message(
+            req.contact_type,
+            req.contact_confirmation_token or secrets.token_urlsafe(6),
+            getattr(payload, "preferred_language", "en"),
+        )
+        meta = req.generation_metadata or {}
+        meta.update(_channel_confirmation_meta(req.contact_type, req.outbound_message_text))
+        req.generation_metadata = meta
+
     db.commit()
     db.refresh(req)
 
-    enqueue_job(db, "generate_demo", {"request_id": str(req.id)})
-    log_event(
-        db,
-        "request_queued",
-        request_id=req.id,
-        payload={"request_type": req.request_type, "contact_type": req.contact_type},
-        distinct_id=normalized_contact,
-    )
-    return RequestStatus.QUEUED, req, None
+    if req.contact_type == ContactType.EMAIL:
+        enqueue_job(db, "generate_demo", {"request_id": str(req.id)})
+
+    log_event(db, "request_queued" if req.status == RequestStatus.QUEUED else "request_contact_confirmation_required", request_id=req.id, payload={"request_type": req.request_type, "contact_type": req.contact_type}, distinct_id=normalized_contact)
+    return req.status, req, None
 
 
 def confirm_contact_and_queue(
@@ -218,6 +241,9 @@ def confirm_contact_and_queue(
         return None
 
     req.contact_confirmed_at = _utcnow()
+    if req.status == RequestStatus.CREATED:
+        req.status = RequestStatus.QUEUED
+        enqueue_job(db, "generate_demo", {"request_id": str(req.id)})
     if inbound_message_text:
         req.inbound_message_text = inbound_message_text
     meta = req.generation_metadata or {}
@@ -227,7 +253,6 @@ def confirm_contact_and_queue(
     db.commit()
     log_event(db, "contact_confirmed", request_id=req.id, payload={"contact_type": req.contact_type}, distinct_id=req.contact_value)
     return req
-
 
 async def process_generate_job(db: Session, request_id: str) -> None:
     req = db.get(Request, _parse_request_uuid(request_id))

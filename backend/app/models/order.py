@@ -96,7 +96,11 @@ class Order(Base):
 
     client: Mapped['ClientProfile'] = relationship(back_populates='orders')
     concepts: Mapped[list['HomepageConcept']] = relationship(back_populates='order', cascade='all, delete-orphan')
-    packages: Mapped[list['FinalPackage']] = relationship(back_populates='order', cascade='all, delete-orphan')
+    final_packages: Mapped[list['FinalPackage']] = relationship(back_populates='order', cascade='all, delete-orphan')
+
+    
+    def packages(self) -> list['FinalPackage']:
+        return self.final_packages
 
 
 class HomepageConcept(Base):
@@ -125,4 +129,4 @@ class FinalPackage(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    order: Mapped['Order'] = relationship(back_populates='packages')
+    order: Mapped['Order'] = relationship(back_populates='final_packages')

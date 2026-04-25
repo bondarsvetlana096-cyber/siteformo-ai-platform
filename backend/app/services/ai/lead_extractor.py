@@ -32,9 +32,9 @@ async def extract_lead_data(text: str, user_id: str, channel: str | None = None)
             {
                 "role": "system",
                 "content": (
-                    "Извлеки лид из сообщения. Верни только JSON без markdown. "
-                    "Поля: service, city, urgency, contact. "
-                    "Если данных нет, используй null."
+                    "Extract lead data from the message. Return JSON only with no markdown. "
+                    "Fields: service, city, urgency, contact. "
+                    "Use null when data is missing."
                 ),
             },
             {"role": "user", "content": text},

@@ -34,30 +34,30 @@ def calculate_estimate(answers: dict[str, Any]) -> dict[str, Any]:
         base_price *= 1.2
 
     price = int(round(base_price / 10) * 10)
-    delivery = "7-10 дней" if price <= 1200 else "2-3 недели"
+    delivery = "7-10 days" if price <= 1200 else "2-3 weeks"
     complexity = "standard" if price <= 1200 else "advanced"
     return {"price_eur": price, "timeline": delivery, "complexity": complexity}
 
 
 def generate_offer_text(answers: dict[str, Any], labels: dict[str, dict[str, str]], estimate: dict[str, Any]) -> str:
-    service = labels.get("start", {}).get(answers.get("start"), answers.get("start", "проект"))
-    business = labels.get("business_type", {}).get(answers.get("business_type"), answers.get("business_type", "бизнес"))
-    timeline = labels.get("timeline", {}).get(answers.get("timeline"), answers.get("timeline", "сроки уточним"))
-    budget = labels.get("budget", {}).get(answers.get("budget"), answers.get("budget", "бюджет уточним"))
+    service = labels.get("start", {}).get(answers.get("start"), answers.get("start", "project"))
+    business = labels.get("business_type", {}).get(answers.get("business_type"), answers.get("business_type", "business"))
+    timeline = labels.get("timeline", {}).get(answers.get("timeline"), answers.get("timeline", "timeline to be confirmed"))
+    budget = labels.get("budget", {}).get(answers.get("budget"), answers.get("budget", "budget to be confirmed"))
     return (
-        "Коммерческое предложение SiteFormo\n\n"
-        f"Задача: {service}\n"
-        f"Тип бизнеса: {business}\n"
-        f"Желаемые сроки: {timeline}\n"
-        f"Заявленный бюджет: {budget}\n\n"
-        f"Предварительная оценка: от €{estimate['price_eur']}\n"
-        f"Ориентировочный срок реализации: {estimate['timeline']}\n\n"
-        "Что входит:\n"
-        "- структура лендинга или сайта под вашу задачу;\n"
-        "- продающий сценарий и CTA;\n"
-        "- AI-форма/квиз для сбора заявок;\n"
-        "- базовая интеграция с каналами связи.\n\n"
-        "Следующий шаг: коротко уточним детали и подготовим точный план запуска."
+        "SiteFormo proposal\n\n"
+        f"Project: {service}\n"
+        f"Business type: {business}\n"
+        f"Desired timeline: {timeline}\n"
+        f"Budget: {budget}\n\n"
+        f"Preliminary estimate: from €{estimate['price_eur']}\n"
+        f"Estimated delivery: {estimate['timeline']}\n\n"
+        "Included:\n"
+        "- landing page or website structure for the client goal;\n"
+        "- conversion-focused copy flow and CTA;\n"
+        "- AI form or quiz for lead capture;\n"
+        "- basic integration with contact channels.\n\n"
+        "Next step: confirm a few details and prepare a precise launch plan."
     )
 
 

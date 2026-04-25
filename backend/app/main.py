@@ -12,6 +12,7 @@ from app.api.routes import router as api_router
 from app.api.channel_routes import router as channel_router
 from app.api.leads import router as leads_router
 from app.api.order_routes import router as order_router
+from app.api.request_routes import router as request_router
 
 # 🔥 ВАЖНО — ПРАВИЛЬНЫЙ ИМПОРТ
 from app.api.admin_routes import router as admin_routes_router
@@ -70,6 +71,7 @@ app.include_router(whatsapp_router)
 # Business logic
 app.include_router(leads_router)
 app.include_router(order_router)
+app.include_router(request_router)
 
 # 🔥 ПОДКЛЮЧАЕМ ПРАВИЛЬНЫЙ ADMIN ROUTER
 app.include_router(admin_routes_router)

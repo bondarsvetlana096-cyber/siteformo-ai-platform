@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     allow_manual_decision_without_token: bool = True
     rate_limit_enabled: bool = True
     rate_limit_per_hour: int = 60
-    free_attempt_limit: int = 1
+    free_attempt_limit: int = 2
     bypass_limit_emails: str | None = None
     payment_approval_bypass_emails: str | None = "klon97048@gmail.com"
 

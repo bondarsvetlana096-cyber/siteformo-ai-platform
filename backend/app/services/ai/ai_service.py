@@ -14,14 +14,14 @@ async def generate_ai_reply(user_text: str, user_id: str, channel: str) -> str:
     user_text = (user_text or "").strip()
 
     if not user_text:
-        return "Напишите, пожалуйста, какую услугу вы ищете."
+        return "Please describe the website or landing page you want to create."
 
     if len(user_text) > settings.MAX_USER_MESSAGE_CHARS:
         user_text = user_text[: settings.MAX_USER_MESSAGE_CHARS]
 
     if is_rate_limited(user_id):
         logger.warning("rate_limited user=%s channel=%s", mask_sensitive(user_id), channel)
-        return "Слишком много сообщений за короткое время. Напишите, пожалуйста, через минуту."
+        return "Too many messages in a short time. Please try again in a minute."
 
     current_state = get_state(user_id)
     history = get_history(user_id)
@@ -38,10 +38,10 @@ async def generate_ai_reply(user_text: str, user_id: str, channel: str) -> str:
 
     system_prompt = (
         f"{SYSTEM_PROMPT}\n\n"
-        f"Канал: {channel}\n"
-        f"Текущий этап воронки: {current_state}\n"
-        f"Следующий предполагаемый этап: {next_state}\n"
-        f"Извлечённые данные лида: {lead_data}\n"
+        f"Channel: {channel}\n"
+        f"Current funnel stage: {current_state}\n"
+        f"Next expected stage: {next_state}\n"
+        f"Extracted lead data: {lead_data}\n"
     )
 
     reply = await create_response_with_retry(
@@ -50,7 +50,7 @@ async def generate_ai_reply(user_text: str, user_id: str, channel: str) -> str:
             *history,
             {"role": "user", "content": user_text},
         ],
-        fallback_text="Понял. Уточните, пожалуйста, город, услугу и насколько срочно нужно?",
+        fallback_text="Got it. Please share the business type, website goal, and how soon you need it.",
     )
 
     save_turn(user_id, user_text, reply)

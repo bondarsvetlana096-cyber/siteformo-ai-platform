@@ -16,7 +16,7 @@ client = OpenAI(
 
 async def create_response_with_retry(input_data, model: str | None = None, fallback_text: str | None = None) -> str:
     model = model or settings.OPENAI_MODEL
-    fallback_text = fallback_text or "Понял. Уточните, пожалуйста, город и какая услуга нужна?"
+    fallback_text = fallback_text or "Got it. Please share the business type and the website goal."
 
     last_error = None
 
