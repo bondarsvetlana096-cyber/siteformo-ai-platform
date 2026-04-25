@@ -101,3 +101,7 @@ docs/CRM_AND_NOTIFICATIONS.md
 ```
 
 Подробнее: `docs/GUIDED_WEB_CHAT_FLOW_RU.md`.
+
+## Latest guided AI sales flow patch
+
+See `GUIDED_FLOW_AI_FOLLOWUPS_PATCH_2026-04-24.md` for the latest changes: guided button-only quiz, lead scoring, offer generation, Telegram/WhatsApp CTA, and AI follow-up worker.

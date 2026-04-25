@@ -83,14 +83,25 @@ class Settings(BaseSettings):
     main_site_base_url: str | None = "https://siteformo.com"
     main_site_continue_path: str | None = "/continue"
     main_site_checkout_path: str | None = "/checkout"
-    demo_ttl_minutes: int = 60
-    demo_retention_hours: int = 72
+    demo_ttl_minutes: int = 10
+    demo_retention_hours: int = 96
     demo_storage_dir: str | None = "./demo_storage"
     demo_protection_enabled: bool = True
     demo_ready_followup_delay_minutes: int = 30
     demo_cta_followup_delay_minutes: int = 180
     checkout_followup_delay_minutes: int = 1440
     max_followup_count: int = 3
+
+    # Guided sales flow / lead nurturing
+    enable_guided_followups: bool = True
+    guided_followup_poll_seconds: int = 60
+    guided_followup_stage_1_minutes: int = 5
+    guided_followup_stage_2_minutes: int = 60
+    guided_followup_stage_3_minutes: int = 1440
+    guided_followup_stage_4_minutes: int = 4320
+    guided_followup_max_stage: int = 4
+    guided_followup_send_to_lead: bool = False
+    offer_output_dir: str | None = "app/static/offers"
 
     # Queue/storage/Supabase/S3
     queue_backend: str | None = "inline"
@@ -158,6 +169,7 @@ class Settings(BaseSettings):
         "main_site_continue_path",
         "main_site_checkout_path",
         "demo_storage_dir",
+        "offer_output_dir",
         "queue_backend",
         "storage_backend",
         "redis_url",
@@ -281,5 +293,13 @@ class Settings(BaseSettings):
     def ENABLE_DB_LEADS(self) -> bool:
         return self.enable_db_leads
 
+
+    
+    def ENABLE_GUIDED_FOLLOWUPS(self) -> bool:
+        return self.enable_guided_followups
+
+    
+    def GUIDED_FOLLOWUP_SEND_TO_LEAD(self) -> bool:
+        return self.guided_followup_send_to_lead
 
 settings = Settings()

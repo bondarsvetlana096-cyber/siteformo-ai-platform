@@ -7,12 +7,14 @@ from app.services.ai.ai_service import generate_ai_reply
 router = APIRouter()
 
 
+@router.get("/twilio/webhook")
 @router.get("/whatsapp/webhook")
 @router.get("/channels/whatsapp/webhook")
 async def whatsapp_webhook_check():
     return {"ok": True, "channel": "whatsapp"}
 
 
+@router.post("/twilio/webhook")
 @router.post("/whatsapp/webhook")
 @router.post("/channels/whatsapp/webhook")
 async def whatsapp_webhook(

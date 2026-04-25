@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
+from typing import Any
+
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -15,8 +17,8 @@ class WebChatStartRequest(BaseModel):
 
 class WebChatAnswerRequest(BaseModel):
     session_id: str | None = None
-    answer: str | None = Field(default=None, description="Selected option value or contact text for the contact step")
-    message: str | None = Field(default=None, description="Legacy alias for answer")
+    answer: Any = Field(default=None, description="Selected option value, contact text, or structured field answers")
+    message: Any = Field(default=None, description="Legacy alias for answer")
 
 
 @router.post("/web-chat/start")
