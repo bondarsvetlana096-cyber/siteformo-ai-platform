@@ -42,8 +42,8 @@ async def create_checkout(data: CheckoutRequest):
 
     deposit = _safe_deposit_for_tier(data.tier, data.amount)
 
-    success_url = os.getenv("FRONTEND_SUCCESS_URL", "https://siteformo.com/payment-success")
-    cancel_url = os.getenv("FRONTEND_CANCEL_URL", "https://siteformo.com/payment-cancelled")
+    success_url = f"https://siteformo.com/?payment=success&order_id={data.order_id}"
+    cancel_url = os.getenv("FRONTEND_CANCEL_URL", "https://siteformo.com/?payment=cancel")
 
     try:
         session = stripe.checkout.Session.create(
