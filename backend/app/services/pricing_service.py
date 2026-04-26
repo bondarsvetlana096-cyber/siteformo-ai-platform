@@ -8,6 +8,19 @@ BUSINESS_PRICE = 900
 PREMIUM_PRICE = 1500
 
 
+def _normalize_data(data: Any) -> Dict[str, Any]:
+    if isinstance(data, dict):
+        return data
+
+    if hasattr(data, "model_dump"):
+        return data.model_dump()
+
+    if hasattr(data, "dict"):
+        return data.dict()
+
+    return {}
+
+
 def _to_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -27,12 +40,9 @@ def _to_int(value: Any, default: int = 1) -> int:
         return default
 
 
-def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Core pricing logic
-    """
+def calculate_price(data: Any) -> Dict[str, Any]:
+    data = _normalize_data(data)
 
-    # --- INPUT ---
     ecommerce = _to_bool(data.get("ecommerce"))
     cart = _to_bool(data.get("cart"))
     catalog = _to_bool(data.get("catalog"))
@@ -43,7 +53,6 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
     services_count = _to_int(data.get("services_count"), default=1)
     has_service_pages = _to_bool(data.get("has_service_pages"))
 
-    # --- PREMIUM LOGIC (FIRST) ---
     premium_reasons = []
 
     if ecommerce:
@@ -62,19 +71,11 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
             "tier": "Premium",
             "price": PREMIUM_PRICE,
             "currency": "EUR",
-            "reason": (
-                "This project requires advanced functionality: "
-                + ", ".join(premium_reasons)
-                + "."
-            ),
-            "signals": {
-                "premium": premium_reasons,
-                "business": [],
-                "starter": [],
-            },
+            "reason": "This project requires advanced functionality: "
+            + ", ".join(premium_reasons)
+            + ".",
         }
 
-    # --- BUSINESS LOGIC ---
     business_reasons = []
 
     if pages_requested >= 2:
@@ -89,53 +90,23 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
             "tier": "Business",
             "price": BUSINESS_PRICE,
             "currency": "EUR",
-            "reason": (
-                "This project requires a more complex structure: "
-                + ", ".join(business_reasons)
-                + "."
-            ),
-            "signals": {
-                "premium": [],
-                "business": business_reasons,
-                "starter": [],
-            },
+            "reason": "This project requires a more complex structure: "
+            + ", ".join(business_reasons)
+            + ".",
         }
 
-    # --- STARTER ---
     return {
         "tier": "Starter",
         "price": STARTER_PRICE,
         "currency": "EUR",
         "reason": "Simple landing page without advanced functionality.",
-        "signals": {
-            "premium": [],
-            "business": [],
-            "starter": ["1 page", "no advanced features"],
-        },
     }
 
 
-# --- COMPATIBILITY LAYER (CRITICAL) ---
 class PricingService:
     @staticmethod
-    def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
-        return calculate_price(data)
-
-    @staticmethod
-    def get_price(data: Dict[str, Any]) -> Dict[str, Any]:
-        return calculate_price(data)
-
-    @staticmethod
-    def estimate(data: Dict[str, Any]) -> Dict[str, Any]:
-        return calculate_price(data)
-
-    @staticmethod
-    def classify(data: Dict[str, Any]):
-        """
-        This is required by intake_service.py
-        """
+    def classify(data: Any):
         result = calculate_price(data)
-
         return (
             result["tier"],
             result["price"],
