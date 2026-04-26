@@ -28,15 +28,6 @@ def _to_int(value: Any, default: int = 1) -> int:
 
 
 def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Main pricing logic for SiteFormo AI Sales Funnel.
-
-    Tariffs:
-    - Starter: 600€ — simple landing page
-    - Business: 900€ — more structure / more pages / service pages
-    - Premium: 1500€ — ecommerce / booking / catalog / cart / integrations
-    """
-
     ecommerce = _to_bool(data.get("ecommerce"))
     cart = _to_bool(data.get("cart"))
     catalog = _to_bool(data.get("catalog"))
@@ -60,9 +51,6 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
     if advanced_integrations:
         premium_reasons.append("advanced integrations / CRM / AI / payments")
 
-    # IMPORTANT:
-    # Premium must be checked FIRST.
-    # Otherwise large projects with ecommerce/booking can be incorrectly priced as Business.
     if premium_reasons:
         return {
             "tier": "Premium",
@@ -119,6 +107,19 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# Optional alias, in case other files import get_price instead of calculate_price
 def get_price(data: Dict[str, Any]) -> Dict[str, Any]:
     return calculate_price(data)
+
+
+class PricingService:
+    @staticmethod
+    def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
+        return calculate_price(data)
+
+    @staticmethod
+    def get_price(data: Dict[str, Any]) -> Dict[str, Any]:
+        return calculate_price(data)
+
+    @staticmethod
+    def estimate(data: Dict[str, Any]) -> Dict[str, Any]:
+        return calculate_price(data)
