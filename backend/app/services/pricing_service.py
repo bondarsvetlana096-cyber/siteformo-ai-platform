@@ -1,4 +1,6 @@
 # backend/app/services/pricing_service.py
+print("🔥 THIS IS THE REAL FILE")
+# backend/app/services/pricing_service.py
 
 from typing import Any, Dict
 
