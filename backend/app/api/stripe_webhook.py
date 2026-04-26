@@ -1,5 +1,6 @@
 import os
 import inspect
+import base64
 import stripe
 import requests
 
@@ -12,13 +13,13 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.session import get_db
 from app.models.order import Order
 from app.services import generation_service
+from app.services.pdf_service import create_divi_pdf
 
 
 router = APIRouter()
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
-
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://siteformo.com")
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "klon97048@gmail.com")
@@ -162,14 +163,18 @@ def send_owner_payment_email(order_id, customer_email, tier, deposit_eur, order=
     business_description = contact["business_description"] or "Not provided"
     questionnaire_link = _questionnaire_link(order_id)
 
-    subject = f"💰 SiteFormo payment received — €{deposit_eur}"
+    subject = f"💰 Оплата в размере {deposit_eur} евро произведена"
 
     body = f"""
-SiteFormo payment received.
+Оплата в размере {deposit_eur or "Unknown"} евро произведена.
 
-IMPORTANT:
-Stripe payment only unlocks the extended questionnaire.
-Website generation must NOT start yet.
+Stripe payment received.
+Order status: APPROVED.
+
+ВАЖНО:
+Stripe только разблокирует расширенную анкету.
+Генерация сайта НЕ запускается после оплаты.
+Генерация запускается только после POST /extended-brief.
 
 Payment details:
 
@@ -178,13 +183,13 @@ Deposit paid: €{deposit_eur or "Unknown"}
 Order ID: {order_id or "Not provided"}
 Order status: APPROVED
 
-Client contact:
+Client contact from first quiz:
 
 Email: {client_email}
 WhatsApp / phone: {client_phone}
 Telegram: {client_telegram}
 
-Project details from quiz:
+Project details from first quiz:
 
 Existing website: {source_url}
 Business / niche: {business_description}
@@ -200,8 +205,9 @@ Client questionnaire link:
 {questionnaire_link}
 
 Next step:
-Wait until the client submits the extended questionnaire.
-Only after POST /extended-brief should generation_service.run(order) be called.
+Client must complete the extended questionnaire.
+Email and phone are required in the extended questionnaire.
+Only after that generation_service.run(order) will be called.
 """
 
     _send_resend_email(
@@ -233,17 +239,11 @@ Please complete your extended project questionnaire here:
 
 {questionnaire_link}
 
+Required before generation:
+- Email address
+- Phone / WhatsApp number
+
 We will start generating your website only after you complete this questionnaire.
-
-Privacy notice:
-We use your information only for your website project and internal communication. We do not sell, share, or transfer your personal data to third parties.
-
-Refund policy reminder:
-- 100% refund if you cancel within 1 hour after payment.
-- 75% refund if you cancel within 24 hours after payment.
-- No refund if you cancel more than 24 hours after payment.
-
-If you have any questions, just reply to this email.
 
 SiteFormo
 """
@@ -255,37 +255,98 @@ SiteFormo
     )
 
 
-def send_owner_generation_result_email(order, generation_result=None):
-    contact = _extract_order_contact(order)
+def send_owner_generation_result_email_with_pdf(
+    order,
+    initial_answers,
+    extended_answers,
+    generation_result,
+    pdf_path,
+):
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    email_from = os.getenv("EMAIL_FROM", "SiteFormo <hello@siteformo.com>")
+    owner_email = os.getenv("OWNER_EMAIL", "klon97048@gmail.com")
 
-    subject = f"✅ SiteFormo site generated — Order {getattr(order, 'id', 'Unknown')}"
+    if not resend_api_key:
+        print("⚠️ RESEND_API_KEY is missing. Final owner email not sent.")
+        return
+
+    order_id = getattr(order, "id", "Unknown")
+    deposit_eur = getattr(order, "deposit_eur", None)
+    tier = getattr(order, "tier", "Unknown")
+
+    email = extended_answers.get("email") or getattr(order, "email", "Not provided")
+    phone = extended_answers.get("phone") or getattr(order, "phone", "Not provided")
+
+    if deposit_eur:
+        payment_line = f"Оплата в размере {deposit_eur} евро произведена."
+        deposit_line = f"€{deposit_eur}"
+    else:
+        payment_line = "Owner bypass: оплата не требовалась."
+        deposit_line = "Owner bypass / no payment"
+
+    subject = f"✅ SiteFormo generated — Order {order_id}"
 
     body = f"""
-Site generation completed.
+{payment_line}
 
-Order ID: {getattr(order, "id", "Unknown")}
+Website generation completed.
 
-Client contact:
+Order details:
+Order ID: {order_id}
+Package: {tier}
+Deposit paid: {deposit_line}
+Status: GENERATED
 
-Email: {contact["client_email"] or "Not provided"}
-WhatsApp / phone: {contact["client_phone"] or "Not provided"}
-Telegram: {contact["client_telegram"] or "Not provided"}
+Required contact from extended questionnaire:
+Email: {email}
+Phone / WhatsApp: {phone}
+
+Initial quiz answers:
+{initial_answers}
+
+Extended questionnaire answers:
+{extended_answers}
 
 Generation result:
+{generation_result}
 
-{generation_result or "Generation finished. Check the admin panel / stored result for details."}
+Attached:
+PDF file with Divi 5 ready website content.
 """
 
-    _send_resend_email(
-        to_email=OWNER_EMAIL,
-        subject=subject,
-        body=body,
+    with open(pdf_path, "rb") as f:
+        pdf_base64 = base64.b64encode(f.read()).decode("utf-8")
+
+    response = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {resend_api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "from": email_from,
+            "to": [owner_email],
+            "subject": subject,
+            "text": body,
+            "attachments": [
+                {
+                    "filename": f"SiteFormo_Divi5_Order_{order_id}.pdf",
+                    "content": pdf_base64,
+                }
+            ],
+        },
+        timeout=20,
     )
+
+    if response.status_code >= 400:
+        print("❌ Failed to send final owner email:", response.status_code, response.text)
+    else:
+        print("✅ Final owner email with PDF sent")
 
 
 class ExtendedBriefPayload(BaseModel):
     order_id: str
-    answers: Dict[str, Any] = {}
+    answers: Dict[str, Any]
 
 
 @router.post("/api/payments/webhook")
@@ -377,9 +438,20 @@ async def submit_extended_brief(
     if current_status != "APPROVED":
         raise HTTPException(
             status_code=400,
-            detail="Order is not approved. Payment must be completed first.",
+            detail="Order is not approved. Payment or owner approval is required first.",
         )
 
+    email = (payload.answers.get("email") or "").strip()
+    phone = (payload.answers.get("phone") or "").strip()
+
+    if not email or not phone:
+        raise HTTPException(
+            status_code=400,
+            detail="Email and phone are required before generation.",
+        )
+
+    _set_if_exists(order, "email", email)
+    _set_if_exists(order, "phone", phone)
     _set_if_exists(order, "extended_brief_answers", payload.answers)
     _set_if_exists(order, "extended_brief", payload.answers)
     _set_if_exists(order, "brief_answers_extended", payload.answers)
@@ -390,22 +462,35 @@ async def submit_extended_brief(
     db.refresh(order)
 
     try:
-        result = generation_service.run(order)
+        generation_result = generation_service.run(order)
 
-        if inspect.isawaitable(result):
-            result = await result
+        if inspect.isawaitable(generation_result):
+            generation_result = await generation_result
+
+        initial_answers = getattr(order, "brief_answers", None) or {}
+        extended_answers = payload.answers
+
+        pdf_path = create_divi_pdf(
+            order=order,
+            initial_answers=initial_answers,
+            extended_answers=extended_answers,
+            generation_result=generation_result,
+        )
 
         _set_if_exists(order, "status", "GENERATED")
-        _set_if_exists(order, "generation_result", result)
-        _set_if_exists(order, "generated_site", result)
+        _set_if_exists(order, "generation_result", generation_result)
+        _set_if_exists(order, "generated_site", generation_result)
 
         db.add(order)
         db.commit()
         db.refresh(order)
 
-        send_owner_generation_result_email(
+        send_owner_generation_result_email_with_pdf(
             order=order,
-            generation_result=result,
+            initial_answers=initial_answers,
+            extended_answers=extended_answers,
+            generation_result=generation_result,
+            pdf_path=pdf_path,
         )
 
         return {
