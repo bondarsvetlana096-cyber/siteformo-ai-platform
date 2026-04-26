@@ -27,12 +27,13 @@ async def stripe_webhook(request: Request):
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
 
-        order_id = getattr(session, "client_reference_id", None)
-        customer_email = getattr(session, "customer_email", None)
+        order_id = session["client_reference_id"] if "client_reference_id" in session else None
+        customer_email = session["customer_email"] if "customer_email" in session else None
 
-        metadata = getattr(session, "metadata", {}) or {}
-        tier = metadata.get("tier", "")
-        deposit_eur = metadata.get("deposit_eur", "")
+        metadata = session["metadata"] if "metadata" in session else {}
+
+        tier = metadata["tier"] if "tier" in metadata else ""
+        deposit_eur = metadata["deposit_eur"] if "deposit_eur" in metadata else ""
 
         print("🔥 PAYMENT SUCCESS")
         print("Order ID:", order_id)
