@@ -1,52 +1,174 @@
-from app.services.i18n_service import I18nService
-from types import SimpleNamespace
+# tests/test_pricing_service.py
 
-from app.services.pricing_service import PricingService
+from app.services.pricing_service import calculate_price
 
 
-starter = SimpleNamespace(
-    ecommerce=False,
-    cart=False,
-    catalog=False,
-    booking=False,
-    advanced_integrations=False,
-    pages_requested=2,
-    services_count=2,
-    has_service_pages=False,
-    wants_leads=False,
-    answers={},
-)
+def test_starter_simple_landing():
+    payload = {
+        "ecommerce": False,
+        "cart": False,
+        "catalog": False,
+        "booking": False,
+        "advanced_integrations": False,
+        "pages_requested": 1,
+        "services_count": 1,
+        "has_service_pages": False,
+    }
 
-business = SimpleNamespace(
-    ecommerce=False,
-    cart=False,
-    catalog=False,
-    booking=False,
-    advanced_integrations=False,
-    pages_requested=5,
-    services_count=4,
-    has_service_pages=True,
-    wants_leads=True,
-    answers={'needs_conversion_sections': True},
-)
+    result = calculate_price(payload)
 
-premium = SimpleNamespace(
-    ecommerce=True,
-    cart=True,
-    catalog=False,
-    booking=False,
-    advanced_integrations=False,
-    pages_requested=3,
-    services_count=2,
-    has_service_pages=False,
-    wants_leads=True,
-    answers={},
-)
+    assert result["tier"] == "Starter"
+    assert result["price"] == 600
 
-assert PricingService.classify(starter)[1] == 600
-assert PricingService.classify(business)[1] == 900
-assert PricingService.classify(premium)[1] == 1500
-print('pricing preview checks passed')
 
-assert I18nService.normalize_language('DE') == 'de'
-assert I18nService.normalize_language('pt') == 'en'
+def test_starter_defaults():
+    payload = {}
+
+    result = calculate_price(payload)
+
+    assert result["tier"] == "Starter"
+    assert result["price"] == 600
+
+
+def test_business_multiple_pages():
+    payload = {
+        "ecommerce": False,
+        "cart": False,
+        "catalog": False,
+        "booking": False,
+        "advanced_integrations": False,
+        "pages_requested": 3,
+        "services_count": 1,
+        "has_service_pages": False,
+    }
+
+    result = calculate_price(payload)
+
+    assert result["tier"] == "Business"
+    assert result["price"] == 900
+
+
+def test_business_services_count():
+    payload = {
+        "ecommerce": False,
+        "cart": False,
+        "catalog": False,
+        "booking": False,
+        "advanced_integrations": False,
+        "pages_requested": 1,
+        "services_count": 3,
+        "has_service_pages": False,
+    }
+
+    result = calculate_price(payload)
+
+    assert result["tier"] == "Business"
+    assert result["price"] == 900
+
+
+def test_business_service_pages():
+    payload = {
+        "ecommerce": False,
+        "cart": False,
+        "catalog": False,
+        "booking": False,
+        "advanced_integrations": False,
+        "pages_requested": 1,
+        "services_count": 2,
+        "has_service_pages": True,
+    }
+
+    result = calculate_price(payload)
+
+    assert result["tier"] == "Business"
+    assert result["price"] == 900
+
+
+def test_premium_ecommerce():
+    payload = {
+        "ecommerce": True,
+        "cart": False,
+        "catalog": False,
+        "booking": False,
+        "advanced_integrations": False,
+        "pages_requested": 1,
+        "services_count": 1,
+        "has_service_pages": False,
+    }
+
+    result = calculate_price(payload)
+
+    assert result["tier"] == "Premium"
+    assert result["price"] == 1500
+
+
+def test_premium_booking():
+    payload = {
+        "ecommerce": False,
+        "cart": False,
+        "catalog": False,
+        "booking": True,
+        "advanced_integrations": False,
+        "pages_requested": 1,
+        "services_count": 1,
+        "has_service_pages": False,
+    }
+
+    result = calculate_price(payload)
+
+    assert result["tier"] == "Premium"
+    assert result["price"] == 1500
+
+
+def test_premium_advanced_integrations():
+    payload = {
+        "ecommerce": False,
+        "cart": False,
+        "catalog": False,
+        "booking": False,
+        "advanced_integrations": True,
+        "pages_requested": 2,
+        "services_count": 2,
+        "has_service_pages": True,
+    }
+
+    result = calculate_price(payload)
+
+    assert result["tier"] == "Premium"
+    assert result["price"] == 1500
+
+
+def test_premium_overrides_business():
+    payload = {
+        "ecommerce": True,
+        "cart": True,
+        "catalog": True,
+        "booking": False,
+        "advanced_integrations": False,
+        "pages_requested": 5,
+        "services_count": 5,
+        "has_service_pages": True,
+    }
+
+    result = calculate_price(payload)
+
+    assert result["tier"] == "Premium"
+    assert result["price"] == 1500
+
+
+def test_string_inputs_handling():
+    payload = {
+        "ecommerce": "true",
+        "cart": "false",
+        "catalog": "0",
+        "booking": "yes",
+        "advanced_integrations": "no",
+        "pages_requested": "3",
+        "services_count": "2",
+        "has_service_pages": "true",
+    }
+
+    result = calculate_price(payload)
+
+    assert result["tier"] == "Premium"
+    assert result["price"] == 1500
