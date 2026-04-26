@@ -37,3 +37,4 @@ uvicorn==0.35.0
 reportlab==4.4.5
 
 email-validator==2.3.0
+stripe
