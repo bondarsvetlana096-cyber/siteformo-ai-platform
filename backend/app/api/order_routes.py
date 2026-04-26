@@ -198,6 +198,53 @@ def create_order_intake(
     )
 
 
+
+@router.get("/confirm")
+def confirm_paid_order(
+    order_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    order = (
+        db.query(Order)
+        .options(
+            joinedload(Order.concepts),
+            joinedload(Order.client),
+        )
+        .filter(Order.id == order_id)
+        .first()
+    )
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    now = datetime.now(timezone.utc)
+
+    if order.status not in {
+        OrderStatus.APPROVED,
+        OrderStatus.FINAL_READY,
+        OrderStatus.PENDING_PAYMENT_APPROVAL,
+    }:
+        order.status = OrderStatus.PENDING_PAYMENT_APPROVAL
+
+    if not order.approved_at:
+        order.approved_at = now
+
+    db.commit()
+    db.refresh(order)
+
+    print("✅ ORDER CONFIRMED:", order.id)
+
+    return {
+        "status": "confirmed",
+        "order_id": order.id,
+        "order_status": order.status,
+        "message": (
+            "Project confirmation received. SiteFormo will review your payment "
+            "and send the next questionnaire."
+        ),
+    }
+
+
 @router.get("/{order_id}")
 def get_order(
     order_id: str,
