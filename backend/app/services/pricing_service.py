@@ -28,6 +28,11 @@ def _to_int(value: Any, default: int = 1) -> int:
 
 
 def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Core pricing logic
+    """
+
+    # --- INPUT ---
     ecommerce = _to_bool(data.get("ecommerce"))
     cart = _to_bool(data.get("cart"))
     catalog = _to_bool(data.get("catalog"))
@@ -38,16 +43,17 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
     services_count = _to_int(data.get("services_count"), default=1)
     has_service_pages = _to_bool(data.get("has_service_pages"))
 
+    # --- PREMIUM LOGIC (FIRST) ---
     premium_reasons = []
 
     if ecommerce:
-        premium_reasons.append("online store / ecommerce")
+        premium_reasons.append("ecommerce / online store")
     if cart:
         premium_reasons.append("shopping cart")
     if catalog:
-        premium_reasons.append("product or service catalog")
+        premium_reasons.append("catalog")
     if booking:
-        premium_reasons.append("booking functionality")
+        premium_reasons.append("booking system")
     if advanced_integrations:
         premium_reasons.append("advanced integrations / CRM / AI / payments")
 
@@ -68,14 +74,15 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
             },
         }
 
+    # --- BUSINESS LOGIC ---
     business_reasons = []
 
     if pages_requested >= 2:
-        business_reasons.append(f"{pages_requested} pages requested")
+        business_reasons.append(f"{pages_requested} pages")
     if services_count >= 2:
         business_reasons.append(f"{services_count} services")
     if has_service_pages:
-        business_reasons.append("separate service pages")
+        business_reasons.append("service pages")
 
     if business_reasons:
         return {
@@ -83,7 +90,7 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
             "price": BUSINESS_PRICE,
             "currency": "EUR",
             "reason": (
-                "This project needs a more developed website structure: "
+                "This project requires a more complex structure: "
                 + ", ".join(business_reasons)
                 + "."
             ),
@@ -94,6 +101,7 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
             },
         }
 
+    # --- STARTER ---
     return {
         "tier": "Starter",
         "price": STARTER_PRICE,
@@ -102,15 +110,12 @@ def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
         "signals": {
             "premium": [],
             "business": [],
-            "starter": ["simple landing page", "1 page", "no advanced functionality"],
+            "starter": ["1 page", "no advanced features"],
         },
     }
 
 
-def get_price(data: Dict[str, Any]) -> Dict[str, Any]:
-    return calculate_price(data)
-
-
+# --- COMPATIBILITY LAYER (CRITICAL) ---
 class PricingService:
     @staticmethod
     def calculate_price(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -123,3 +128,16 @@ class PricingService:
     @staticmethod
     def estimate(data: Dict[str, Any]) -> Dict[str, Any]:
         return calculate_price(data)
+
+    @staticmethod
+    def classify(data: Dict[str, Any]):
+        """
+        This is required by intake_service.py
+        """
+        result = calculate_price(data)
+
+        return (
+            result["tier"],
+            result["price"],
+            result["reason"],
+        )
