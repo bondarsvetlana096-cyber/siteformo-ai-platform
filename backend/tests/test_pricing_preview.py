@@ -1,5 +1,5 @@
 # backend/app/services/pricing_service.py
-
+print("🔥 PRICING V3 LOADED")
 from typing import Any, Dict
 
 
