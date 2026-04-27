@@ -9,30 +9,34 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
+OWNER_EMAIL = os.getenv("OWNER_EMAIL", "klon97048@gmail.com")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://siteformo.com")
+
 
 class CheckoutRequest(BaseModel):
     amount: int = Field(..., ge=1)
     order_id: str | None = None
     tier: str | None = None
+    package_name: str | None = None
+    package_range: str | None = None
+    market: str | None = None
     customer_email: str | None = None
 
 
-def _safe_deposit_for_tier(tier: str | None, amount: int) -> int:
-    normalized = (tier or "").strip().lower()
+def _is_owner_email(email: str | None) -> bool:
+    return (email or "").strip().lower() == OWNER_EMAIL.strip().lower()
 
-    if normalized == "starter":
-        return 300
 
-    if normalized == "business":
-        return 450
+def _safe_deposit(amount: int) -> int:
+    allowed_deposits = [475, 750, 1400, 2250]
 
-    if normalized == "premium":
-        return 750
-
-    if amount in [300, 450, 750]:
+    if amount in allowed_deposits:
         return amount
 
-    return 300
+    raise HTTPException(
+        status_code=400,
+        detail="Invalid deposit amount.",
+    )
 
 
 @router.post("/create-checkout")
@@ -40,10 +44,20 @@ async def create_checkout(data: CheckoutRequest):
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured.")
 
-    deposit = _safe_deposit_for_tier(data.tier, data.amount)
+    deposit = _safe_deposit(data.amount)
 
-    success_url = f"https://siteformo.com/?payment=success&order_id={data.order_id}"
-    cancel_url = os.getenv("FRONTEND_CANCEL_URL", "https://siteformo.com/?payment=cancel")
+    if _is_owner_email(data.customer_email):
+        return {
+            "status": "owner_bypass",
+            "order_id": data.order_id,
+            "questionnaire_url": f"{APP_BASE_URL}/extended-questionnaire?order_id={data.order_id or ''}",
+            "deposit": deposit,
+        }
+
+    success_url = f"{APP_BASE_URL}/?payment=success&order_id={data.order_id}"
+    cancel_url = os.getenv("FRONTEND_CANCEL_URL", f"{APP_BASE_URL}/?payment=cancel")
+
+    product_name = data.package_name or f"SiteFormo {data.tier or 'Website'} deposit"
 
     try:
         session = stripe.checkout.Session.create(
@@ -56,7 +70,7 @@ async def create_checkout(data: CheckoutRequest):
                     "price_data": {
                         "currency": "eur",
                         "product_data": {
-                            "name": f"SiteFormo {data.tier or 'Website'} deposit",
+                            "name": product_name,
                             "description": "50% project deposit",
                         },
                         "unit_amount": deposit * 100,
@@ -67,12 +81,18 @@ async def create_checkout(data: CheckoutRequest):
             metadata={
                 "order_id": data.order_id or "",
                 "tier": data.tier or "",
+                "package_name": data.package_name or "",
+                "package_range": data.package_range or "",
+                "market": data.market or "",
                 "deposit_eur": str(deposit),
             },
             payment_intent_data={
                 "metadata": {
                     "order_id": data.order_id or "",
                     "tier": data.tier or "",
+                    "package_name": data.package_name or "",
+                    "package_range": data.package_range or "",
+                    "market": data.market or "",
                     "deposit_eur": str(deposit),
                 }
             },
