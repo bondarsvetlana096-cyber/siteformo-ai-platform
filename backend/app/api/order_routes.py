@@ -12,9 +12,10 @@ from app.db.session import get_db
 from app.models.order import FinalPackage, Order, OrderStatus
 from app.schemas.order import ApprovalResponse, IntakePayload, IntakeResponse
 from app.services.approval_service import ApprovalService
-from app.services.email_service import OwnerEmailComposer, send_email
 from app.services.intake_service import IntakeService
 from app.services.launch_link_service import LaunchLinkService
+from fastapi import HTTPException
+from app.services import orders_service, generation_service, email_service
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -489,69 +490,58 @@ def _apply_decision(
     return ApprovalResponse(order_id=order.id, status=order.status, message=message)
 
 
-@router.post("/{order_id}/extended-brief")
-async def submit_extended_brief(
-    order_id: str,
-    answers: dict[str, Any],
-    db: Session = Depends(get_db),
-):
-    """Save the extended questionnaire and prepare five design previews.
+@router.post("/extended-brief")
+async def submit_extended_brief(payload: dict):
 
-    Important: this endpoint must NOT create the final package. The client has
-    only submitted the extended brief. The next step is design preview selection.
-    """
-    order = _get_order_or_404(db, order_id)
-    owner_bypass = _is_owner_bypass_order(order)
+    print("Extended brief received:", payload)
 
-    allowed_statuses = {_status("APPROVED", "FINAL_READY")}
-    if _has_status("BRIEF_SUBMITTED"):
-        allowed_statuses.add(OrderStatus.BRIEF_SUBMITTED)
-    if _has_status("DESIGN_PREVIEWS_READY"):
-        allowed_statuses.add(OrderStatus.DESIGN_PREVIEWS_READY)
-    if _has_status("AWAITING_CLIENT_DESIGN_CHOICE"):
-        allowed_statuses.add(OrderStatus.AWAITING_CLIENT_DESIGN_CHOICE)
+    order_id = payload.get("order_id")
+    contact = payload.get("contact", {})
+    client_email = contact.get("email")
 
-    if order.status not in allowed_statuses and not owner_bypass:
-        raise HTTPException(
-            status_code=409,
-            detail="Deposit payment must be approved before the extended questionnaire can be submitted.",
-        )
+    if not order_id:
+        raise HTTPException(status_code=400, detail="Missing order_id")
 
-    order.brief_answers = answers
-    order.status = _status("BRIEF_SUBMITTED", "APPROVED")
-    db.flush()
+    # ✅ сохраняем анкету
+    await orders_service.update_order(
+        order_id,
+        {
+            "status": "BRIEF_SUBMITTED",
+            "extended_brief": payload
+        }
+    )
 
-    preview_concepts = _build_preview_concepts(order)
-    _replace_order_concepts(db, order, preview_concepts)
+    # 🔥 генерируем превью
+    result = await generation_service.generate_design_previews(order_id, payload)
 
-    logo_options = _generate_logo_placeholders(order, answers)
-    if logo_options:
-        answers["generated_logo_options"] = logo_options
-        order.brief_answers = answers
+    print("🔥 PREVIEWS GENERATED:", result)
 
-    order.status = _status("AWAITING_CLIENT_DESIGN_CHOICE", "APPROVED")
-    _set_if_exists(order, "design_previews_ready_at", _now())
+    # 📧 ВОТ СЮДА ДОБАВЛЕН EMAIL
+    if client_email:
+        try:
+            preview_link = f"https://siteformo.com/design-previews?order_id={order_id}"
 
-    db.commit()
-    db.refresh(order)
+            await email_service.send_email(
+                to=client_email,
+                subject="Your design previews are ready",
+                html=f"""
+                <h2>Your website design previews are ready</h2>
+                <p>You can now review and select your preferred design:</p>
+                <a href="{preview_link}" style="padding:12px 20px;background:#4f46e5;color:white;text-decoration:none;border-radius:8px;">
+                    View your designs
+                </a>
+                <p>You will receive 5 design options and can choose one to start production.</p>
+                """
+            )
 
-    # Keep this email safe: older email_service versions may not have a dedicated
-    # preview email composer yet. Owner gets notified; client email can be added
-    # in email_service as compose_design_preview_email(order).
-    if hasattr(OwnerEmailComposer, "compose_design_preview_email"):
-        email = OwnerEmailComposer.compose_design_preview_email(order)
-        await send_email(email["to"], email["subject"], email["html"])
-    else:
-        brief_markdown = _brief_to_markdown(answers)
-        email = OwnerEmailComposer.compose_delivery_email(order, brief_markdown)
-        await send_email(email["to"], email["subject"], email["html"])
+            print("📧 Preview email sent")
+
+        except Exception as e:
+            print("❌ Email error:", e)
 
     return {
-        "order_id": order.id,
-        "status": order.status,
-        "concepts": _serialize_concepts(order),
-        "logos": logo_options,
-        "message": "Extended questionnaire saved. Five design previews are ready for client selection.",
+        "ok": True,
+        "status": "BRIEF_SUBMITTED"
     }
 
 
