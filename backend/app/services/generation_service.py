@@ -1,7 +1,9 @@
+import inspect
 import logging
 import os
+from datetime import datetime
 from html import escape
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 from sqlalchemy.orm import Session
@@ -11,23 +13,173 @@ from app.models.order import FinalPackage, Order, OrderStatus
 logger = logging.getLogger(__name__)
 
 
+async def _maybe_await(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _safe_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 class GenerationService:
     """
-    Generates website concepts and final Divi-ready packages.
+    Generates website concepts, design previews and final Divi-ready packages.
 
-    Behavior:
-    - Uses OpenAI if OPENAI_API_KEY is present
-    - Falls back to a local template if OpenAI is not configured
-    - Supports Telegram concept generation
-    - Supports order approval -> final package generation
+    New SiteFormo flow:
+    1. extended questionnaire submitted
+    2. generate 5 design previews (+ 3 logo concepts if logo ordered)
+    3. client selects 1 preview
+    4. approve-design starts the 1-hour refund window
+    5. full website generation starts only after selected design approval
+
+    This file keeps the old methods working and adds safe preview/full-production helpers.
     """
 
     def __init__(self) -> None:
         self.api_key = os.getenv("OPENAI_API_KEY", "").strip()
         self.model = os.getenv("OPENAI_MODEL", "gpt-5").strip()
+        self.image_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1").strip()
         self.client: Optional[OpenAI] = (
             OpenAI(api_key=self.api_key) if self.api_key else None
         )
+
+    # ---------------------------------------------------------------------
+    # NEW FLOW: DESIGN PREVIEWS
+    # ---------------------------------------------------------------------
+
+    def build_design_preview_payload(
+        self,
+        order: Optional[Order] = None,
+        extended_brief: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Builds a structured preview payload.
+
+        At this stage it intentionally returns preview prompts/placeholders instead of
+        claiming that real screenshots were generated. The next implementation step can
+        replace preview_url values with uploaded OpenAI-generated image URLs.
+        """
+        extended_brief = extended_brief or {}
+        logo_ordered = bool(extended_brief.get("logo_ordered"))
+
+        project_summary = self._summarize_extended_brief(order, extended_brief)
+        prompts = self._build_preview_prompts(project_summary)
+
+        previews = []
+        for index, item in enumerate(prompts, start=1):
+            previews.append(
+                {
+                    "id": f"design_{index}",
+                    "type": "homepage_preview",
+                    "label": item["label"],
+                    "style": item["style"],
+                    "color_direction": item["color_direction"],
+                    "prompt": item["prompt"],
+                    "preview_url": None,
+                    "status": "PROMPT_READY",
+                }
+            )
+
+        logo_previews: List[Dict[str, Any]] = []
+        if logo_ordered:
+            logo_prompts = self._build_logo_prompts(project_summary)
+            for index, item in enumerate(logo_prompts, start=1):
+                logo_previews.append(
+                    {
+                        "id": f"logo_{index}",
+                        "type": "logo_concept",
+                        "label": item["label"],
+                        "style": item["style"],
+                        "prompt": item["prompt"],
+                        "preview_url": None,
+                        "status": "PROMPT_READY",
+                    }
+                )
+
+        return {
+            "design_status": "DESIGN_PREVIEWS_READY",
+            "generated_at": datetime.utcnow().isoformat(),
+            "project_summary": project_summary,
+            "design_previews": previews,
+            "logo_previews": logo_previews,
+            "note": (
+                "Preview prompts are ready. Connect OpenAI image generation/storage "
+                "to turn these into real screenshot URLs."
+            ),
+        }
+
+    def generate_design_previews_for_order(
+        self,
+        db: Session,
+        order: Order,
+        extended_brief: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Sync DB version for code paths that already have a SQLAlchemy Session and Order.
+        Saves preview data on the order when matching columns exist.
+        """
+        preview_payload = self.build_design_preview_payload(order, extended_brief)
+
+        self._set_if_exists(order, "design_status", preview_payload["design_status"])
+        self._set_if_exists(order, "design_previews", preview_payload["design_previews"])
+        self._set_if_exists(order, "logo_previews", preview_payload["logo_previews"])
+        self._set_if_exists(order, "preview_generation_payload", preview_payload)
+
+        if hasattr(order, "status"):
+            try:
+                order.status = OrderStatus.BRIEF_SUBMITTED
+            except Exception:
+                self._set_if_exists(order, "status", "BRIEF_SUBMITTED")
+
+        db.commit()
+        db.refresh(order)
+
+        logger.info("Design previews prepared for order %s", _safe_get(order, "id"))
+        return preview_payload
+
+    # ---------------------------------------------------------------------
+    # NEW FLOW: FULL GENERATION AFTER DESIGN APPROVAL
+    # ---------------------------------------------------------------------
+
+    def start_full_generation_for_order(
+        self,
+        db: Session,
+        order: Order,
+        note: str = "Full generation started after client selected a design preview.",
+    ) -> FinalPackage:
+        """
+        Starts full website generation after the client approves one preview.
+        This preserves the existing final-package behavior.
+        """
+        selected_design = (
+            _safe_get(order, "selected_design_url")
+            or _safe_get(order, "selected_design_id")
+            or ""
+        )
+
+        if not selected_design:
+            logger.warning(
+                "Starting full generation for order %s without selected_design_url. "
+                "Check approve-design payload.",
+                _safe_get(order, "id"),
+            )
+
+        self._set_if_exists(order, "status", "FULL_PRODUCTION_STARTED")
+        self._set_if_exists(order, "design_status", "DESIGN_APPROVED")
+        db.commit()
+        db.refresh(order)
+
+        return self.generate_final_package_for_order(db, order, note=note)
+
+    # ---------------------------------------------------------------------
+    # EXISTING FLOW: CONCEPT GENERATION
+    # ---------------------------------------------------------------------
 
     def generate_site_concept(
         self,
@@ -100,13 +252,17 @@ class GenerationService:
             db.refresh(order)
             return existing_package
 
-        selected_concept_label = "A"
+        selected_concept_label = (
+            _safe_get(order, "selected_design_id")
+            or _safe_get(order, "selected_design_url")
+            or "A"
+        )
         divi_html = self._generate_divi_html(order)
         brief_markdown = self._build_brief_markdown(order)
 
         package = FinalPackage(
             order_id=order.id,
-            selected_concept_label=selected_concept_label,
+            selected_concept_label=str(selected_concept_label),
             divi_html=divi_html,
             brief_markdown=brief_markdown,
             notes=note,
@@ -160,15 +316,23 @@ class GenerationService:
         business_name = getattr(order, "business_name", "") or "Client business"
         source_url = getattr(order, "source_url", "") or ""
         description = getattr(order, "desired_site_description", "") or ""
-        brief_answers = getattr(order, "brief_answers", None) or {}
+        brief_answers = (
+            getattr(order, "extended_brief", None)
+            or getattr(order, "brief_answers", None)
+            or {}
+        )
         pricing_reasoning = getattr(order, "pricing_reasoning", "") or ""
+        selected_design = (
+            getattr(order, "selected_design_url", "") or getattr(order, "selected_design_id", "") or ""
+        )
 
         return (
-            "Create a Divi 5-ready homepage HTML package.\n\n"
+            "Create a Divi 5-ready homepage HTML package based on the client's approved design direction.\n\n"
             "Requirements:\n"
             "- English only\n"
             "- Mobile-first\n"
             "- Premium, trustworthy, conversion-focused\n"
+            "- Follow the selected design direction as closely as text HTML can support\n"
             "- Clear hero section\n"
             "- Services / offer section\n"
             "- Trust section\n"
@@ -182,6 +346,7 @@ class GenerationService:
             f"- Source URL / old site: {source_url}\n"
             f"- Description: {description}\n"
             f"- Pricing reasoning: {pricing_reasoning}\n"
+            f"- Selected design: {selected_design}\n"
             f"- Brief answers: {brief_answers}\n"
         )
 
@@ -261,12 +426,19 @@ class GenerationService:
 """.strip()
 
     def _build_brief_markdown(self, order: Order) -> str:
-        brief_answers = getattr(order, "brief_answers", None) or {}
+        brief_answers = (
+            getattr(order, "extended_brief", None)
+            or getattr(order, "brief_answers", None)
+            or {}
+        )
 
         if not brief_answers:
             return "- Generated from the first SiteFormo brief."
 
-        return "\n".join(f"- {key}: {value}" for key, value in brief_answers.items())
+        if isinstance(brief_answers, dict):
+            return "\n".join(f"- {key}: {value}" for key, value in brief_answers.items())
+
+        return str(brief_answers)
 
     def _build_system_prompt(self) -> str:
         return (
@@ -381,7 +553,215 @@ class GenerationService:
 
         return "Get started today"
 
+    def _summarize_extended_brief(
+        self,
+        order: Optional[Order],
+        extended_brief: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        contact = extended_brief.get("contact") or {}
+        pricing = extended_brief.get("pricing") or {}
+        additional_pages = (
+            extended_brief.get("additional_pages")
+            or self._extract_answer_by_id(extended_brief, "additional_pages_builder")
+            or []
+        )
+
+        return {
+            "order_id": _safe_get(order, "id") or extended_brief.get("order_id"),
+            "plan": extended_brief.get("plan") or _safe_get(order, "tier") or "",
+            "business_name": (
+                extended_brief.get("business_name")
+                or _safe_get(order, "business_name")
+                or _safe_get(order, "desired_site_description")
+                or "Client business"
+            ),
+            "contact_email": contact.get("email") or _safe_get(order, "email") or "",
+            "main_goal": self._extract_answer_by_id(extended_brief, "website_goal"),
+            "design_style": self._extract_answer_by_id(extended_brief, "design_style"),
+            "logo_ordered": bool(extended_brief.get("logo_ordered")),
+            "pages": additional_pages,
+            "pricing": pricing,
+            "raw_brief": extended_brief,
+        }
+
+    def _extract_answer_by_id(self, brief: Dict[str, Any], answer_id: str) -> Any:
+        answers = brief.get("answers") or []
+        if not isinstance(answers, list):
+            return None
+
+        for item in answers:
+            if isinstance(item, dict) and item.get("id") == answer_id:
+                return item.get("selected") or item.get("extra") or item.get("other")
+        return None
+
+    def _build_preview_prompts(self, project_summary: Dict[str, Any]) -> List[Dict[str, str]]:
+        base_context = (
+            f"Business: {project_summary.get('business_name')}\n"
+            f"Plan: {project_summary.get('plan')}\n"
+            f"Goal: {project_summary.get('main_goal')}\n"
+            f"Requested style: {project_summary.get('design_style')}\n"
+            f"Pages: {project_summary.get('pages')}\n"
+        )
+
+        directions = [
+            {
+                "label": "Design A",
+                "style": "Clean premium business",
+                "color_direction": "white, deep navy, soft green accents",
+            },
+            {
+                "label": "Design B",
+                "style": "Luxury dark high-end",
+                "color_direction": "charcoal, black, champagne gold accents",
+            },
+            {
+                "label": "Design C",
+                "style": "Modern bold conversion",
+                "color_direction": "white, electric blue, strong contrast",
+            },
+            {
+                "label": "Design D",
+                "style": "Warm local trustworthy",
+                "color_direction": "cream, forest green, warm neutral tones",
+            },
+            {
+                "label": "Design E",
+                "style": "Minimal corporate",
+                "color_direction": "light grey, navy, clean monochrome accents",
+            },
+        ]
+
+        prompts: List[Dict[str, str]] = []
+        for direction in directions:
+            prompt = (
+                "Create a single homepage design preview screenshot concept for a professional website.\n"
+                "Do not include browser chrome. Do not include fake UI controls outside the page.\n"
+                "Use realistic sections: hero, services/offer, trust proof, FAQ preview and CTA.\n"
+                "Use English text only. Do not mention OpenAI.\n\n"
+                f"Project context:\n{base_context}\n"
+                f"Visual style: {direction['style']}\n"
+                f"Color direction: {direction['color_direction']}\n"
+                "The result should look like a polished website screenshot, not a poster."
+            )
+            prompts.append({**direction, "prompt": prompt})
+
+        return prompts
+
+    def _build_logo_prompts(self, project_summary: Dict[str, Any]) -> List[Dict[str, str]]:
+        business_name = project_summary.get("business_name") or "Client business"
+        return [
+            {
+                "label": "Logo A",
+                "style": "minimal premium wordmark",
+                "prompt": (
+                    f"Create a minimal premium logo concept for {business_name}. "
+                    "Clean wordmark, professional, scalable, white background, no mockup."
+                ),
+            },
+            {
+                "label": "Logo B",
+                "style": "modern icon + wordmark",
+                "prompt": (
+                    f"Create a modern icon and wordmark logo concept for {business_name}. "
+                    "Professional digital service style, white background, no mockup."
+                ),
+            },
+            {
+                "label": "Logo C",
+                "style": "luxury refined brand mark",
+                "prompt": (
+                    f"Create a refined luxury logo concept for {business_name}. "
+                    "Elegant typography, subtle symbol, white background, no mockup."
+                ),
+            },
+        ]
+
+    def _set_if_exists(self, obj: Any, field: str, value: Any) -> None:
+        if hasattr(obj, field):
+            setattr(obj, field, value)
+
+
+# -------------------------------------------------------------------------
+# BACKWARD-COMPATIBLE MODULE HELPERS
+# -------------------------------------------------------------------------
 
 def generate_site(db: Session, order: Order):
     service = GenerationService()
     return service.generate_final_package_for_order(db, order)
+
+
+async def generate_design_previews(order_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Async helper for order_routes.py.
+
+    Use this after /extended-brief is submitted.
+    It prepares 5 homepage preview prompts and 3 logo prompts if logo was ordered.
+    It also tries to save them through orders_service.update_order if that async service exists.
+    """
+    service = GenerationService()
+    preview_payload = service.build_design_preview_payload(order=None, extended_brief=payload)
+
+    try:
+        from app.services import orders_service
+
+        await _maybe_await(
+            orders_service.update_order(
+                order_id,
+                {
+                    "status": "DESIGN_PREVIEWS_READY",
+                    "design_status": "DESIGN_PREVIEWS_READY",
+                    "design_previews": preview_payload.get("design_previews", []),
+                    "logo_previews": preview_payload.get("logo_previews", []),
+                    "preview_generation_payload": preview_payload,
+                    "extended_brief": payload,
+                },
+            )
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not save generated design previews for order %s: %s",
+            order_id,
+            exc,
+        )
+
+    logger.info("Design preview payload prepared for order %s", order_id)
+    return preview_payload
+
+
+async def start_full_generation(order_id: str) -> Dict[str, Any]:
+    """
+    Async helper for order_routes.py.
+
+    Use this only after the client approved one of the 5 design previews.
+    It marks full production as started. Existing sync final-package generation can still
+    be triggered by generate_site(db, order) where a database Session is available.
+    """
+    now = datetime.utcnow().isoformat()
+
+    try:
+        from app.services import orders_service
+
+        await _maybe_await(
+            orders_service.update_order(
+                order_id,
+                {
+                    "status": "FULL_PRODUCTION_STARTED",
+                    "generation_status": "FULL_PRODUCTION_STARTED",
+                    "full_generation_started_at": now,
+                },
+            )
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not mark full generation as started for order %s: %s",
+            order_id,
+            exc,
+        )
+
+    logger.info("Full generation started for order %s", order_id)
+    return {
+        "ok": True,
+        "order_id": order_id,
+        "status": "FULL_PRODUCTION_STARTED",
+        "full_generation_started_at": now,
+    }
