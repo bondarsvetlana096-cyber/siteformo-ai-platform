@@ -17,7 +17,6 @@ from app.services.launch_link_service import LaunchLinkService
 from fastapi import HTTPException
 from app.services import generation_service
 from app.services.email_service import send_email
-from app.services import orders_service
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -493,7 +492,7 @@ def _apply_decision(
 
 
 @router.post("/extended-brief")
-async def submit_extended_brief(payload: dict):
+async def submit_extended_brief(payload: dict, db: Session = Depends(get_db)):
 
     print("Extended brief received:", payload)
 
@@ -505,13 +504,16 @@ async def submit_extended_brief(payload: dict):
         raise HTTPException(status_code=400, detail="Missing order_id")
 
     # ✅ сохраняем анкету
-    await orders_service.update_order(
-        order_id,
-        {
-            "status": "BRIEF_SUBMITTED",
-            "extended_brief": payload
-        }
-    )
+    order = db.query(Order).filter(Order.id == order_id).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    order.status = OrderStatus.BRIEF_SUBMITTED
+    order.extended_brief = payload
+
+    db.commit()
+    db.refresh(order)
 
     # 🔥 генерируем превью
     result = await generation_service.generate_design_previews(order_id, payload)
@@ -523,7 +525,7 @@ async def submit_extended_brief(payload: dict):
         try:
             preview_link = f"https://siteformo.com/design-previews?order_id={order_id}"
 
-            await email_service.send_email(
+            await send_email(
                 to=client_email,
                 subject="Your design previews are ready",
                 html=f"""
