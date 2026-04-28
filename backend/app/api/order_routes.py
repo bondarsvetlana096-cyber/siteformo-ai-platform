@@ -17,6 +17,7 @@ from app.services.launch_link_service import LaunchLinkService
 from fastapi import HTTPException
 from app.services import generation_service
 from app.services.email_service import send_email
+from app.services import orders_service
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
