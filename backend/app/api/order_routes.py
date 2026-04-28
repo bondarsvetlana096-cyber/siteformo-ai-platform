@@ -489,3 +489,7 @@ async def submit_extended_brief(
             "for visual review."
         ),
     }
+        @router.post("/extended-brief")
+    async def submit_extended_brief(payload: dict):
+        print("Extended brief received:", payload)
+        return {"ok": True}     
