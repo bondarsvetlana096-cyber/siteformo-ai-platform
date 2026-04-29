@@ -39,22 +39,35 @@ def _safe_deposit(amount: int) -> int:
     )
 
 
+def _clean_order_id(order_id: str | None) -> str:
+    value = (order_id or "").strip()
+
+    if not value or value.lower() in ["none", "null", "undefined"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing order_id. Checkout cannot start without a valid order.",
+        )
+
+    return value
+
+
 @router.post("/create-checkout")
 async def create_checkout(data: CheckoutRequest):
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured.")
 
     deposit = _safe_deposit(data.amount)
+    order_id = _clean_order_id(data.order_id)
 
     if _is_owner_email(data.customer_email):
         return {
             "status": "owner_bypass",
-            "order_id": data.order_id,
-            "questionnaire_url": f"{APP_BASE_URL}/extended-questionnaire?order_id={data.order_id or ''}",
+            "order_id": order_id,
+            "questionnaire_url": f"{APP_BASE_URL}/extended-questionnaire/?order_id={order_id}",
             "deposit": deposit,
         }
 
-    success_url = f"{APP_BASE_URL}/?payment=success&order_id={data.order_id}"
+    success_url = f"{APP_BASE_URL}/extended-questionnaire/?order_id={order_id}"
     cancel_url = os.getenv("FRONTEND_CANCEL_URL", f"{APP_BASE_URL}/?payment=cancel")
 
     product_name = data.package_name or f"SiteFormo {data.tier or 'Website'} deposit"
@@ -64,7 +77,7 @@ async def create_checkout(data: CheckoutRequest):
             mode="payment",
             payment_method_types=["card"],
             customer_email=data.customer_email or None,
-            client_reference_id=data.order_id or None,
+            client_reference_id=order_id,
             line_items=[
                 {
                     "price_data": {
@@ -79,7 +92,7 @@ async def create_checkout(data: CheckoutRequest):
                 }
             ],
             metadata={
-                "order_id": data.order_id or "",
+                "order_id": order_id,
                 "tier": data.tier or "",
                 "package_name": data.package_name or "",
                 "package_range": data.package_range or "",
@@ -88,7 +101,7 @@ async def create_checkout(data: CheckoutRequest):
             },
             payment_intent_data={
                 "metadata": {
-                    "order_id": data.order_id or "",
+                    "order_id": order_id,
                     "tier": data.tier or "",
                     "package_name": data.package_name or "",
                     "package_range": data.package_range or "",
@@ -104,6 +117,7 @@ async def create_checkout(data: CheckoutRequest):
             "url": session.url,
             "session_id": session.id,
             "deposit": deposit,
+            "order_id": order_id,
         }
 
     except Exception as e:
