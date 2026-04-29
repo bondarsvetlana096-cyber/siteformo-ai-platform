@@ -15,12 +15,9 @@ from app.api.order_routes import router as order_router
 from app.api.request_routes import router as request_router
 from app.api.payment_routes import router as payment_router
 from app.api.stripe_webhook import router as stripe_webhook_router
-
-
-# 🔥 ВАЖНО — ПРАВИЛЬНЫЙ ИМПОРТ
 from app.api.admin_routes import router as admin_routes_router
 
-# Channel routers
+# Channels
 from app.channels.health import router as health_router
 from app.channels.telegram import router as telegram_router
 from app.channels.whatsapp import router as whatsapp_router
@@ -32,28 +29,28 @@ app = FastAPI(
     version="1.0.0",
 )
 
-
-# CORS
+# 🔥 ВАЖНО: правильный CORS (фикс ошибки Failed to fetch)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://siteformo.com",
+        "https://www.siteformo.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# Static files
+# Static
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
 # Root
 @app.get("/")
 def root():
-    return {
-        "status": "ok",
-        "service": "SiteFormo AI Sales Platform",
-    }
+    return {"status": "ok", "service": "SiteFormo AI Sales Platform"}
 
 
 @app.get("/health")
@@ -61,24 +58,20 @@ def health():
     return {"status": "ok"}
 
 
-# Main API
+# Routers
 app.include_router(api_router)
 app.include_router(channel_router)
 
-# Channels
 app.include_router(health_router)
 app.include_router(web_chat_router)
 app.include_router(telegram_router)
 app.include_router(whatsapp_router)
 
-# Business logic
 app.include_router(leads_router)
 app.include_router(order_router)
 app.include_router(request_router)
 app.include_router(payment_router)
 app.include_router(stripe_webhook_router)
-
-# 🔥 ПОДКЛЮЧАЕМ ПРАВИЛЬНЫЙ ADMIN ROUTER
 app.include_router(admin_routes_router)
 
 
@@ -88,5 +81,4 @@ async def startup_event():
 
     if settings.enable_guided_followups:
         from app.services.lead_nurturing import followup_worker
-
         asyncio.create_task(followup_worker())
