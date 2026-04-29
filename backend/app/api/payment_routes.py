@@ -1,9 +1,11 @@
 import os
 import stripe
+import uuid
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.db import database  # ВАЖНО: если ошибка — скажешь, поправлю
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
@@ -39,26 +41,38 @@ def _safe_deposit(amount: int) -> int:
     )
 
 
-def _clean_order_id(order_id: str | None) -> str:
-    value = (order_id or "").strip()
-
-    if not value or value.lower() in ["none", "null", "undefined"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Missing order_id. Checkout cannot start without a valid order.",
-        )
-
-    return value
-
-
 @router.post("/create-checkout")
 async def create_checkout(data: CheckoutRequest):
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured.")
 
     deposit = _safe_deposit(data.amount)
-    order_id = _clean_order_id(data.order_id)
 
+    # 🔥 1. Создаём order_id, если его нет
+    if not data.order_id:
+        order_id = str(uuid.uuid4())
+    else:
+        order_id = data.order_id.strip()
+
+    # 🔥 2. СОЗДАЁМ ЗАКАЗ В БАЗЕ (ключевой момент)
+    try:
+        await database.execute(
+            """
+            INSERT INTO orders (id, email, plan, status, amount, deposit)
+            VALUES (:id, :email, :plan, 'PENDING_PAYMENT', :amount, :deposit)
+            """,
+            {
+                "id": order_id,
+                "email": data.customer_email,
+                "plan": data.tier,
+                "amount": data.amount,
+                "deposit": deposit,
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {str(e)}")
+
+    # 🔥 OWNER BYPASS
     if _is_owner_email(data.customer_email):
         return {
             "status": "owner_bypass",
