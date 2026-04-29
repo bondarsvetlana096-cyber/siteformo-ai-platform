@@ -1,13 +1,16 @@
 from app.db.session import engine
 from app.db.base import Base
 
-# импорт ВСЕХ моделей (ОЧЕНЬ ВАЖНО)
+# 🔥 ОБЯЗАТЕЛЬНО импортируем ВСЕ модели
 from app.models.order import Order
-from app.models.client import ClientProfile  # если есть
-# добавь сюда другие модели если есть
+
+# если есть — добавь:
+# from app.models.client import ClientProfile
 
 
 def init_db():
-    print("🔥 Creating database tables if not exist...")
+    print("🔥 FORCE creating all tables...")
+
     Base.metadata.create_all(bind=engine)
-    print("✅ Database ready")
+
+    print("✅ Tables created")
