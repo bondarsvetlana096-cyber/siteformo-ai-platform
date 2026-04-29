@@ -29,6 +29,14 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 🔥 ВРЕМЕННО РАЗРЕШАЕМ ВСЁ
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 🔥 ВАЖНО: правильный CORS (фикс ошибки Failed to fetch)
 app.add_middleware(
     CORSMiddleware,
