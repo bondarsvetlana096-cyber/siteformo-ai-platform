@@ -1,11 +1,10 @@
 import os
-import stripe
 import uuid
+import stripe
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.db import database  # ВАЖНО: если ошибка — скажешь, поправлю
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
@@ -35,10 +34,7 @@ def _safe_deposit(amount: int) -> int:
     if amount in allowed_deposits:
         return amount
 
-    raise HTTPException(
-        status_code=400,
-        detail="Invalid deposit amount.",
-    )
+    raise HTTPException(status_code=400, detail="Invalid deposit amount.")
 
 
 @router.post("/create-checkout")
@@ -48,31 +44,12 @@ async def create_checkout(data: CheckoutRequest):
 
     deposit = _safe_deposit(data.amount)
 
-    # 🔥 1. Создаём order_id, если его нет
-    if not data.order_id:
+    # Create order_id if frontend did not send it
+    order_id = (data.order_id or "").strip()
+    if not order_id or order_id.lower() in ["none", "null", "undefined"]:
         order_id = str(uuid.uuid4())
-    else:
-        order_id = data.order_id.strip()
 
-    # 🔥 2. СОЗДАЁМ ЗАКАЗ В БАЗЕ (ключевой момент)
-    try:
-        await database.execute(
-            """
-            INSERT INTO orders (id, email, plan, status, amount, deposit)
-            VALUES (:id, :email, :plan, 'PENDING_PAYMENT', :amount, :deposit)
-            """,
-            {
-                "id": order_id,
-                "email": data.customer_email,
-                "plan": data.tier,
-                "amount": data.amount,
-                "deposit": deposit,
-            }
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"DB error: {str(e)}")
-
-    # 🔥 OWNER BYPASS
+    # OWNER BYPASS
     if _is_owner_email(data.customer_email):
         return {
             "status": "owner_bypass",
@@ -81,7 +58,7 @@ async def create_checkout(data: CheckoutRequest):
             "deposit": deposit,
         }
 
-    success_url = f"{APP_BASE_URL}/extended-questionnaire/?order_id={order_id}"
+    success_url = f"{APP_BASE_URL}/extended-questionnaire/?order_id={order_id}&payment=success"
     cancel_url = os.getenv("FRONTEND_CANCEL_URL", f"{APP_BASE_URL}/?payment=cancel")
 
     product_name = data.package_name or f"SiteFormo {data.tier or 'Website'} deposit"
