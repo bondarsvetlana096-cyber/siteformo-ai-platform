@@ -1,0 +1,244 @@
+<!-- SiteFormo /design-previews page
+Paste into a Divi Code Module or WPCode snippet on the WordPress page.
+Required URL format: /design-previews?order_id=ORDER_UUID
+-->
+<div id="siteformo-design-previews-root">
+  <div class="sf-loading">Loading design previews...</div>
+</div>
+
+<style>
+  #siteformo-design-previews-root {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 48px 20px;
+    font-family: Inter, Arial, sans-serif;
+    color: #111827;
+  }
+  .sf-loading, .sf-error, .sf-empty {
+    padding: 28px;
+    border-radius: 18px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    font-size: 18px;
+  }
+  .sf-header {
+    margin-bottom: 28px;
+  }
+  .sf-header h1 {
+    font-size: 38px;
+    line-height: 1.1;
+    margin: 0 0 10px;
+  }
+  .sf-header p {
+    font-size: 17px;
+    color: #4b5563;
+    margin: 0;
+  }
+  .sf-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+  }
+  .sf-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 22px;
+    background: white;
+    overflow: hidden;
+    box-shadow: 0 14px 35px rgba(15, 23, 42, 0.08);
+  }
+  .sf-card img {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #f3f4f6;
+  }
+  .sf-card-body {
+    padding: 18px;
+  }
+  .sf-card h3 {
+    margin: 0 0 6px;
+    font-size: 20px;
+  }
+  .sf-card p {
+    margin: 0 0 16px;
+    color: #6b7280;
+  }
+  .sf-select-btn {
+    width: 100%;
+    border: 0;
+    border-radius: 999px;
+    padding: 14px 18px;
+    background: #111827;
+    color: white;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .sf-select-btn:hover {
+    opacity: 0.92;
+  }
+  .sf-logos {
+    margin-top: 36px;
+  }
+  .sf-logo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+  }
+  .sf-logo-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 18px;
+    padding: 14px;
+    background: #fff;
+  }
+  .sf-logo-card img {
+    width: 100%;
+    border-radius: 14px;
+    background: #f9fafb;
+  }
+  @media (max-width: 800px) {
+    .sf-grid, .sf-logo-grid {
+      grid-template-columns: 1fr;
+    }
+    .sf-header h1 {
+      font-size: 30px;
+    }
+  }
+</style>
+
+<script>
+(function () {
+  const API_BASE = "https://siteformo-production.up.railway.app/api/orders/";
+  const root = document.getElementById("siteformo-design-previews-root");
+
+  function getOrderId() {
+    return new URLSearchParams(window.location.search).get("order_id");
+  }
+
+  function imageFromPreview(item) {
+    if (typeof item === "string") return item;
+    return item.screenshot_url || item.preview_url || item.image_url || item.url || "";
+  }
+
+  function labelFromPreview(item, index) {
+    if (typeof item === "string") return "Design " + (index + 1);
+    return item.label || item.id || ("Design " + (index + 1));
+  }
+
+  async function selectDesign(item, index) {
+    const orderId = getOrderId();
+    const imageUrl = imageFromPreview(item);
+
+    const response = await fetch(API_BASE + orderId + "/approve-design", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        selected_index: index,
+        selected_design_id: typeof item === "object" ? item.id : undefined,
+        selected_design_label: labelFromPreview(item, index),
+        selected_screenshot_url: imageUrl
+      })
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || "Could not approve design");
+    }
+
+    root.innerHTML = `
+      <div class="sf-header">
+        <h1>Design selected</h1>
+        <p>Your selected design has been approved. The 1-hour refund window has started and full production can begin.</p>
+      </div>
+    `;
+  }
+
+  async function loadPreviews() {
+    const orderId = getOrderId();
+
+    if (!orderId) {
+      root.innerHTML = '<div class="sf-error">Missing order ID. Please open the link from your email.</div>';
+      return;
+    }
+
+    try {
+      const response = await fetch(API_BASE + orderId);
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const order = await response.json();
+      const previews = order.design_previews || [];
+      const logos = order.logo_previews || [];
+
+      if (!previews.length) {
+        root.innerHTML = '<div class="sf-empty">No design previews are ready yet. Please refresh this page in a few minutes.</div>';
+        return;
+      }
+
+      const cards = previews.map((item, index) => {
+        const img = imageFromPreview(item);
+        const label = labelFromPreview(item, index);
+        const style = typeof item === "object" ? (item.style || item.color_direction || "") : "";
+        return `
+          <article class="sf-card">
+            <img src="${img}" alt="${label}">
+            <div class="sf-card-body">
+              <h3>${label}</h3>
+              <p>${style}</p>
+              <button class="sf-select-btn" data-index="${index}">Select this design</button>
+            </div>
+          </article>
+        `;
+      }).join("");
+
+      const logoHtml = logos.length ? `
+        <section class="sf-logos">
+          <div class="sf-header">
+            <h2>Logo concepts</h2>
+            <p>Logo options are included because you ordered a logo.</p>
+          </div>
+          <div class="sf-logo-grid">
+            ${logos.map((item, index) => `
+              <div class="sf-logo-card">
+                <img src="${imageFromPreview(item)}" alt="${labelFromPreview(item, index)}">
+                <p>${labelFromPreview(item, index)}</p>
+              </div>
+            `).join("")}
+          </div>
+        </section>
+      ` : "";
+
+      root.innerHTML = `
+        <div class="sf-header">
+          <h1>Choose your website design</h1>
+          <p>Review the 5 homepage screenshot options below and select one design to start full production.</p>
+        </div>
+        <div class="sf-grid">${cards}</div>
+        ${logoHtml}
+      `;
+
+      root.querySelectorAll(".sf-select-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const index = Number(btn.dataset.index);
+          btn.disabled = true;
+          btn.textContent = "Selecting...";
+          try {
+            await selectDesign(previews[index], index);
+          } catch (error) {
+            console.error(error);
+            btn.disabled = false;
+            btn.textContent = "Select this design";
+            alert("Could not select this design. Please try again.");
+          }
+        });
+      });
+
+    } catch (error) {
+      console.error(error);
+      root.innerHTML = '<div class="sf-error">Error loading design previews. Please contact SiteFormo support.</div>';
+    }
+  }
+
+  loadPreviews();
+})();
+</script>

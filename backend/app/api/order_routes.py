@@ -16,7 +16,7 @@ from app.services.intake_service import IntakeService
 from app.services.launch_link_service import LaunchLinkService
 from fastapi import HTTPException
 from app.services import generation_service
-from app.services.email_service import send_email
+from app.services.email_service import OwnerEmailComposer, send_email
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -394,7 +394,14 @@ def get_order(
         "pricing_reasoning": order.pricing_reasoning,
         "reused_context_from_order_id": order.reused_context_from_order_id,
         "concepts": _serialize_concepts(order),
+        "design_previews": getattr(order, "design_previews", None) or [],
+        "logo_previews": getattr(order, "logo_previews", None) or [],
+        "preview_generation_payload": getattr(order, "preview_generation_payload", None) or {},
+        "selected_design_id": getattr(order, "selected_design_id", None),
+        "selected_design_label": getattr(order, "selected_design_label", None),
+        "selected_screenshot_url": getattr(order, "selected_screenshot_url", None),
         "brief_answers": order.brief_answers or {},
+        "extended_brief": getattr(order, "extended_brief", None) or {},
         "next_step": next_step,
     }
 
@@ -493,59 +500,73 @@ def _apply_decision(
 
 @router.post("/extended-brief")
 async def submit_extended_brief(payload: dict, db: Session = Depends(get_db)):
-
+    """Save the extended questionnaire, generate 5 screenshot previews (+ logos), and email the client."""
     print("Extended brief received:", payload)
 
     order_id = payload.get("order_id")
-    contact = payload.get("contact", {})
+    contact = payload.get("contact", {}) or {}
     client_email = contact.get("email")
 
     if not order_id:
         raise HTTPException(status_code=400, detail="Missing order_id")
 
-    # ✅ сохраняем анкету
-    order = db.query(Order).filter(Order.id == order_id).first()
+    order = _get_order_or_404(db, order_id)
 
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    order.status = OrderStatus.BRIEF_SUBMITTED
-    order.extended_brief = payload
-
+    # Save the detailed questionnaire on the order. Keep brief_answers in sync as
+    # a fallback for older code paths that still read that field.
+    order.status = _status("BRIEF_SUBMITTED", "APPROVED")
+    _set_if_exists(order, "extended_brief", payload)
+    _set_if_exists(order, "brief_answers", payload)
     db.commit()
     db.refresh(order)
 
-    # 🔥 генерируем превью
-    result = await generation_service.generate_design_previews(order_id, payload)
+    # New logic: the client receives screenshots, not two full homepage HTML samples.
+    service = generation_service.GenerationService()
+    result = service.generate_design_previews_for_order(db, order, payload)
 
-    print("🔥 PREVIEWS GENERATED:", result)
+    order.status = _status("DESIGN_PREVIEWS_READY", "CONCEPTS_READY")
+    _set_if_exists(order, "design_status", "DESIGN_PREVIEWS_READY")
+    _set_if_exists(order, "design_previews", result.get("design_previews", []))
+    _set_if_exists(order, "logo_previews", result.get("logo_previews", []))
+    _set_if_exists(order, "preview_generation_payload", result)
+    db.commit()
+    db.refresh(order)
 
-    # 📧 ВОТ СЮДА ДОБАВЛЕН EMAIL
+    print("PREVIEW SCREENSHOTS GENERATED:", result)
+
+    preview_link = f"https://siteformo.com/design-previews?order_id={order_id}"
+
     if client_email:
         try:
-            preview_link = f"https://siteformo.com/design-previews?order_id={order_id}"
-
             await send_email(
                 to=client_email,
                 subject="Your design previews are ready",
                 html=f"""
-                <h2>Your website design previews are ready</h2>
-                <p>You can now review and select your preferred design:</p>
-                <a href="{preview_link}" style="padding:12px 20px;background:#4f46e5;color:white;text-decoration:none;border-radius:8px;">
-                    View your designs
-                </a>
-                <p>You will receive 5 design options and can choose one to start production.</p>
-                """
+                <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;">
+                    <h2>Your website design previews are ready</h2>
+                    <p>You can now review 5 homepage screenshot options and select your preferred design.</p>
+                    <p>
+                        <a href="{preview_link}" style="padding:12px 20px;background:#4f46e5;color:white;text-decoration:none;border-radius:8px;display:inline-block;font-weight:bold;">
+                            View your designs
+                        </a>
+                    </p>
+                    <p>After you select one design, your 1-hour refund window starts and full production can begin.</p>
+                </div>
+                """,
             )
-
-            print("📧 Preview email sent")
-
+            print("Preview email sent")
         except Exception as e:
-            print("❌ Email error:", e)
+            # Do not fail the order if Resend/email is temporarily unavailable.
+            print("Email error:", e)
 
     return {
         "ok": True,
-        "status": "BRIEF_SUBMITTED"
+        "order_id": order.id,
+        "status": order.status,
+        "design_status": getattr(order, "design_status", None),
+        "design_previews": getattr(order, "design_previews", None) or [],
+        "logo_previews": getattr(order, "logo_previews", None) or [],
+        "preview_link": preview_link,
     }
 
 
@@ -555,42 +576,100 @@ async def approve_design(
     payload: dict[str, Any],
     db: Session = Depends(get_db),
 ):
-    """Client selects one preview and starts the one-hour refund window."""
+    """Client selects one screenshot preview and starts the one-hour refund window."""
     order = _get_order_or_404(db, order_id)
 
-    selected_label = (
-        payload.get("selected_concept_label")
-        or payload.get("concept_label")
-        or payload.get("selected_design")
-        or "A"
+    previews = getattr(order, "design_previews", None) or []
+    selected_id = (
+        payload.get("selected_design_id")
+        or payload.get("selected_id")
+        or payload.get("design_id")
+    )
+    selected_index = payload.get("selected_index")
+    selected_url = (
+        payload.get("selected_screenshot_url")
+        or payload.get("selected_design_url")
+        or payload.get("preview_url")
     )
 
-    valid_labels = {concept.concept_label for concept in _concept_collection(order)}
-    if valid_labels and selected_label not in valid_labels:
-        raise HTTPException(
-            status_code=400,
-            detail=f"selected_concept_label must be one of: {', '.join(sorted(valid_labels))}",
+    selected_preview = None
+
+    if selected_id:
+        selected_preview = next(
+            (item for item in previews if isinstance(item, dict) and item.get("id") == selected_id),
+            None,
         )
+
+    if selected_preview is None and selected_index is not None:
+        try:
+            index = int(selected_index)
+            # Frontend may send 0-based or 1-based index.
+            if 0 <= index < len(previews):
+                selected_preview = previews[index]
+            elif 1 <= index <= len(previews):
+                selected_preview = previews[index - 1]
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="selected_index must be a number")
+
+    if selected_preview is None and selected_url:
+        selected_preview = next(
+            (
+                item
+                for item in previews
+                if isinstance(item, dict)
+                and selected_url in {
+                    item.get("screenshot_url"),
+                    item.get("preview_url"),
+                    item.get("image_url"),
+                }
+            ),
+            None,
+        )
+
+    if selected_preview is None:
+        if previews:
+            raise HTTPException(
+                status_code=400,
+                detail="Select a valid design screenshot using selected_design_id, selected_index, or selected_screenshot_url.",
+            )
+
+        # Fallback for legacy orders without stored preview JSON.
+        selected_preview = {
+            "id": selected_id or "design_1",
+            "label": payload.get("selected_concept_label") or payload.get("concept_label") or "Design A",
+            "screenshot_url": selected_url,
+        }
+
+    selected_design_id = selected_preview.get("id") or "design_1"
+    selected_label = selected_preview.get("label") or selected_design_id
+    selected_screenshot_url = (
+        selected_preview.get("screenshot_url")
+        or selected_preview.get("preview_url")
+        or selected_preview.get("image_url")
+        or selected_url
+    )
 
     now = _now()
     refund_until = now + timedelta(hours=1)
 
-    _set_if_exists(order, "selected_concept_label", selected_label)
+    _set_if_exists(order, "selected_design_id", selected_design_id)
     _set_if_exists(order, "selected_design_label", selected_label)
-    _set_if_exists(order, "selected_screenshot_url", payload.get("selected_screenshot_url"))
+    _set_if_exists(order, "selected_design_url", selected_screenshot_url)
+    _set_if_exists(order, "selected_screenshot_url", selected_screenshot_url)
     _set_if_exists(order, "design_approved_at", now)
     _set_if_exists(order, "refund_window_started_at", now)
     _set_if_exists(order, "refund_window_expires_at", refund_until)
+    _set_if_exists(order, "design_status", "DESIGN_APPROVED")
+    _set_if_exists(order, "generation_status", "FULL_PRODUCTION_STARTED")
+    _set_if_exists(order, "full_generation_started_at", now)
 
-    if _has_status("DESIGN_APPROVED"):
-        order.status = OrderStatus.DESIGN_APPROVED
-        db.flush()
+    order.status = _status("FULL_PRODUCTION_STARTED", "FINAL_READY")
 
     _build_final_package_from_selected_design(
         db,
         order,
         selected_label,
-        "Client selected a design preview. One-hour refund window started; full production can begin.",
+        "Client selected a screenshot design preview. One-hour refund window started; full production can begin.",
     )
 
     db.commit()
@@ -599,7 +678,9 @@ async def approve_design(
     return {
         "order_id": order.id,
         "status": order.status,
-        "selected_concept_label": selected_label,
+        "selected_design_id": selected_design_id,
+        "selected_design_label": selected_label,
+        "selected_screenshot_url": selected_screenshot_url,
         "refund_window_started_at": now.isoformat(),
         "refund_window_expires_at": refund_until.isoformat(),
         "message": "Design approved. One-hour refund window has started and full production has been queued.",

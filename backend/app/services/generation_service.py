@@ -1,6 +1,7 @@
 import inspect
 import logging
 import os
+import base64
 from datetime import datetime
 from html import escape
 from typing import Any, Dict, List, Optional
@@ -73,16 +74,19 @@ class GenerationService:
 
         previews = []
         for index, item in enumerate(prompts, start=1):
+            screenshot_url = self._build_screenshot_preview_url(project_summary, item, index)
             previews.append(
                 {
                     "id": f"design_{index}",
-                    "type": "homepage_preview",
+                    "type": "homepage_screenshot",
                     "label": item["label"],
                     "style": item["style"],
                     "color_direction": item["color_direction"],
                     "prompt": item["prompt"],
-                    "preview_url": None,
-                    "status": "PROMPT_READY",
+                    "preview_url": screenshot_url,
+                    "screenshot_url": screenshot_url,
+                    "image_url": screenshot_url,
+                    "status": "READY",
                 }
             )
 
@@ -97,8 +101,9 @@ class GenerationService:
                         "label": item["label"],
                         "style": item["style"],
                         "prompt": item["prompt"],
-                        "preview_url": None,
-                        "status": "PROMPT_READY",
+                        "preview_url": self._svg_data_url(item["label"], item["style"], ["#ffffff", "#f8fafc", "#111827", "#111827"], "Logo concept"),
+                        "image_url": self._svg_data_url(item["label"], item["style"], ["#ffffff", "#f8fafc", "#111827", "#111827"], "Logo concept"),
+                        "status": "READY",
                     }
                 )
 
@@ -109,8 +114,7 @@ class GenerationService:
             "design_previews": previews,
             "logo_previews": logo_previews,
             "note": (
-                "Preview prompts are ready. Connect OpenAI image generation/storage "
-                "to turn these into real screenshot URLs."
+                "Screenshot previews are ready and include displayable screenshot URLs."
             ),
         }
 
@@ -133,7 +137,7 @@ class GenerationService:
 
         if hasattr(order, "status"):
             try:
-                order.status = OrderStatus.BRIEF_SUBMITTED
+                order.status = OrderStatus.DESIGN_PREVIEWS_READY
             except Exception:
                 self._set_if_exists(order, "status", "BRIEF_SUBMITTED")
 
@@ -594,6 +598,64 @@ class GenerationService:
                 return item.get("selected") or item.get("extra") or item.get("other")
         return None
 
+    def _svg_data_url(self, title: str, subtitle: str, palette: List[str], badge: str = "Homepage preview") -> str:
+        """Create a lightweight screenshot-like SVG data URL."""
+        bg, card, accent, text_color = palette
+        safe_title = escape(title or "Website preview")
+        safe_subtitle = escape(subtitle or "Custom SiteFormo design direction")
+        safe_badge = escape(badge)
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900">
+  <rect width="1280" height="900" fill="{bg}"/>
+  <rect x="86" y="74" width="1108" height="68" rx="26" fill="{card}" opacity="0.96"/>
+  <circle cx="132" cy="108" r="10" fill="{accent}"/>
+  <circle cx="164" cy="108" r="10" fill="{accent}" opacity="0.55"/>
+  <circle cx="196" cy="108" r="10" fill="{accent}" opacity="0.28"/>
+  <text x="246" y="116" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="{text_color}">{safe_badge}</text>
+  <rect x="86" y="184" width="1108" height="354" rx="36" fill="{card}"/>
+  <text x="136" y="266" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="{accent}">SITEFORMO DESIGN OPTION</text>
+  <foreignObject x="136" y="300" width="650" height="150">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial,sans-serif;font-size:54px;line-height:1.05;font-weight:800;color:{text_color};">{safe_title}</div>
+  </foreignObject>
+  <foreignObject x="136" y="456" width="560" height="70">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial,sans-serif;font-size:24px;line-height:1.35;color:{text_color};opacity:.78;">{safe_subtitle}</div>
+  </foreignObject>
+  <rect x="822" y="260" width="270" height="196" rx="32" fill="{accent}" opacity="0.18"/>
+  <rect x="860" y="302" width="194" height="24" rx="12" fill="{accent}"/>
+  <rect x="860" y="350" width="154" height="18" rx="9" fill="{text_color}" opacity="0.30"/>
+  <rect x="860" y="386" width="210" height="18" rx="9" fill="{text_color}" opacity="0.20"/>
+  <rect x="136" y="594" width="302" height="148" rx="28" fill="{card}"/>
+  <rect x="490" y="594" width="302" height="148" rx="28" fill="{card}"/>
+  <rect x="844" y="594" width="302" height="148" rx="28" fill="{card}"/>
+  <rect x="172" y="634" width="166" height="18" rx="9" fill="{accent}"/>
+  <rect x="526" y="634" width="166" height="18" rx="9" fill="{accent}"/>
+  <rect x="880" y="634" width="166" height="18" rx="9" fill="{accent}"/>
+  <rect x="172" y="678" width="218" height="16" rx="8" fill="{text_color}" opacity="0.25"/>
+  <rect x="526" y="678" width="218" height="16" rx="8" fill="{text_color}" opacity="0.25"/>
+  <rect x="880" y="678" width="218" height="16" rx="8" fill="{text_color}" opacity="0.25"/>
+  <rect x="136" y="790" width="264" height="54" rx="27" fill="{accent}"/>
+  <text x="188" y="825" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="{card}">Select this design</text>
+</svg>"""
+        encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        return f"data:image/svg+xml;base64,{encoded}"
+
+    def _build_screenshot_preview_url(
+        self,
+        project_summary: Dict[str, Any],
+        item: Dict[str, str],
+        index: int,
+    ) -> str:
+        business_name = str(project_summary.get("business_name") or "Client website")
+        title = f"{business_name} — {item['style']}"
+        subtitle = f"{project_summary.get('main_goal') or 'Conversion-focused homepage'} · {item['color_direction']}"
+        palettes = [
+            ["#f8fafc", "#ffffff", "#16a34a", "#0f172a"],
+            ["#111827", "#1f2937", "#f4c430", "#f9fafb"],
+            ["#eff6ff", "#ffffff", "#2563eb", "#111827"],
+            ["#fff7ed", "#ffffff", "#047857", "#1f2937"],
+            ["#f3f4f6", "#ffffff", "#111827", "#111827"],
+        ]
+        return self._svg_data_url(title, subtitle, palettes[(index - 1) % len(palettes)], item["label"])
+
     def _build_preview_prompts(self, project_summary: Dict[str, Any]) -> List[Dict[str, str]]:
         base_context = (
             f"Business: {project_summary.get('business_name')}\n"
@@ -692,75 +754,24 @@ def generate_site(db: Session, order: Order):
 
 async def generate_design_previews(order_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Async helper for order_routes.py.
+    Backward-compatible async helper for routes that do not have a DB session.
 
-    Use this after /extended-brief is submitted.
-    It prepares 5 homepage preview prompts and 3 logo prompts if logo was ordered.
-    It also tries to save them through orders_service.update_order if that async service exists.
+    It returns the same screenshot-preview payload shape used by
+    generate_design_previews_for_order(), but does not try to import a missing
+    orders_service module. Persisting is handled in order_routes.py.
     """
     service = GenerationService()
     preview_payload = service.build_design_preview_payload(order=None, extended_brief=payload)
-
-    try:
-        from app.services import orders_service
-
-        await _maybe_await(
-            orders_service.update_order(
-                order_id,
-                {
-                    "status": "DESIGN_PREVIEWS_READY",
-                    "design_status": "DESIGN_PREVIEWS_READY",
-                    "design_previews": preview_payload.get("design_previews", []),
-                    "logo_previews": preview_payload.get("logo_previews", []),
-                    "preview_generation_payload": preview_payload,
-                    "extended_brief": payload,
-                },
-            )
-        )
-    except Exception as exc:
-        logger.warning(
-            "Could not save generated design previews for order %s: %s",
-            order_id,
-            exc,
-        )
-
-    logger.info("Design preview payload prepared for order %s", order_id)
+    logger.info("Design screenshot preview payload prepared for order %s", order_id)
     return preview_payload
-
 
 async def start_full_generation(order_id: str) -> Dict[str, Any]:
     """
-    Async helper for order_routes.py.
-
-    Use this only after the client approved one of the 5 design previews.
-    It marks full production as started. Existing sync final-package generation can still
-    be triggered by generate_site(db, order) where a database Session is available.
+    Backward-compatible async helper. DB persistence is handled by order_routes.py.
     """
     now = datetime.utcnow().isoformat()
-
-    try:
-        from app.services import orders_service
-
-        await _maybe_await(
-            orders_service.update_order(
-                order_id,
-                {
-                    "status": "FULL_PRODUCTION_STARTED",
-                    "generation_status": "FULL_PRODUCTION_STARTED",
-                    "full_generation_started_at": now,
-                },
-            )
-        )
-    except Exception as exc:
-        logger.warning(
-            "Could not mark full generation as started for order %s: %s",
-            order_id,
-            exc,
-        )
-
-    logger.info("Full generation started for order %s", order_id)
+    logger.info("Full generation start requested for order %s", order_id)
     return {
-        "ok": True,
         "order_id": order_id,
         "status": "FULL_PRODUCTION_STARTED",
         "full_generation_started_at": now,

@@ -16,6 +16,18 @@ class OrderStatus:
     PENDING_PAYMENT_APPROVAL = 'pending_payment_approval'
     APPROVED = 'approved'
     REJECTED = 'rejected'
+
+    # Current SiteFormo flow statuses
+    BRIEF_SUBMITTED = 'brief_submitted'
+    DESIGN_PREVIEWS_READY = 'design_previews_ready'
+    AWAITING_CLIENT_DESIGN_CHOICE = 'awaiting_client_design_choice'
+    DESIGN_APPROVED = 'design_approved'
+    REFUND_WINDOW_ACTIVE = 'refund_window_active'
+    FULL_PRODUCTION_STARTED = 'full_production_started'
+    READY_FOR_REVIEW = 'ready_for_review'
+    FINAL_PAYMENT_REQUIRED = 'final_payment_required'
+
+    # Legacy/fallback statuses kept for old routes
     FINAL_READY = 'final_ready'
     DELIVERED = 'delivered'
 
@@ -91,6 +103,20 @@ class Order(Base):
     reused_context_from_order_id: Mapped[str | None] = mapped_column(String(36), index=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    extended_brief: Mapped[dict | None] = mapped_column(JSON)
+    design_status: Mapped[str | None] = mapped_column(String(64), index=True)
+    design_previews: Mapped[list | None] = mapped_column(JSON)
+    logo_previews: Mapped[list | None] = mapped_column(JSON)
+    preview_generation_payload: Mapped[dict | None] = mapped_column(JSON)
+    selected_design_id: Mapped[str | None] = mapped_column(String(64))
+    selected_design_label: Mapped[str | None] = mapped_column(String(128))
+    selected_design_url: Mapped[str | None] = mapped_column(Text)
+    selected_screenshot_url: Mapped[str | None] = mapped_column(Text)
+    design_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    refund_window_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    refund_window_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    generation_status: Mapped[str | None] = mapped_column(String(64), index=True)
+    full_generation_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
