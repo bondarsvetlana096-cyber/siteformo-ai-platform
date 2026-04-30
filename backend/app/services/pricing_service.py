@@ -5,9 +5,10 @@ print("🔥 THIS IS THE REAL FILE")
 from typing import Any, Dict
 
 
-STARTER_PRICE = 600
-BUSINESS_PRICE = 900
-PREMIUM_PRICE = 1500
+STARTER_PRICE = 900
+BUSINESS_PRICE = 1500
+PREMIUM_PRICE = 2450
+CUSTOM_PRICE = 4500
 
 
 def _normalize_data(data: Any) -> Dict[str, Any]:
