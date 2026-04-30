@@ -370,7 +370,9 @@ def get_order(
 ):
     order = _get_order_or_404(db, order_id)
     owner_bypass = _is_owner_bypass_order(order)
-    estimated_price = order.estimated_price_eur or 0
+    estimated_price = int(order.estimated_price_eur or 0)
+    deposit_amount = 0 if owner_bypass else int(estimated_price / 2)
+    remaining_balance = max(estimated_price - deposit_amount, 0)
 
     if order.status == _status("APPROVED", "PENDING_PAYMENT_APPROVAL"):
         next_step = "Extended questionnaire is available."
@@ -388,9 +390,18 @@ def get_order(
         "status": order.status,
         "owner_bypass": owner_bypass,
         "payment_required": not owner_bypass,
+
+        # Frontend-friendly pricing fields.
+        # The questionnaire reads these first. Deposit is always 50%.
+        "plan": order.recommended_tier,
+        "total_amount": estimated_price,
+        "deposit_amount": deposit_amount,
+        "remaining_balance": remaining_balance,
+
+        # Backward-compatible fields used by older pages/code.
         "recommended_tier": order.recommended_tier,
         "estimated_price_eur": estimated_price,
-        "deposit_due_eur": 0 if owner_bypass else int(estimated_price / 2),
+        "deposit_due_eur": deposit_amount,
         "pricing_reasoning": order.pricing_reasoning,
         "reused_context_from_order_id": order.reused_context_from_order_id,
         "concepts": _serialize_concepts(order),
