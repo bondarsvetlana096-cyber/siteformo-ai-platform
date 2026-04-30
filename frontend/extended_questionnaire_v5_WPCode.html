@@ -1,0 +1,804 @@
+<!-- SiteFormo Smart Extended Questionnaire v5 AI-READY SIMPLIFIED
+Paste this whole file into WPCode as an HTML snippet.
+WordPress page slug: /extended-questionnaire/
+Backend endpoint: POST /api/orders/extended-brief
+
+Main product rule:
+Payment -> Extended questionnaire -> AI design previews -> Client selects design -> Full generation -> Final payment
+This form must NOT trigger full site generation.
+-->
+
+<div id="siteformo-questionnaire-root"></div>
+
+<style>
+  #siteformo-questionnaire-root,
+  #siteformo-questionnaire-root * { box-sizing: border-box; }
+  #siteformo-questionnaire-root {
+    font-family: Inter, Arial, sans-serif;
+    color: #ffffff;
+    background: #080d1c;
+    padding: 30px 16px;
+    min-height: 100vh;
+  }
+  .sf-wrap { max-width: 1060px; margin: 0 auto; }
+  .sf-header, .sf-card, .sf-summary {
+    background: #11182c;
+    border: 1px solid rgba(255,255,255,.16);
+    border-radius: 22px;
+    box-shadow: 0 18px 55px rgba(0,0,0,.35);
+  }
+  .sf-header { padding: 28px; margin-bottom: 18px; }
+  .sf-header h1 { margin: 0 0 10px; font-size: 38px; line-height: 1.1; color: #fff; }
+  .sf-header p { margin: 0 0 10px; color: #c6cee3; line-height: 1.6; }
+  .sf-badge { display: inline-block; margin-bottom: 12px; padding: 8px 12px; border-radius: 999px; background: rgba(124,92,255,.22); color: #ded8ff; font-weight: 800; font-size: 13px; }
+  .sf-grid { display: grid; gap: 18px; }
+  .sf-card { padding: 22px; }
+  .sf-question-title { margin: 0 0 8px; font-size: 21px; color: #fff; }
+  .sf-question-help { margin: 0 0 16px; color: #b6c0d8; line-height: 1.5; }
+  .sf-required { color: #ffd166; }
+  .sf-note { margin: 12px 0; border-radius: 16px; background: rgba(255,209,102,.14); border: 1px solid rgba(255,209,102,.45); color: #ffe6ad; padding: 13px 14px; font-weight: 800; line-height: 1.45; }
+  .sf-ai-note { margin: 12px 0; border-radius: 16px; background: rgba(33,212,163,.11); border: 1px solid rgba(33,212,163,.38); color: #d8fff4; padding: 13px 14px; line-height: 1.45; }
+  .sf-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .sf-option { position: relative; border: 2px solid rgba(255,255,255,.16); background: #18223d; color: #ffffff; padding: 16px 14px; border-radius: 18px; text-align: left; cursor: pointer; min-height: 86px; transition: .15s ease; }
+  .sf-option:hover { border-color: #7c5cff; transform: translateY(-1px); }
+  .sf-option.sf-selected { background: #241d55; border-color: #21d4a3; box-shadow: 0 0 0 4px rgba(33,212,163,.18), 0 16px 40px rgba(0,0,0,.28); }
+  .sf-option.sf-selected::before { content: "✓ Selected"; display: inline-block; margin-bottom: 8px; padding: 5px 9px; border-radius: 999px; background: #21d4a3; color: #04120e; font-size: 12px; font-weight: 900; }
+  .sf-option-name { display: block; font-weight: 900; margin-bottom: 6px; color: #fff; }
+  .sf-option-desc { display: block; color: #c0c9df; font-size: 13px; line-height: 1.35; }
+  .sf-addon { margin-top: 8px; color: #ffd166; font-size: 13px; font-weight: 900; }
+  .sf-field label, .sf-checkbox { display: block; color: #d8def0; font-size: 14px; font-weight: 800; margin-bottom: 8px; }
+  .sf-input, .sf-select { width: 100%; border-radius: 14px; border: 2px solid rgba(255,255,255,.18); background: #ffffff; color: #101828; padding: 14px; font: inherit; outline: none; min-height: 54px; }
+  .sf-input:focus, .sf-select:focus { border-color: #21d4a3; }
+  .sf-contact-grid, .sf-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .sf-page-card { margin-top: 14px; padding: 18px; border-radius: 18px; background: #0d1428; border: 1px solid rgba(255,255,255,.14); }
+  .sf-page-card-title { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom: 12px; }
+  .sf-page-card-title strong { color:#fff; font-size: 16px; }
+  .sf-page-status { display: inline-block; margin: 0 0 10px; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 900; background: rgba(255,209,102,.14); color: #ffe4a6; border: 1px solid rgba(255,209,102,.45); }
+  .sf-template-preview { margin-top: 10px; padding: 12px; border-radius: 14px; background: rgba(255,255,255,.07); color: #cfd7ed; line-height: 1.45; font-size: 13px; }
+  .sf-error { display: none; margin-top: 10px; color: #ffb4b4; font-weight: 900; }
+  .sf-summary { position: sticky; bottom: 12px; padding: 18px; margin-top: 20px; z-index: 50; }
+  .sf-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .sf-money-box { background: rgba(255,255,255,.08); border-radius: 16px; padding: 14px; }
+  .sf-money-label { display: block; color: #c3cce3; font-size: 13px; margin-bottom: 5px; }
+  .sf-money-value { display: block; color: #fff; font-size: 24px; font-weight: 950; }
+  .sf-submit, .sf-secondary { width: 100%; border: 0; border-radius: 18px; padding: 17px 20px; font-size: 17px; font-weight: 950; color: #fff; cursor: pointer; }
+  .sf-submit { background: linear-gradient(135deg, #7c5cff, #397cff); }
+  .sf-secondary { background: rgba(255,255,255,.12); margin-top: 10px; }
+  .sf-submit:disabled, .sf-secondary:disabled { opacity: .55; cursor: not-allowed; }
+  .sf-review-table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+  .sf-review-table th, .sf-review-table td { border-bottom: 1px solid rgba(255,255,255,.14); padding: 12px 8px; text-align: left; vertical-align: top; color: #dbe3f7; font-size: 14px; white-space: pre-line; }
+  .sf-review-table th { width: 34%; color: #fff; }
+  .sf-success { display:none; max-width:780px; margin:0 auto; text-align:center; padding:45px 20px; }
+  .sf-success h2 { font-size:34px; margin:0 0 10px; color:#fff; }
+  .sf-success p { color:#c6cee3; font-size:18px; line-height:1.6; }
+  .sf-home-link { display:inline-block; margin-top:18px; padding:15px 22px; border-radius:18px; background:linear-gradient(135deg,#7c5cff,#397cff); color:#fff !important; font-weight:950; text-decoration:none; }
+  @media (max-width: 700px) { .sf-header h1 { font-size:30px; } .sf-summary { position: static; } .sf-contact-grid, .sf-two { grid-template-columns:1fr; } }
+</style>
+
+<script>
+(function () {
+  async function startSiteFormoQuestionnaire() {
+    const root = document.getElementById("siteformo-questionnaire-root");
+    if (!root) return;
+
+    const API_BASE = "https://siteformo-ai-platform-production.up.railway.app";
+    const API_URL = API_BASE + "/api/orders/extended-brief";
+    const url = new URL(window.location.href);
+    const rawOrderId = url.searchParams.get("order_id") || url.searchParams.get("order") || "";
+    const orderId = cleanOrderId(rawOrderId);
+
+    let rawPlan = url.searchParams.get("plan") || localStorage.getItem("siteformo_plan") || "";
+    let rawDeposit = url.searchParams.get("deposit") || localStorage.getItem("siteformo_deposit") || "";
+    let rawTotal = url.searchParams.get("total") || localStorage.getItem("siteformo_total") || "";
+
+    if (orderId && (!rawPlan || !rawDeposit || !rawTotal)) {
+      try {
+        const orderRes = await fetch(API_BASE + "/api/orders/" + encodeURIComponent(orderId));
+        const orderData = await orderRes.json().catch(function(){ return {}; });
+        if (orderRes.ok) {
+          rawPlan = rawPlan || orderData.recommended_tier || orderData.tier || orderData.plan || "";
+          rawTotal = rawTotal || orderData.estimated_price_eur || orderData.total || orderData.price_max || "";
+          rawDeposit = rawDeposit || orderData.deposit_due_eur || (rawTotal ? Math.round(Number(rawTotal) / 2) : "");
+        }
+      } catch (e) {
+        console.warn("Could not load order pricing. Falling back to URL/localStorage/defaults.", e);
+      }
+    }
+
+    const plan = normalizePlan(rawPlan || "Business");
+    const depositPaid = money(rawDeposit || defaultDepositByPlan(plan));
+    const baseTotal = money(rawTotal || defaultTotalByPlan(plan));
+
+    try {
+      localStorage.setItem("siteformo_plan", plan);
+      localStorage.setItem("siteformo_deposit", String(depositPaid));
+      localStorage.setItem("siteformo_total", String(baseTotal));
+    } catch(e) {}
+
+    const PRICES = {
+      extraPage: 120,
+      logo: 100,
+      multipleSocials: 50,
+      stockPhotos: 60,
+      aiPhotos: 120,
+      aiVideo: 250,
+      hostingRecommendation: 50,
+      hostingSetup: 125,
+      hostingConsultation: 75,
+      luxuryStyle: 180
+    };
+
+    const PAGE_TEMPLATES = {
+      home: {
+        label: "Homepage",
+        purpose: "Main sales page",
+        blocks: ["Hero section", "Benefits", "Services overview", "Trust proof", "Main CTA"],
+        ai: "Create a homepage focused on first impression, clear offer, trust and lead generation."
+      },
+      services: {
+        label: "Services",
+        purpose: "Explain and sell services",
+        blocks: ["Services list", "Service benefits", "Process", "FAQ", "Quote CTA"],
+        ai: "Create a services page with clear service cards, benefits, process and request-a-quote CTA."
+      },
+      about: {
+        label: "About company",
+        purpose: "Build trust",
+        blocks: ["Company intro", "Experience", "Why choose us", "Values", "Trust CTA"],
+        ai: "Create an about page that builds trust and explains why clients should choose this company."
+      },
+      portfolio: {
+        label: "Portfolio / Gallery",
+        purpose: "Show previous work",
+        blocks: ["Gallery", "Case study cards", "Before/after", "Testimonials", "CTA"],
+        ai: "Create a portfolio page with visual proof, gallery/case studies and a strong contact CTA."
+      },
+      pricing: {
+        label: "Pricing",
+        purpose: "Explain packages or prices",
+        blocks: ["Pricing cards", "What is included", "Comparison", "FAQ", "CTA"],
+        ai: "Create a pricing page with simple package cards, included features, FAQ and conversion CTA."
+      },
+      contact: {
+        label: "Contact",
+        purpose: "Get enquiries",
+        blocks: ["Contact form", "Phone/email", "Map/location", "Social links", "Trust text"],
+        ai: "Create a contact page with easy enquiry path, location, contact details and trust-focused copy."
+      },
+      booking: {
+        label: "Booking / Consultation",
+        purpose: "Book appointments",
+        blocks: ["Booking CTA", "How it works", "Availability note", "Trust proof", "Contact fallback"],
+        ai: "Create a booking page focused on consultation or appointment requests with clear steps and trust."
+      },
+      reviews: {
+        label: "Reviews / Testimonials",
+        purpose: "Build social proof",
+        blocks: ["Testimonials", "Ratings", "Client outcomes", "Trust badges", "CTA"],
+        ai: "Create a reviews page that builds social proof using testimonial-style sections and conversion CTA."
+      },
+      faq: {
+        label: "FAQ",
+        purpose: "Answer common questions",
+        blocks: ["FAQ categories", "Process questions", "Pricing questions", "Support CTA"],
+        ai: "Create an FAQ page with clear categories, simple answers and CTA to contact the business."
+      }
+    };
+
+    const PAGE_PRESETS = {
+      Starter: ["home", "services", "contact"],
+      Business: ["home", "services", "about", "portfolio"],
+      Premium: ["home", "services", "about", "portfolio", "contact"]
+    };
+
+    const state = {
+      contact: {},
+      answers: { design_quality: "wow", improve_references: true, form_protection: "no_extra_protection" },
+      socialLinks: {},
+      pages: PAGE_PRESETS[plan].map(function(type){ return newPage(type); }),
+      references: [],
+      hosting: {},
+      addons: [],
+      addonTotal: 0,
+      reviewMode: false
+    };
+
+    const socialOptions = ["Instagram", "Facebook", "TikTok", "LinkedIn"];
+
+    root.innerHTML = `
+      <div class="sf-wrap" id="sfFormWrap">
+        <div class="sf-header">
+          <div class="sf-badge">Project questionnaire · ${escapeHtml(plan)} plan · AI-ready v5</div>
+          <h1>Final project brief</h1>
+          <p><strong>We will create your website for you.</strong> You only need to choose simple options. No design writing is required.</p>
+          <div class="sf-ai-note"><strong>Important:</strong> This form is structured for AI. Please choose the closest option. The system will create clean AI commands from your choices and improve the design beyond basic expectations.</div>
+        </div>
+        <form id="sfForm" class="sf-grid"></form>
+        <div class="sf-summary" id="sfSummary">
+          <div class="sf-summary-grid">
+            <div class="sf-money-box"><span class="sf-money-label">Plan</span><span class="sf-money-value">${escapeHtml(plan)}</span></div>
+            <div class="sf-money-box"><span class="sf-money-label">Deposit paid</span><span class="sf-money-value">€${depositPaid}</span></div>
+            <div class="sf-money-box"><span class="sf-money-label">Extra options</span><span class="sf-money-value" id="sfAddons">€0</span></div>
+            <div class="sf-money-box"><span class="sf-money-label">Remaining balance</span><span class="sf-money-value" id="sfRemaining">€${Math.max(baseTotal - depositPaid, 0)}</span></div>
+          </div>
+          <button class="sf-submit" id="sfContinue" type="button">Continue</button>
+          <button class="sf-secondary" id="sfBackToForm" type="button" style="display:none;">Back to edit answers</button>
+          <div class="sf-error" id="sfGlobalError"></div>
+        </div>
+      </div>
+      <div class="sf-success" id="sfSuccess">
+        <h2>Your project has been sent to development.</h2>
+        <p>You will receive 5 screenshots of your homepage design options based on your answers. If you ordered a logo, you will also receive 3 logo options.</p>
+        <p>We will contact you via your provided details.</p>
+        <a class="sf-home-link" href="/">Go to homepage</a>
+      </div>
+    `;
+
+    const form = document.getElementById("sfForm");
+    renderForm();
+    updateSummary();
+
+    document.getElementById("sfContinue").addEventListener("click", function () {
+      if (state.reviewMode) {
+        const agreement = document.getElementById("sfAgreementCheck");
+        if (!agreement || !agreement.checked) {
+          showGlobalError("Please confirm that you will pay the remaining balance before receiving the final project.");
+          const reviewError = document.getElementById("sfReviewError");
+          if (reviewError) reviewError.style.display = "block";
+          return;
+        }
+        submitBrief();
+        return;
+      }
+      if (!validateForm()) {
+        showGlobalError("Please complete all required questions before continuing.");
+        const firstError = document.querySelector(".sf-error[style*='block']");
+        if (firstError) firstError.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      hideGlobalError();
+      renderReviewStep();
+    });
+
+    document.getElementById("sfBackToForm").addEventListener("click", function () {
+      state.reviewMode = false;
+      renderForm();
+      document.getElementById("sfContinue").textContent = "Continue";
+      document.getElementById("sfBackToForm").style.display = "none";
+      hideGlobalError();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    function renderForm() {
+      form.innerHTML = `
+        ${renderContact()}
+        ${renderCompanyAndGoal()}
+        ${renderPagesBuilder()}
+        ${renderDesignStyle()}
+        ${renderDesignQuality()}
+        ${renderMedia()}
+        ${renderSocials()}
+        ${renderFormProtection()}
+        ${renderLogo()}
+        ${renderReferences()}
+        ${renderHosting()}
+      `;
+      bindEvents();
+    }
+
+    function renderContact() {
+      return `
+        <section class="sf-card" data-section="contact">
+          <h2 class="sf-question-title">1. Contact information <span class="sf-required">*</span></h2>
+          <p class="sf-question-help">We will use these details to send design previews and contact you about final delivery.</p>
+          <div class="sf-contact-grid">
+            <div class="sf-field"><label>Email *</label><input class="sf-input" data-contact="email" type="email" value="${escapeHtml(state.contact.email || "")}" placeholder="email@example.com"></div>
+            <div class="sf-field"><label>Phone or Telegram *</label><input class="sf-input" data-contact="phone_or_telegram" value="${escapeHtml(state.contact.phone_or_telegram || "")}" placeholder="+353871234567 or @username"></div>
+          </div>
+          <div class="sf-error" data-error="contact">Please enter a valid email and phone/Telegram.</div>
+        </section>`;
+    }
+
+    function renderCompanyAndGoal() {
+      return `
+        <section class="sf-card" data-section="basics">
+          <h2 class="sf-question-title">2. Business information <span class="sf-required">*</span></h2>
+          <div class="sf-two">
+            <div class="sf-field"><label>Company / project name *</label><input class="sf-input" data-answer="company_name" value="${escapeHtml(state.answers.company_name || "")}" placeholder="Example: Dublin Cleaning Services"></div>
+            <div class="sf-field"><label>Company location *</label><input class="sf-input" data-answer="company_location" value="${escapeHtml(state.answers.company_location || "")}" placeholder="Example: Dublin, Ireland"></div>
+          </div>
+          <div class="sf-two" style="margin-top:12px;">
+            <div class="sf-field"><label>Main business type *</label><select class="sf-select" data-answer="business_type">${selectOptions(["Local service business", "Consultant / expert", "Clinic / beauty / wellness", "Construction / renovation", "Restaurant / cafe", "Portfolio / creative", "Online service", "Other"], state.answers.business_type)}</select></div>
+            <div class="sf-field"><label>Main website goal *</label><select class="sf-select" data-answer="website_goal">${selectOptions(["Get more leads", "Sell a service", "Book consultations", "Show portfolio", "Build premium brand trust", "Explain prices/services"], state.answers.website_goal)}</select></div>
+          </div>
+          <div class="sf-error" data-error="basics">Please complete company name, location, business type and goal.</div>
+        </section>`;
+    }
+
+    function renderPagesBuilder() {
+      const includedPages = getIncludedPagesCount();
+      return `
+        <section class="sf-card" data-section="pages">
+          <h2 class="sf-question-title">3. Website pages <span class="sf-required">*</span></h2>
+          <p class="sf-question-help">Your plan includes ${includedPages} page(s). We suggested the best page structure for your package. You can change page types if needed.</p>
+          <div class="sf-note">No writing is required here. Each page type already contains a ready structure for AI.</div>
+          <div id="sfPagesList">${state.pages.map(renderPageCard).join("")}</div>
+          <button type="button" class="sf-submit" id="sfAddPage">+ Add extra page (€${PRICES.extraPage})</button>
+          <div class="sf-error" data-error="pages">Please keep at least the included number of pages and complete every page type and goal.</div>
+        </section>`;
+    }
+
+    function renderPageCard(page, index) {
+      const template = PAGE_TEMPLATES[page.type] || PAGE_TEMPLATES.services;
+      const pagePrice = index < getIncludedPagesCount() ? 0 : PRICES.extraPage;
+      return `
+        <div class="sf-page-card" data-page-card="${index}">
+          <span class="sf-page-status">${pagePrice === 0 ? "Included in your package" : "Paid extra page: +€" + pagePrice}</span>
+          <div class="sf-page-card-title"><strong>Page ${index + 1}</strong>${index >= getIncludedPagesCount() ? `<button type="button" class="sf-secondary" data-remove-page="${index}" style="width:auto; padding:10px 14px; margin:0;">Remove</button>` : ""}</div>
+          <div class="sf-two">
+            <div class="sf-field"><label>Page type *</label><select class="sf-select" data-page-field="type" data-page-index="${index}">${pageTypeOptions(page.type)}</select></div>
+            <div class="sf-field"><label>Main goal of this page *</label><select class="sf-select" data-page-field="goal" data-page-index="${index}">${selectOptions(["Get enquiries", "Explain services", "Build trust", "Show examples", "Help people contact us", "Help people book"], page.goal)}</select></div>
+          </div>
+          <div class="sf-template-preview"><strong>AI will include:</strong> ${escapeHtml(template.blocks.join(", "))}</div>
+          <div class="sf-ai-note"><strong>AI command preview:</strong> ${escapeHtml(buildPageAiCommand(page))}</div>
+          <div class="sf-error" data-page-error="${index}">Please select page type and goal.</div>
+        </div>`;
+    }
+
+    function renderDesignStyle() {
+      const options = [
+        ["clean_modern", "Clean modern", "Simple, professional and easy to read."],
+        ["premium_business", "Premium business", "High-trust business presentation."],
+        ["bold_startup", "Bold startup", "Modern, energetic and more colourful."],
+        ["luxury_high_end", "Luxury / high-end +€180", "Premium dark/elegant custom visual direction."]
+      ];
+      return renderChoiceSection("4. Design style", "design_style", options, true);
+    }
+
+    function renderDesignQuality() {
+      const options = [
+        ["standard", "Standard", "Clean and professional website."],
+        ["high_end", "High-end", "Premium spacing, typography and structure."],
+        ["wow", "WOW design (recommended)", "Designed to look stronger than typical websites and improve references automatically."]
+      ];
+      return renderChoiceSection("5. Design quality level", "design_quality", options, true);
+    }
+
+    function renderMedia() {
+      const photoOptions = [
+        ["client_photos", "I will provide photos", "We prepare image spaces and you provide real photos."],
+        ["stock_photos", "Use stock photos +€60", "We select suitable business-style photos."],
+        ["ai_photos", "Generate AI photos +€120", "We generate custom AI visuals for your concept."],
+        ["no_photos", "No photos needed", "Use clean layout, icons and simple visual blocks."]
+      ];
+      const videoOptions = [
+        ["no_video", "No video", "Recommended for most business websites."],
+        ["client_video_link", "I will provide a video link", "Add YouTube/Vimeo/direct video link."],
+        ["ai_video", "Generate AI video +€250", "Short simple generated video asset."]
+      ];
+      return `
+        <section class="sf-card" data-section="media">
+          <h2 class="sf-question-title">6. Photos and video <span class="sf-required">*</span></h2>
+          <p class="sf-question-help">Choose one simple option. This keeps the AI brief clean.</p>
+          <h3 class="sf-question-title" style="font-size:17px;">Photos *</h3>
+          <div class="sf-options">${photoOptions.map(function(row){ return optionButton("photo_option", row); }).join("")}</div>
+          <h3 class="sf-question-title" style="font-size:17px;">Video *</h3>
+          <div class="sf-options">${videoOptions.map(function(row){ return optionButton("video_option", row); }).join("")}</div>
+          ${state.answers.video_option === "client_video_link" ? `<div class="sf-field"><label>Video link *</label><input class="sf-input" data-answer="video_url" value="${escapeHtml(state.answers.video_url || "")}" placeholder="https://youtube.com/... or https://vimeo.com/..."></div>` : ""}
+          <div class="sf-error" data-error="media">Please choose photo and video options. If you provide a video link, enter a valid URL.</div>
+        </section>`;
+    }
+
+    function renderSocials() {
+      const selected = Array.isArray(state.answers.social_networks) ? state.answers.social_networks : [];
+      const noSocial = selected.includes("No social networks");
+      return `
+        <section class="sf-card" data-section="socials">
+          <h2 class="sf-question-title">7. Social networks <span class="sf-required">*</span></h2>
+          <p class="sf-question-help">One social network is included. Two or more social networks add €${PRICES.multipleSocials} total.</p>
+          <div class="sf-options">
+            ${socialOptions.map(function (name) { return `<button type="button" class="sf-option ${selected.includes(name) ? "sf-selected" : ""}" data-social-option="${name}"><span class="sf-option-name">${name}</span><span class="sf-option-desc">Add ${name} link to website footer/contact sections.</span></button>`; }).join("")}
+            <button type="button" class="sf-option ${noSocial ? "sf-selected" : ""}" data-social-option="No social networks"><span class="sf-option-name">No social networks</span><span class="sf-option-desc">Do not add social links.</span></button>
+          </div>
+          ${selected.length && !noSocial ? `<div class="sf-contact-grid">${selected.map(function (network) { return `<div class="sf-field"><label>${network} link *</label><input class="sf-input" data-social-link="${network}" value="${escapeHtml(state.socialLinks[network] || "")}" placeholder="https://${network.toLowerCase()}.com/... "></div>`; }).join("")}</div>` : ""}
+          <div class="sf-error" data-error="socials">Please select social networks and enter a valid link for each selected network, or choose No social networks.</div>
+        </section>`;
+    }
+
+    function renderFormProtection() {
+      const options = [
+        ["no_extra_protection", "No extra protection", "Standard forms will be included."],
+        ["invisible_spam_protection", "Add invisible spam protection (free)", "Protects forms from spam without visible CAPTCHA for visitors."]
+      ];
+      return renderChoiceSection("8. Form protection (optional, free)", "form_protection", options, true);
+    }
+
+    function renderLogo() {
+      const options = [
+        ["I already have a logo", "I already have a logo", "You will provide it."],
+        ["I need a logo", "I need a logo +€100", "You will receive 3 logo options."],
+        ["I do not need a logo", "I do not need a logo", "No logo work required."]
+      ];
+      return renderChoiceSection("9. Logo", "logo", options, true);
+    }
+
+    function renderReferences() {
+      const hasRefs = state.answers.has_references || "";
+      return `
+        <section class="sf-card" data-section="references">
+          <h2 class="sf-question-title">10. Website examples <span class="sf-required">*</span></h2>
+          <p class="sf-question-help">Optional examples help with style. No explanation is needed.</p>
+          <div class="sf-options">
+            <button type="button" class="sf-option ${hasRefs === "yes" ? "sf-selected" : ""}" data-reference-choice="yes"><span class="sf-option-name">Yes, I have examples</span><span class="sf-option-desc">Add 1 or 2 website links.</span></button>
+            <button type="button" class="sf-option ${hasRefs === "no" ? "sf-selected" : ""}" data-reference-choice="no"><span class="sf-option-name">No examples</span><span class="sf-option-desc">We will choose the best structure ourselves.</span></button>
+          </div>
+          ${hasRefs === "yes" ? `<div class="sf-two"><div class="sf-field"><label>Example website 1 *</label><input class="sf-input" data-reference-index="0" value="${escapeHtml(state.references[0] || "")}" placeholder="https://example.com"></div><div class="sf-field"><label>Example website 2</label><input class="sf-input" data-reference-index="1" value="${escapeHtml(state.references[1] || "")}" placeholder="https://example.com"></div></div><label class="sf-checkbox" style="margin-top:12px;"><input type="checkbox" data-answer-checkbox="improve_references" ${state.answers.improve_references !== false ? "checked" : ""}> Improve these examples automatically and make the design cleaner, more modern and more premium</label>` : ""}
+          <div class="sf-error" data-error="references">Please choose whether you have examples. If yes, add at least one valid URL.</div>
+        </section>`;
+    }
+
+    function renderHosting() {
+      const status = state.hosting.status || "";
+      return `
+        <section class="sf-card" data-section="hosting">
+          <h2 class="sf-question-title">11. Hosting and installation <span class="sf-required">*</span></h2>
+          <p class="sf-question-help">We do not sell hosting. We can guide you or install the finished website on your own hosting account.</p>
+          <div class="sf-options">
+            ${hostingStatusButton("I already have hosting", status)}
+            ${hostingStatusButton("I do not have hosting yet", status)}
+            ${hostingStatusButton("I am not sure", status)}
+          </div>
+          ${status === "I already have hosting" ? `<div class="sf-two"><div class="sf-field"><label>Hosting provider *</label><input class="sf-input" data-hosting="provider" value="${escapeHtml(state.hosting.provider || "")}" placeholder="Hostinger, SiteGround, GoDaddy"></div><div class="sf-field"><label>CMS / builder *</label><input class="sf-input" data-hosting="cms" value="${escapeHtml(state.hosting.cms || "")}" placeholder="WordPress, Divi, Wix..."></div></div>${renderHostingChoice("install", ["Website installation on my hosting +€125", "Send me files/instructions only"])}${renderHostingChoice("access", ["I can provide temporary hosting access securely", "I need guidance without sharing access", "I am not sure about access"])}` : ""}
+          ${status === "I do not have hosting yet" ? `${renderHostingChoice("option", ["Hosting recommendation only +€50", "Hosting setup + website installation +€125", "I will arrange hosting myself"])}` : ""}
+          ${status === "I am not sure" ? `${renderHostingChoice("setup", ["Hosting consultation / setup advice +€75", "No paid hosting help now"])}` : ""}
+          <div class="sf-error" data-error="hosting">Please complete the hosting question.</div>
+        </section>`;
+    }
+
+    function optionButton(id, row) {
+      const selected = state.answers[id] || "";
+      return `<button type="button" class="sf-option ${selected === row[0] ? "sf-selected" : ""}" data-choice-id="${id}" data-choice-value="${escapeHtml(row[0])}"><span class="sf-option-name">${escapeHtml(row[1])}</span><span class="sf-option-desc">${escapeHtml(row[2] || "")}</span>${row[1].includes("+€") ? `<div class="sf-addon">Paid add-on</div>` : ""}</button>`;
+    }
+
+    function hostingStatusButton(label, selected) {
+      return `<button type="button" class="sf-option ${selected === label ? "sf-selected" : ""}" data-hosting-status="${escapeHtml(label)}"><span class="sf-option-name">${escapeHtml(label)}</span><span class="sf-option-desc">${label === "I already have hosting" ? "Tell us provider and installation preference." : label === "I do not have hosting yet" ? "Choose whether you need help." : "We will clarify the next step."}</span></button>`;
+    }
+
+    function renderHostingChoice(field, options) {
+      return `<div class="sf-options" style="margin-top:14px;">${options.map(function (label) { return `<button type="button" class="sf-option ${state.hosting[field] === label ? "sf-selected" : ""}" data-hosting-choice="${field}" data-hosting-value="${escapeHtml(label)}"><span class="sf-option-name">${escapeHtml(label)}</span>${label.includes("+€") ? `<div class="sf-addon">This option adds ${label.match(/\+€\d+/)[0]} to your final payment</div>` : ""}</button>`; }).join("")}</div>`;
+    }
+
+    function renderChoiceSection(title, id, options, required) {
+      const selected = state.answers[id] || "";
+      return `
+        <section class="sf-card" data-section="${id}">
+          <h2 class="sf-question-title">${title} ${required ? `<span class="sf-required">*</span>` : ""}</h2>
+          <div class="sf-options">${options.map(function (row) { return `<button type="button" class="sf-option ${selected === row[0] ? "sf-selected" : ""}" data-choice-id="${id}" data-choice-value="${escapeHtml(row[0])}"><span class="sf-option-name">${escapeHtml(row[1])}</span><span class="sf-option-desc">${escapeHtml(row[2] || "")}</span>${row[1].includes("+€") ? `<div class="sf-addon">Paid add-on</div>` : ""}</button>`; }).join("")}</div>
+          <div class="sf-error" data-error="${id}">Please select an option.</div>
+        </section>`;
+    }
+
+    function bindEvents() {
+      form.querySelectorAll("[data-contact]").forEach(function (input) { input.addEventListener("input", function () { state.contact[input.dataset.contact] = input.value.trim(); clearError("contact"); }); });
+      form.querySelectorAll("[data-answer]").forEach(function (el) { el.addEventListener("input", function () { state.answers[el.dataset.answer] = el.value.trim(); clearError("basics"); clearError("media"); }); el.addEventListener("change", function () { state.answers[el.dataset.answer] = el.value.trim(); clearError("basics"); clearError("media"); }); });
+      form.querySelectorAll("[data-choice-id]").forEach(function (button) { button.addEventListener("click", function () { state.answers[button.dataset.choiceId] = button.dataset.choiceValue; renderForm(); updateSummary(); }); });
+
+      const addPage = document.getElementById("sfAddPage");
+      if (addPage) addPage.addEventListener("click", function () { state.pages.push(newPage("services")); renderForm(); updateSummary(); });
+      form.querySelectorAll("[data-remove-page]").forEach(function (button) { button.addEventListener("click", function () { state.pages.splice(Number(button.dataset.removePage), 1); renderForm(); updateSummary(); }); });
+      form.querySelectorAll("[data-page-field]").forEach(function (field) { field.addEventListener("change", updatePageField); });
+
+      form.querySelectorAll("[data-social-option]").forEach(function (button) { button.addEventListener("click", function () { const value = button.dataset.socialOption; let selected = Array.isArray(state.answers.social_networks) ? state.answers.social_networks : []; if (value === "No social networks") { state.answers.social_networks = ["No social networks"]; state.socialLinks = {}; } else { selected = selected.filter(x => x !== "No social networks"); selected = selected.includes(value) ? selected.filter(x => x !== value) : selected.concat(value); state.answers.social_networks = selected; Object.keys(state.socialLinks).forEach(k => { if (!selected.includes(k)) delete state.socialLinks[k]; }); } renderForm(); updateSummary(); }); });
+      form.querySelectorAll("[data-social-link]").forEach(function (input) { input.addEventListener("input", function () { state.socialLinks[input.dataset.socialLink] = input.value.trim(); clearError("socials"); }); });
+
+      form.querySelectorAll("[data-reference-choice]").forEach(function (button) { button.addEventListener("click", function () { state.answers.has_references = button.dataset.referenceChoice; if (state.answers.has_references === "no") state.references = []; else if (!state.references.length) state.references = ["", ""]; renderForm(); updateSummary(); }); });
+      form.querySelectorAll("[data-reference-index]").forEach(function (input) { input.addEventListener("input", function () { state.references[Number(input.dataset.referenceIndex)] = input.value.trim(); clearError("references"); }); });
+
+      form.querySelectorAll("[data-hosting-status]").forEach(function (button) { button.addEventListener("click", function () { state.hosting = { status: button.dataset.hostingStatus }; renderForm(); updateSummary(); }); });
+      form.querySelectorAll("[data-hosting]").forEach(function (field) { field.addEventListener("input", function () { state.hosting[field.dataset.hosting] = field.value.trim(); clearError("hosting"); }); });
+      form.querySelectorAll("[data-hosting-choice]").forEach(function (button) { button.addEventListener("click", function () { state.hosting[button.dataset.hostingChoice] = button.dataset.hostingValue; renderForm(); updateSummary(); }); });
+    }
+
+    function updatePageField(event) {
+      const field = event.currentTarget;
+      const index = Number(field.dataset.pageIndex);
+      const page = state.pages[index];
+      if (!page) return;
+      page[field.dataset.pageField] = field.value;
+      clearPageError(index);
+      updateSummary();
+      renderForm();
+    }
+
+    function newPage(type) {
+      const template = PAGE_TEMPLATES[type] || PAGE_TEMPLATES.services;
+      return { type: type, name: template.label, goal: defaultGoalForPage(type), blocks: template.blocks, ai_command: template.ai };
+    }
+
+    function defaultGoalForPage(type) {
+      if (type === "home") return "Get enquiries";
+      if (type === "services") return "Explain services";
+      if (type === "about") return "Build trust";
+      if (type === "portfolio") return "Show examples";
+      if (type === "contact") return "Help people contact us";
+      if (type === "booking") return "Help people book";
+      return "Explain services";
+    }
+
+    function validateForm() {
+      let valid = true;
+      if (!isEmail(state.contact.email) || !isValidPhoneOrTelegram(state.contact.phone_or_telegram)) { showError("contact"); valid = false; } else clearError("contact");
+      if (!isMeaningfulText(state.answers.company_name) || !isMeaningfulText(state.answers.company_location) || !state.answers.business_type || !state.answers.website_goal) { showError("basics"); valid = false; } else clearError("basics");
+      if (!validatePages()) valid = false;
+      if (!state.answers.design_style) { showError("design_style"); valid = false; } else clearError("design_style");
+      if (!state.answers.design_quality) { showError("design_quality"); valid = false; } else clearError("design_quality");
+      if (!state.answers.form_protection) { showError("form_protection"); valid = false; } else clearError("form_protection");
+      if (!validateMedia()) valid = false;
+      if (!validateSocials()) valid = false;
+      if (!state.answers.logo) { showError("logo"); valid = false; } else clearError("logo");
+      if (!validateReferences()) valid = false;
+      if (!validateHosting()) valid = false;
+      return valid;
+    }
+
+    function validatePages() {
+      let valid = true;
+      if (state.pages.length < getIncludedPagesCount()) { showError("pages"); valid = false; } else clearError("pages");
+      state.pages.forEach(function (page, index) {
+        const ok = Boolean(page.type) && Boolean(page.goal);
+        if (!ok) { showPageError(index); valid = false; } else clearPageError(index);
+      });
+      return valid;
+    }
+
+    function validateMedia() {
+      let ok = Boolean(state.answers.photo_option) && Boolean(state.answers.video_option);
+      if (state.answers.video_option === "client_video_link") ok = ok && isUrl(state.answers.video_url);
+      if (!ok) showError("media"); else clearError("media");
+      return ok;
+    }
+
+    function validateSocials() {
+      const selected = Array.isArray(state.answers.social_networks) ? state.answers.social_networks : [];
+      if (!selected.length) { showError("socials"); return false; }
+      if (selected.includes("No social networks")) { clearError("socials"); return true; }
+      const ok = selected.every(network => isUrl(state.socialLinks[network]));
+      if (!ok) showError("socials"); else clearError("socials");
+      return ok;
+    }
+
+    function validateReferences() {
+      if (!state.answers.has_references) { showError("references"); return false; }
+      if (state.answers.has_references === "no") { clearError("references"); return true; }
+      const validUrls = state.references.filter(Boolean).filter(isUrl);
+      const ok = validUrls.length >= 1;
+      if (!ok) showError("references"); else clearError("references");
+      return ok;
+    }
+
+    function validateHosting() {
+      const h = state.hosting;
+      let ok = Boolean(h.status);
+      if (h.status === "I already have hosting") ok = isMeaningfulText(h.provider) && isMeaningfulText(h.cms) && Boolean(h.install) && Boolean(h.access);
+      if (h.status === "I do not have hosting yet") ok = Boolean(h.option);
+      if (h.status === "I am not sure") ok = Boolean(h.setup);
+      if (!ok) showError("hosting"); else clearError("hosting");
+      return ok;
+    }
+
+    function updateSummary() {
+      const addons = [];
+      if (state.answers.logo === "I need a logo") addons.push({ question: "Logo", option: "3 logo options", price: PRICES.logo });
+      const socials = Array.isArray(state.answers.social_networks) ? state.answers.social_networks.filter(x => x !== "No social networks") : [];
+      if (socials.length > 1) addons.push({ question: "Social networks", option: "Multiple social networks", price: PRICES.multipleSocials });
+      state.pages.forEach(function (page, index) {
+        if (index >= getIncludedPagesCount()) addons.push({ question: "Extra page", option: page.name || PAGE_TEMPLATES[page.type].label, price: PRICES.extraPage });
+      });
+      if (state.answers.photo_option === "stock_photos") addons.push({ question: "Photos", option: "Stock photos", price: PRICES.stockPhotos });
+      if (state.answers.photo_option === "ai_photos") addons.push({ question: "Photos", option: "AI photos", price: PRICES.aiPhotos });
+      if (state.answers.video_option === "ai_video") addons.push({ question: "Video", option: "AI video", price: PRICES.aiVideo });
+      if (state.answers.design_style === "luxury_high_end") addons.push({ question: "Design style", option: "Luxury / high-end visual style", price: PRICES.luxuryStyle });
+      if (state.hosting.install === "Website installation on my hosting +€125") addons.push({ question: "Hosting", option: "Website installation", price: PRICES.hostingSetup });
+      if (state.hosting.option === "Hosting recommendation only +€50") addons.push({ question: "Hosting", option: "Hosting recommendation", price: PRICES.hostingRecommendation });
+      if (state.hosting.option === "Hosting setup + website installation +€125") addons.push({ question: "Hosting", option: "Hosting setup + installation", price: PRICES.hostingSetup });
+      if (state.hosting.setup === "Hosting consultation / setup advice +€75") addons.push({ question: "Hosting", option: "Hosting consultation", price: PRICES.hostingConsultation });
+      state.addons = addons;
+      state.addonTotal = addons.reduce((sum, item) => sum + item.price, 0);
+      const addonsEl = document.getElementById("sfAddons");
+      const remainingEl = document.getElementById("sfRemaining");
+      if (addonsEl) addonsEl.textContent = "€" + state.addonTotal;
+      if (remainingEl) remainingEl.textContent = "€" + getRemainingBalance();
+    }
+
+    function buildPayload() {
+      const pages = state.pages.map(function(page, index){
+        const template = PAGE_TEMPLATES[page.type] || PAGE_TEMPLATES.services;
+        return {
+          page_number: index + 1,
+          type: page.type,
+          name: template.label,
+          goal: page.goal,
+          included_in_package: index < getIncludedPagesCount(),
+          extra_price: index < getIncludedPagesCount() ? 0 : PRICES.extraPage,
+          blocks: template.blocks,
+          ai_command: buildPageAiCommand(page)
+        };
+      });
+      const aiCommands = buildAiCommands(pages);
+      return {
+        order_id: orderId,
+        plan: plan,
+        contact: state.contact,
+        answers: {
+          company_name: state.answers.company_name,
+          company_location: state.answers.company_location,
+          business_type: state.answers.business_type,
+          website_goal: state.answers.website_goal,
+          design_style: state.answers.design_style,
+          design_quality: state.answers.design_quality,
+          improve_references: state.answers.improve_references !== false,
+          form_protection: state.answers.form_protection,
+          media: {
+            photo_option: state.answers.photo_option,
+            video_option: state.answers.video_option,
+            video_url: state.answers.video_url || ""
+          },
+          social_networks: {
+            networks: state.answers.social_networks || [],
+            links: state.socialLinks
+          },
+          logo: state.answers.logo,
+          pages: pages,
+          references: state.answers.has_references === "yes" ? state.references.filter(Boolean) : [],
+          hosting: state.hosting,
+          additional_details: "No additional details collected. Client used structured AI-ready questionnaire."
+        },
+        additional_pages: pages,
+        addons: state.addons,
+        pricing: { base_total: baseTotal, deposit_paid: depositPaid, extra_options: state.addonTotal, remaining_balance: getRemainingBalance() },
+        ai_commands: aiCommands,
+        project_complexity_note: buildComplexityNote(),
+        logo_ordered: state.answers.logo === "I need a logo",
+        agreement: true,
+        submitted_at: new Date().toISOString()
+      };
+    }
+
+    function buildAiCommands(pages) {
+      return {
+        main_project_command: `Create a ${plan} website for ${state.answers.company_name || "the company"}, a ${state.answers.business_type || "business"} located in ${state.answers.company_location || "Ireland"}. Main goal: ${state.answers.website_goal || "business growth"}.`,
+        style_command: styleCommand(state.answers.design_style),
+        design_quality_command: designQualityCommand(state.answers.design_quality),
+        form_protection_command: formProtectionCommand(state.answers.form_protection),
+        media_command: mediaCommand(),
+        page_commands: pages.map(function(page){ return page.ai_command; }),
+        social_links_required_and_provided: state.socialLinks,
+        references: state.answers.has_references === "yes" ? state.references.filter(Boolean) : []
+      };
+    }
+
+    function buildPageAiCommand(page) {
+      const template = PAGE_TEMPLATES[page.type] || PAGE_TEMPLATES.services;
+      return `${template.ai} Page goal: ${page.goal}. Include blocks: ${template.blocks.join(", ")}.`;
+    }
+
+    function styleCommand(style) {
+      if (style === "clean_modern") return "Clean modern UI, white space, simple professional layout.";
+      if (style === "premium_business") return "Premium business UI, strong trust sections, polished typography.";
+      if (style === "bold_startup") return "Bold startup-style UI, modern colors, energetic sections.";
+      if (style === "luxury_high_end") return "Luxury high-end visual style, premium spacing, elegant details.";
+      return "Professional business website style.";
+    }
+
+    function designQualityCommand(quality) {
+      if (quality === "standard") return "Create a clean professional website, but still avoid basic/outdated layouts.";
+      if (quality === "high_end") return "Create a high-end premium website with improved spacing, typography, hierarchy and trust sections.";
+      return "Create a WOW-level website that looks premium, modern and stronger than typical websites or provided references.";
+    }
+
+    function formProtectionCommand(option) {
+      if (option === "invisible_spam_protection") return "All contact and booking forms should include invisible spam protection such as honeypot or reCAPTCHA v3 with no visible friction.";
+      return "Use clean validated forms. Do not add visible CAPTCHA unless requested later.";
+    }
+
+    function mediaCommand() {
+      const photo = state.answers.photo_option || "not selected";
+      const video = state.answers.video_option || "not selected";
+      return `Photo option: ${photo}. Video option: ${video}${state.answers.video_url ? ". Video URL: " + state.answers.video_url : ""}.`;
+    }
+
+    function buildComplexityNote() {
+      const notes = [];
+      if (state.answers.photo_option === "ai_photos") notes.push("AI photo generation included.");
+      if (state.answers.video_option === "ai_video") notes.push("AI video generation included.");
+      if (state.pages.length > getIncludedPagesCount()) notes.push("Extra pages included.");
+      if (state.answers.design_style === "luxury_high_end") notes.push("Luxury visual direction included.");
+      return notes.length ? notes.join(" ") : "Standard production time.";
+    }
+
+    function renderReviewStep() {
+      updateSummary();
+      state.reviewMode = true;
+      const payload = buildPayload();
+      const rows = [
+        ["Email", state.contact.email],
+        ["Phone / Telegram", state.contact.phone_or_telegram],
+        ["Company", state.answers.company_name],
+        ["Location", state.answers.company_location],
+        ["Goal", state.answers.website_goal],
+        ["Design style", state.answers.design_style],
+        ["Design quality", state.answers.design_quality],
+        ["Form protection", state.answers.form_protection],
+        ["Media", payload.answers.media.photo_option + " / " + payload.answers.media.video_option],
+        ["Social networks", JSON.stringify(payload.answers.social_networks, null, 2)],
+        ["Pages", payload.answers.pages.map(p => `Page ${p.page_number}: ${p.name} | ${p.ai_command} | Extra: €${p.extra_price}`).join("\n")],
+        ["References", payload.answers.references.length ? payload.answers.references.join("\n") : "No references"],
+        ["Complexity note", payload.project_complexity_note],
+        ["Extra options", "€" + state.addonTotal],
+        ["Remaining balance", "€" + getRemainingBalance()]
+      ];
+      form.innerHTML = `
+        <section class="sf-card">
+          <h2 class="sf-question-title">Review your AI-ready project brief</h2>
+          <p class="sf-question-help">Please check the structured brief before sending. This will be used to create design previews, not the final website immediately.</p>
+          <table class="sf-review-table"><tbody>${rows.map(row => `<tr><th>${escapeHtml(row[0])}</th><td>${escapeHtml(row[1])}</td></tr>`).join("")}</tbody></table>
+          <label class="sf-checkbox" style="margin-top:18px;"><input type="checkbox" id="sfAgreementCheck"> I confirm that I will pay the remaining balance before receiving the final project.</label>
+          <div class="sf-error" id="sfReviewError">Please confirm the remaining balance agreement before submitting.</div>
+        </section>`;
+      document.getElementById("sfAgreementCheck").addEventListener("change", function () { if (this.checked) hideGlobalError(); });
+      document.getElementById("sfContinue").textContent = "Confirm and send project";
+      document.getElementById("sfBackToForm").style.display = "block";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function submitBrief() {
+      const submitButton = document.getElementById("sfContinue");
+      submitButton.disabled = true;
+      submitButton.textContent = "Sending...";
+      fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildPayload()) })
+        .then(function (response) { if (!response.ok) throw new Error("Submit failed: " + response.status); return response.json().catch(function () { return { ok: true }; }); })
+        .then(function () { document.getElementById("sfFormWrap").style.display = "none"; document.getElementById("sfSuccess").style.display = "block"; window.scrollTo({ top: 0, behavior: "smooth" }); })
+        .catch(function (error) { console.error(error); showGlobalError("Something went wrong while sending your project. Please try again."); })
+        .finally(function () { submitButton.disabled = false; submitButton.textContent = "Confirm and send project"; });
+    }
+
+    function getIncludedPagesCount() { if (plan === "Starter") return 3; if (plan === "Premium") return 5; return 4; }
+    function getRemainingBalance() { return Math.max(baseTotal + state.addonTotal - depositPaid, 0); }
+    function showError(id) { const el = document.querySelector(`[data-error="${id}"]`); if (el) el.style.display = "block"; }
+    function clearError(id) { const el = document.querySelector(`[data-error="${id}"]`); if (el) el.style.display = "none"; }
+    function showPageError(index) { const el = document.querySelector(`[data-page-error="${index}"]`); if (el) el.style.display = "block"; }
+    function clearPageError(index) { const el = document.querySelector(`[data-page-error="${index}"]`); if (el) el.style.display = "none"; }
+    function showGlobalError(message) { const el = document.getElementById("sfGlobalError"); if (el) { el.textContent = message; el.style.display = "block"; } }
+    function hideGlobalError() { const el = document.getElementById("sfGlobalError"); if (el) el.style.display = "none"; }
+    function isEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim()); }
+    function isValidPhoneOrTelegram(value) { const clean = String(value || "").trim(); if (/^@[a-zA-Z0-9_]{5,32}$/.test(clean)) return true; const digits = clean.replace(/\D/g, ""); return digits.length >= 8 && digits.length <= 15 && /^[+()0-9\s-]{8,25}$/.test(clean); }
+    function isMeaningfulText(value) { const text = String(value || "").trim(); return text.length >= 2 && /[a-zA-Z0-9]/.test(text) && !/^[\W_]+$/.test(text); }
+    function isUrl(value) { return /^https?:\/\/.+\..+/.test(String(value || "").trim()); }
+    function cleanOrderId(value) { const v = String(value || "").trim(); if (!v || v === "None" || v === "none" || v === "null" || v === "undefined") return ""; return v; }
+    function normalizePlan(value) { const clean = String(value || "").toLowerCase(); if (clean.includes("starter")) return "Starter"; if (clean.includes("premium")) return "Premium"; return "Business"; }
+    function defaultTotalByPlan(currentPlan) { if (currentPlan === "Starter") return 950; if (currentPlan === "Premium") return 2450; return 1500; }
+    function defaultDepositByPlan(currentPlan) { return Math.round(defaultTotalByPlan(currentPlan) / 2); }
+    function money(value) { const parsed = Number(String(value).replace(/[^0-9.]/g, "")); return Number.isFinite(parsed) ? Math.round(parsed) : 0; }
+    function escapeHtml(value) { return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;"); }
+    function selectOptions(options, selected) { return `<option value="">Choose option</option>` + options.map(opt => `<option value="${escapeHtml(opt)}" ${selected === opt ? "selected" : ""}>${escapeHtml(opt)}</option>`).join(""); }
+    function pageTypeOptions(selected) { return Object.keys(PAGE_TEMPLATES).map(function(key){ const label = PAGE_TEMPLATES[key].label; return `<option value="${escapeHtml(key)}" ${selected === key ? "selected" : ""}>${escapeHtml(label)}</option>`; }).join(""); }
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startSiteFormoQuestionnaire);
+  else startSiteFormoQuestionnaire();
+})();
+</script>
+
+<script>
+(function(){
+  function removeUnneededDepositButton(){
+    document.querySelectorAll("button, a").forEach(function(el){
+      const text = String(el.textContent || "").trim().toLowerCase();
+      if(text === "open detailed questionnaire") el.remove();
+    });
+  }
+  document.addEventListener("DOMContentLoaded", removeUnneededDepositButton);
+  setTimeout(removeUnneededDepositButton, 300);
+  setTimeout(removeUnneededDepositButton, 1000);
+})();
+</script>

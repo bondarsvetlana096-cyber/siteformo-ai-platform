@@ -29,18 +29,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# CORS for SiteFormo frontend and local development.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 🔥 ВРЕМЕННО РАЗРЕШАЕМ ВСЁ
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 🔥 ВАЖНО: правильный CORS (фикс ошибки Failed to fetch)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+    allow_origins=getattr(settings, "cors_origins", None) or [
         "https://siteformo.com",
         "https://www.siteformo.com",
         "http://localhost:3000",

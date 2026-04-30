@@ -10,6 +10,7 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.models.order import FinalPackage, Order, OrderStatus
+from app.services.prompt_service import build_ai_prompt, build_preview_variation_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,8 @@ class GenerationService:
         logo_ordered = bool(extended_brief.get("logo_ordered"))
 
         project_summary = self._summarize_extended_brief(order, extended_brief)
-        prompts = self._build_preview_prompts(project_summary)
+        prompt_engine_prompt = build_ai_prompt(extended_brief)
+        prompts = self._build_preview_prompts(project_summary, extended_brief)
 
         previews = []
         for index, item in enumerate(prompts, start=1):
@@ -111,6 +113,7 @@ class GenerationService:
             "design_status": "DESIGN_PREVIEWS_READY",
             "generated_at": datetime.utcnow().isoformat(),
             "project_summary": project_summary,
+            "prompt_engine_prompt": prompt_engine_prompt,
             "design_previews": previews,
             "logo_previews": logo_previews,
             "note": (
@@ -564,8 +567,10 @@ class GenerationService:
     ) -> Dict[str, Any]:
         contact = extended_brief.get("contact") or {}
         pricing = extended_brief.get("pricing") or {}
+        answers = extended_brief.get("answers") if isinstance(extended_brief.get("answers"), dict) else {}
         additional_pages = (
-            extended_brief.get("additional_pages")
+            answers.get("pages")
+            or extended_brief.get("additional_pages")
             or self._extract_answer_by_id(extended_brief, "additional_pages_builder")
             or []
         )
@@ -575,14 +580,15 @@ class GenerationService:
             "plan": extended_brief.get("plan") or _safe_get(order, "tier") or "",
             "business_name": (
                 extended_brief.get("business_name")
+                or answers.get("company_name")
                 or _safe_get(order, "business_name")
                 or _safe_get(order, "desired_site_description")
                 or "Client business"
             ),
             "contact_email": contact.get("email") or _safe_get(order, "email") or "",
-            "main_goal": self._extract_answer_by_id(extended_brief, "website_goal"),
-            "design_style": self._extract_answer_by_id(extended_brief, "design_style"),
-            "logo_ordered": bool(extended_brief.get("logo_ordered")),
+            "main_goal": answers.get("website_goal") or self._extract_answer_by_id(extended_brief, "website_goal"),
+            "design_style": answers.get("design_style") or self._extract_answer_by_id(extended_brief, "design_style"),
+            "logo_ordered": bool(extended_brief.get("logo_ordered") or answers.get("logo") == "I need a logo"),
             "pages": additional_pages,
             "pricing": pricing,
             "raw_brief": extended_brief,
@@ -656,58 +662,23 @@ class GenerationService:
         ]
         return self._svg_data_url(title, subtitle, palettes[(index - 1) % len(palettes)], item["label"])
 
-    def _build_preview_prompts(self, project_summary: Dict[str, Any]) -> List[Dict[str, str]]:
-        base_context = (
-            f"Business: {project_summary.get('business_name')}\n"
-            f"Plan: {project_summary.get('plan')}\n"
-            f"Goal: {project_summary.get('main_goal')}\n"
-            f"Requested style: {project_summary.get('design_style')}\n"
-            f"Pages: {project_summary.get('pages')}\n"
-        )
+    def _build_preview_prompts(self, project_summary: Dict[str, Any], extended_brief: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+        """Build five distinct preview prompts using the SiteFormo enhancement layer."""
+        if extended_brief:
+            return build_preview_variation_prompts(extended_brief)
 
-        directions = [
-            {
-                "label": "Design A",
-                "style": "Clean premium business",
-                "color_direction": "white, deep navy, soft green accents",
+        fallback_brief = {
+            "plan": project_summary.get("plan"),
+            "answers": {
+                "company_name": project_summary.get("business_name"),
+                "website_goal": project_summary.get("main_goal"),
+                "design_style": project_summary.get("design_style"),
+                "design_quality": "wow",
+                "pages": project_summary.get("pages") or [],
+                "references": [],
             },
-            {
-                "label": "Design B",
-                "style": "Luxury dark high-end",
-                "color_direction": "charcoal, black, champagne gold accents",
-            },
-            {
-                "label": "Design C",
-                "style": "Modern bold conversion",
-                "color_direction": "white, electric blue, strong contrast",
-            },
-            {
-                "label": "Design D",
-                "style": "Warm local trustworthy",
-                "color_direction": "cream, forest green, warm neutral tones",
-            },
-            {
-                "label": "Design E",
-                "style": "Minimal corporate",
-                "color_direction": "light grey, navy, clean monochrome accents",
-            },
-        ]
-
-        prompts: List[Dict[str, str]] = []
-        for direction in directions:
-            prompt = (
-                "Create a single homepage design preview screenshot concept for a professional website.\n"
-                "Do not include browser chrome. Do not include fake UI controls outside the page.\n"
-                "Use realistic sections: hero, services/offer, trust proof, FAQ preview and CTA.\n"
-                "Use English text only. Do not mention OpenAI.\n\n"
-                f"Project context:\n{base_context}\n"
-                f"Visual style: {direction['style']}\n"
-                f"Color direction: {direction['color_direction']}\n"
-                "The result should look like a polished website screenshot, not a poster."
-            )
-            prompts.append({**direction, "prompt": prompt})
-
-        return prompts
+        }
+        return build_preview_variation_prompts(fallback_brief)
 
     def _build_logo_prompts(self, project_summary: Dict[str, Any]) -> List[Dict[str, str]]:
         business_name = project_summary.get("business_name") or "Client business"

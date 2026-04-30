@@ -423,92 +423,15 @@ async def stripe_webhook(
     return {"status": "ok"}
 
 
-@router.post("/extended-brief")
-async def submit_extended_brief(
+@router.post("/api/orders/extended-brief-legacy-disabled")
+async def submit_extended_brief_legacy_disabled(
     payload: ExtendedBriefPayload,
     db: Session = Depends(get_db),
 ):
-    order = _load_order(db, payload.order_id)
-
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    current_status = getattr(order, "status", None)
-
-    if current_status != "APPROVED":
-        raise HTTPException(
-            status_code=400,
-            detail="Order is not approved. Payment or owner approval is required first.",
-        )
-
-    email = (payload.answers.get("email") or "").strip()
-    phone = (payload.answers.get("phone") or "").strip()
-
-    if not email or not phone:
-        raise HTTPException(
-            status_code=400,
-            detail="Email and phone are required before generation.",
-        )
-
-    _set_if_exists(order, "email", email)
-    _set_if_exists(order, "phone", phone)
-    _set_if_exists(order, "extended_brief_answers", payload.answers)
-    _set_if_exists(order, "extended_brief", payload.answers)
-    _set_if_exists(order, "brief_answers_extended", payload.answers)
-    _set_if_exists(order, "status", "GENERATING")
-
-    db.add(order)
-    db.commit()
-    db.refresh(order)
-
-    try:
-        generation_result = generation_service.run(order)
-
-        if inspect.isawaitable(generation_result):
-            generation_result = await generation_result
-
-        initial_answers = getattr(order, "brief_answers", None) or {}
-        extended_answers = payload.answers
-
-        pdf_path = create_divi_pdf(
-            order=order,
-            initial_answers=initial_answers,
-            extended_answers=extended_answers,
-            generation_result=generation_result,
-        )
-
-        _set_if_exists(order, "status", "GENERATED")
-        _set_if_exists(order, "generation_result", generation_result)
-        _set_if_exists(order, "generated_site", generation_result)
-
-        db.add(order)
-        db.commit()
-        db.refresh(order)
-
-        send_owner_generation_result_email_with_pdf(
-            order=order,
-            initial_answers=initial_answers,
-            extended_answers=extended_answers,
-            generation_result=generation_result,
-            pdf_path=pdf_path,
-        )
-
-        return {
-            "status": "ok",
-            "message": "Extended brief submitted. Site generation completed.",
-            "order_id": payload.order_id,
-        }
-
-    except Exception as e:
-        _set_if_exists(order, "status", "GENERATION_FAILED")
-        _set_if_exists(order, "generation_error", str(e))
-
-        db.add(order)
-        db.commit()
-
-        print("❌ Generation failed:", str(e))
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Generation failed: {str(e)}",
-        )
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "This legacy endpoint is disabled. Use /api/orders/extended-brief; "
+            "the correct flow is payment -> questionnaire -> design previews -> design selection -> full generation."
+        ),
+    )
