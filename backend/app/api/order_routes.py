@@ -5,6 +5,7 @@ from html import escape
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
@@ -511,12 +512,16 @@ def _apply_decision(
 
 @router.post("/extended-brief")
 async def submit_extended_brief(payload: dict, db: Session = Depends(get_db)):
-    """Save the extended questionnaire, generate 5 screenshot previews (+ logos), and email the client."""
+    """Save the extended questionnaire and queue preview generation.
+
+    Important:
+    - This endpoint must NOT generate previews directly.
+    - The client should receive success immediately after the questionnaire is saved.
+    - A separate worker will later process the PENDING generation_jobs row.
+    """
     print("Extended brief received:", payload)
 
     order_id = payload.get("order_id")
-    contact = payload.get("contact", {}) or {}
-    client_email = contact.get("email")
 
     if not order_id:
         raise HTTPException(status_code=400, detail="Missing order_id")
@@ -528,58 +533,44 @@ async def submit_extended_brief(payload: dict, db: Session = Depends(get_db)):
     order.status = _status("BRIEF_SUBMITTED", "APPROVED")
     _set_if_exists(order, "extended_brief", payload)
     _set_if_exists(order, "brief_answers", payload)
+
+    # Create one queue job for this order.
+    # If a PENDING / PROCESSING / COMPLETED job already exists, do not duplicate it.
+    existing_job = db.execute(
+        text(
+            """
+            select id
+            from generation_jobs
+            where order_id = :order_id
+              and job_type = 'DESIGN_PREVIEWS'
+              and status in ('PENDING', 'PROCESSING', 'COMPLETED')
+            limit 1
+            """
+        ),
+        {"order_id": str(order.id)},
+    ).first()
+
+    if not existing_job:
+        db.execute(
+            text(
+                """
+                insert into generation_jobs (order_id, job_type, status)
+                values (:order_id, 'DESIGN_PREVIEWS', 'PENDING')
+                """
+            ),
+            {"order_id": str(order.id)},
+        )
+
     db.commit()
     db.refresh(order)
-
-    # New logic: the client receives screenshots, not two full homepage HTML samples.
-    service = generation_service.GenerationService()
-    result = service.generate_design_previews_for_order(db, order, payload)
-
-    order.status = _status("DESIGN_PREVIEWS_READY", "CONCEPTS_READY")
-    _set_if_exists(order, "design_status", "DESIGN_PREVIEWS_READY")
-    _set_if_exists(order, "design_previews", result.get("design_previews", []))
-    _set_if_exists(order, "logo_previews", result.get("logo_previews", []))
-    _set_if_exists(order, "preview_generation_payload", result)
-    db.commit()
-    db.refresh(order)
-
-    print("PREVIEW SCREENSHOTS GENERATED:", result)
-
-    preview_link = f"https://siteformo.com/design-previews?order_id={order_id}"
-
-    if client_email:
-        try:
-            await send_email(
-                to=client_email,
-                subject="Your design previews are ready",
-                html=f"""
-                <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;">
-                    <h2>Your website design previews are ready</h2>
-                    <p>You can now review 5 homepage screenshot options and select your preferred design.</p>
-                    <p>
-                        <a href="{preview_link}" style="padding:12px 20px;background:#4f46e5;color:white;text-decoration:none;border-radius:8px;display:inline-block;font-weight:bold;">
-                            View your designs
-                        </a>
-                    </p>
-                    <p>After you select one design, your 1-hour refund window starts and full production can begin.</p>
-                </div>
-                """,
-            )
-            print("Preview email sent")
-        except Exception as e:
-            # Do not fail the order if Resend/email is temporarily unavailable.
-            print("Email error:", e)
 
     return {
         "ok": True,
         "order_id": order.id,
         "status": order.status,
-        "design_status": getattr(order, "design_status", None),
-        "design_previews": getattr(order, "design_previews", None) or [],
-        "logo_previews": getattr(order, "logo_previews", None) or [],
-        "preview_link": preview_link,
+        "message": "Your project has been sent to development.",
+        "generation_job_status": "PENDING",
     }
-
 
 @router.post("/{order_id}/approve-design")
 async def approve_design(
