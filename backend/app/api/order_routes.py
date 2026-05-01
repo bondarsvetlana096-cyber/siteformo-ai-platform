@@ -578,8 +578,60 @@ async def approve_design(
     payload: dict[str, Any],
     db: Session = Depends(get_db),
 ):
-    """Client selects one screenshot preview and starts the one-hour refund window."""
+    """Client selects one screenshot preview and starts the one-hour refund window.
+
+    Safety rule: a design can be selected only once. Re-opening the email link
+    should show the already-selected state, not allow another approval.
+    """
     order = _get_order_or_404(db, order_id)
+
+    blocked_statuses = []
+    for status_name in [
+        "DESIGN_APPROVED",
+        "REFUND_WINDOW_ACTIVE",
+        "FULL_PRODUCTION_STARTED",
+        "READY_FOR_REVIEW",
+        "FINAL_PAYMENT_REQUIRED",
+        "DELIVERED",
+        "FINAL_READY",
+    ]:
+        if _has_status(status_name):
+            blocked_statuses.append(getattr(OrderStatus, status_name))
+
+    already_has_selection = bool(
+        getattr(order, "selected_design_id", None)
+        or getattr(order, "selected_design_label", None)
+        or getattr(order, "selected_screenshot_url", None)
+        or getattr(order, "selected_design_url", None)
+        or getattr(order, "design_approved_at", None)
+    )
+
+    if order.status in blocked_statuses or already_has_selection:
+        return {
+            "success": False,
+            "already_selected": True,
+            "order_id": order.id,
+            "status": order.status,
+            "selected_design_id": getattr(order, "selected_design_id", None),
+            "selected_design_label": getattr(order, "selected_design_label", None),
+            "selected_screenshot_url": getattr(order, "selected_screenshot_url", None)
+            or getattr(order, "selected_design_url", None),
+            "message": "A design has already been selected for this order.",
+        }
+
+    allowed_statuses = []
+    for status_name in ["DESIGN_PREVIEWS_READY", "AWAITING_CLIENT_DESIGN_CHOICE"]:
+        if _has_status(status_name):
+            allowed_statuses.append(getattr(OrderStatus, status_name))
+
+    if allowed_statuses and order.status not in allowed_statuses:
+        return {
+            "success": False,
+            "already_selected": False,
+            "order_id": order.id,
+            "status": order.status,
+            "message": f"Design selection is not available for status: {order.status}",
+        }
 
     previews = getattr(order, "design_previews", None) or []
     selected_id = (
@@ -678,6 +730,8 @@ async def approve_design(
     db.refresh(order)
 
     return {
+        "success": True,
+        "already_selected": False,
         "order_id": order.id,
         "status": order.status,
         "selected_design_id": selected_design_id,
