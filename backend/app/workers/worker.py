@@ -25,38 +25,57 @@ async def process_job(job):
 
         service = generation_service.GenerationService()
 
-        # 🔥 ГЕНЕРАЦИЯ ПРЕВЬЮ
         result = service.generate_design_previews_for_order(
             db,
             order,
             order.extended_brief or {}
         )
 
-        # 💾 СОХРАНЕНИЕ
         order.status = "DESIGN_PREVIEWS_READY"
         order.design_previews = result.get("design_previews", [])
         order.logo_previews = result.get("logo_previews", [])
+        order.preview_generation_payload = result
 
         db.commit()
         db.refresh(order)
 
         print("✅ Generated previews")
 
-        # 📧 EMAIL
-        client_email = getattr(order.client, "email", None)
+        # 📧 EMAIL FIXED: first try order.client.email, then extended_brief.contact.email
+        client_email = None
+
+        if getattr(order, "client", None) and getattr(order.client, "email", None):
+            client_email = order.client.email
+
+        if not client_email and getattr(order, "extended_brief", None):
+            contact = order.extended_brief.get("contact", {}) or {}
+            client_email = contact.get("email")
 
         if client_email:
             preview_link = f"https://siteformo.com/design-previews?order_id={order_id}"
+
+            print(f"📧 Sending preview email to {client_email}")
 
             await send_email(
                 to=client_email,
                 subject="Your design previews are ready",
                 html=f"""
-                <h2>Your design previews are ready</h2>
-                <p>Click below to view and select your design:</p>
-                <a href="{preview_link}">View designs</a>
+                <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;">
+                    <h2>Your website design previews are ready</h2>
+                    <p>You can now review your homepage design options and select your preferred design.</p>
+                    <p>
+                        <a href="{preview_link}" style="padding:12px 20px;background:#4f46e5;color:white;text-decoration:none;border-radius:8px;display:inline-block;font-weight:bold;">
+                            View your designs
+                        </a>
+                    </p>
+                    <p>After you select one design, your 1-hour refund window starts and full production can begin.</p>
+                </div>
                 """
             )
+
+            print("✅ Preview email sent")
+        else:
+            print("⚠️ No client email found, skipping email")
 
     finally:
         db.close()
