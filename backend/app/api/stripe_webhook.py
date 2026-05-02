@@ -364,26 +364,57 @@ async def stripe_webhook(
             secret=endpoint_secret,
         )
     except Exception as e:
+        print("❌ Stripe webhook verification failed:", str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
 
-        order_id = _safe_get(session, "client_reference_id")
-        customer_email = _safe_get(session, "customer_email")
-
         metadata = _safe_get(session, "metadata", {}) or {}
+
+        order_id = (
+            _safe_get(metadata, "order_id")
+            or _safe_get(session, "client_reference_id")
+        )
+
+        customer_email = (
+            _safe_get(session, "customer_email")
+            or _safe_get(session, "customer_details", {}).get("email")
+        )
 
         tier = _safe_get(metadata, "tier", "")
         deposit_eur = _safe_get(metadata, "deposit_eur", "")
 
+        print("🔥 STRIPE CHECKOUT COMPLETED")
+        print("Metadata:", metadata)
+        print("Order ID:", order_id)
+        print("Customer email:", customer_email)
+        print("Tier:", tier)
+        print("Deposit EUR:", deposit_eur)
+
+        if not order_id:
+            print("❌ No order_id found in Stripe metadata or client_reference_id")
+            return {
+                "status": "error",
+                "reason": "missing_order_id",
+            }
+
         order = _load_order(db, order_id)
+
+        if not order:
+            print("❌ Order not found in database:", order_id)
+            return {
+                "status": "error",
+                "reason": "order_not_found",
+                "order_id": order_id,
+            }
+
         contact = _extract_order_contact(order)
 
         if not customer_email and contact["client_email"]:
             customer_email = contact["client_email"]
 
-        if order:
+        try:
             _set_if_exists(order, "status", "APPROVED")
             _set_if_exists(order, "payment_status", "PAID")
             _set_if_exists(order, "deposit_paid", True)
@@ -393,32 +424,38 @@ async def stripe_webhook(
             db.add(order)
             db.commit()
             db.refresh(order)
-        else:
-            print("⚠️ Order not found for Stripe session:", order_id)
 
-        print("🔥 PAYMENT SUCCESS")
-        print("Order ID:", order_id)
-        print("Status:", "APPROVED")
-        print("Email:", customer_email)
-        print("Phone:", contact["client_phone"])
-        print("Telegram:", contact["client_telegram"])
-        print("Tier:", tier)
-        print("Deposit EUR:", deposit_eur)
+            print("✅ ORDER UPDATED")
+            print("Order ID:", order.id)
+            print("Status:", getattr(order, "status", None))
+            print("Payment status:", getattr(order, "payment_status", None))
 
-        send_owner_payment_email(
-            order_id=order_id,
-            customer_email=customer_email,
-            tier=tier,
-            deposit_eur=deposit_eur,
-            order=order,
-        )
+        except Exception as e:
+            db.rollback()
+            print("❌ Failed to update order:", str(e))
+            raise HTTPException(status_code=500, detail="Failed to update order")
 
-        send_client_payment_email(
-            customer_email=customer_email,
-            order_id=order_id,
-            tier=tier,
-            deposit_eur=deposit_eur,
-        )
+        try:
+            send_owner_payment_email(
+                order_id=order_id,
+                customer_email=customer_email,
+                tier=tier,
+                deposit_eur=deposit_eur,
+                order=order,
+            )
+
+            if customer_email:
+                send_client_payment_email(
+                    customer_email=customer_email,
+                    order_id=order_id,
+                    tier=tier,
+                    deposit_eur=deposit_eur,
+                )
+            else:
+                print("⚠️ Client email missing. Client email not sent.")
+
+        except Exception as e:
+            print("⚠️ Payment email failed, but order is already approved:", str(e))
 
     return {"status": "ok"}
 
