@@ -17,6 +17,9 @@ from app.api.payment_routes import router as payment_router
 from app.api.stripe_webhook import router as stripe_webhook_router
 from app.api.admin_routes import router as admin_routes_router
 
+# 👉 ДОБАВЬ ЭТО
+from app.api.create_order import router as create_order_router
+
 # Channels
 from app.channels.health import router as health_router
 from app.channels.telegram import router as telegram_router
@@ -29,7 +32,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS for SiteFormo frontend and local development.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=getattr(settings, "cors_origins", None) or [
@@ -43,11 +45,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
-# Root
 @app.get("/")
 def root():
     return {"status": "ok", "service": "SiteFormo AI Sales Platform"}
@@ -61,6 +61,9 @@ def health():
 # Routers
 app.include_router(api_router)
 app.include_router(channel_router)
+
+# 👉 ДОБАВЬ ЭТО
+app.include_router(create_order_router)
 
 app.include_router(health_router)
 app.include_router(web_chat_router)
