@@ -1,3 +1,4 @@
+import os
 import asyncio
 import traceback
 
@@ -52,7 +53,7 @@ async def process_job(job):
             client_email = contact.get("email")
 
         if client_email:
-            preview_link = f"https://siteformo.com/design-previews?order_id={order_id}"
+            preview_link = f"{os.getenv('APP_BASE_URL', 'https://siteformo.com').rstrip('/')}/design-previews?order_id={order_id}"
 
             print(f"📧 Sending preview email to {client_email}")
 

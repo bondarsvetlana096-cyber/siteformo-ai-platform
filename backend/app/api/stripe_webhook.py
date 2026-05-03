@@ -161,8 +161,6 @@ def send_owner_payment_email(order_id, customer_email, tier, deposit_eur, order=
 
     source_url = contact["source_url"] or "Not provided"
     business_description = contact["business_description"] or "Not provided"
-    questionnaire_link = _questionnaire_link(order_id)
-
     subject = f"💰 Оплата в размере {deposit_eur} евро произведена"
 
     body = f"""
@@ -200,14 +198,15 @@ Feature: {feature}
 Scope: {scope}
 References: {references}
 
-Client questionnaire link:
-
-{questionnaire_link}
-
 Next step:
-Client must complete the extended questionnaire.
-Email and phone are required in the extended questionnaire.
-Only after that generation_service.run(order) will be called.
+Wait for the client to complete the extended questionnaire.
+No action is required from this owner email.
+
+Important flow:
+1. Stripe deposit unlocks the extended questionnaire for the client.
+2. Full generation does NOT start after payment.
+3. Design preview generation starts only after POST /api/orders/extended-brief.
+4. The client receives the design previews link only after previews are ready.
 """
 
     _send_resend_email(
@@ -239,11 +238,8 @@ Please complete your extended project questionnaire here:
 
 {questionnaire_link}
 
-Required before generation:
-- Email address
-- Phone / WhatsApp number
-
-We will start generating your website only after you complete this questionnaire.
+After you complete the questionnaire, we will prepare your design previews.
+When the previews are ready, you will receive a separate email with a link to review and select your design.
 
 SiteFormo
 """
