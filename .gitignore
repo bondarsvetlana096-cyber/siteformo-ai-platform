@@ -12,3 +12,10 @@ venv/
 .pytest_cache/
 .idea/
 .vscode/
+.env
+*.env
+qa.env
+node_modules/
+qa/node_modules/
+.env
+*.env

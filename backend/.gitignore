@@ -6,3 +6,5 @@ generated_demos/
 .playwright/
 .pytest_cache/
 .mypy_cache/
+qa/.env
+.env
