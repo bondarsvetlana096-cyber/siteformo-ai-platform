@@ -19,3 +19,11 @@ node_modules/
 qa/node_modules/
 .env
 *.env
+node_modules/
+qa/node_modules/
+
+# QA noise
+qa/screenshots/
+qa/*.png
+qa/*.jpg
+qa/*.json
