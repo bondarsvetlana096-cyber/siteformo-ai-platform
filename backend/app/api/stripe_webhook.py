@@ -374,7 +374,9 @@ async def stripe_webhook(
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-
+        amount_total = session.get("amount_total", 0)
+        amount_eur = int(amount_total / 100)
+        
         metadata = _safe_get(session, "metadata", {}) or {}
 
         order_id = (
@@ -388,7 +390,7 @@ async def stripe_webhook(
         )
 
         tier = _safe_get(metadata, "tier", "")
-        deposit_eur = _safe_get(metadata, "deposit_eur", "")
+        deposit_eur = _safe_get(metadata, "deposit_eur") or amount_eur
 
         print("🔥 STRIPE CHECKOUT COMPLETED")
         print("Metadata:", metadata)
