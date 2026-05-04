@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "klon97048@gmail.com")
-APP_BASE_URL = os.getenv("APP_BASE_URL", "https://siteformo.com")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://ie.siteformo.com")
 
 
 class CheckoutRequest(BaseModel):
@@ -22,6 +22,8 @@ class CheckoutRequest(BaseModel):
     package_range: str | None = None
     market: str | None = None
     customer_email: str | None = None
+    success_url: str | None = None
+    cancel_url: str | None = None
 
 
 def _is_owner_email(email: str | None) -> bool:
@@ -44,22 +46,27 @@ async def create_checkout(data: CheckoutRequest):
 
     deposit = _safe_deposit(data.amount)
 
-    # Create order_id if frontend did not send it
     order_id = (data.order_id or "").strip()
     if not order_id or order_id.lower() in ["none", "null", "undefined"]:
         order_id = str(uuid.uuid4())
 
-    # OWNER BYPASS
     if _is_owner_email(data.customer_email):
         return {
             "status": "owner_bypass",
             "order_id": order_id,
-            "questionnaire_url": f"{APP_BASE_URL}/extended-questionnaire/?order_id={order_id}",
+            "questionnaire_url": f"{APP_BASE_URL}/payment-success?order_id={order_id}&owner_bypass=1",
             "deposit": deposit,
         }
 
-    success_url = f"{APP_BASE_URL}/extended-questionnaire/?order_id={order_id}&payment=success"
-    cancel_url = os.getenv("FRONTEND_CANCEL_URL", f"{APP_BASE_URL}/?payment=cancel")
+    success_url = (
+        data.success_url
+        or f"{APP_BASE_URL}/payment-success?session_id={{CHECKOUT_SESSION_ID}}&order_id={order_id}"
+    )
+
+    cancel_url = (
+        data.cancel_url
+        or os.getenv("FRONTEND_CANCEL_URL", f"{APP_BASE_URL}/?payment=cancel")
+    )
 
     product_name = data.package_name or f"SiteFormo {data.tier or 'Website'} deposit"
 
