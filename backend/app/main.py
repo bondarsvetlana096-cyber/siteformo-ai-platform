@@ -16,8 +16,6 @@ from app.api.request_routes import router as request_router
 from app.api.payment_routes import router as payment_router
 from app.api.stripe_webhook import router as stripe_webhook_router
 from app.api.admin_routes import router as admin_routes_router
-
-# 👉 ДОБАВЬ ЭТО
 from app.api.create_order import router as create_order_router
 
 # Channels
@@ -32,9 +30,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# ===== FIXED CORS (ВАЖНО) =====
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=getattr(settings, "cors_origins", None) or [
+    allow_origins=[
+        "https://ie.siteformo.com",
         "https://siteformo.com",
         "https://www.siteformo.com",
         "http://localhost:3000",
@@ -45,9 +45,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
+# Health endpoints
 @app.get("/")
 def root():
     return {"status": "ok", "service": "SiteFormo AI Sales Platform"}
@@ -58,11 +60,9 @@ def health():
     return {"status": "ok"}
 
 
-# Routers
+# ===== ROUTERS =====
 app.include_router(api_router)
 app.include_router(channel_router)
-
-# 👉 ДОБАВЬ ЭТО
 app.include_router(create_order_router)
 
 app.include_router(health_router)
@@ -78,6 +78,7 @@ app.include_router(stripe_webhook_router)
 app.include_router(admin_routes_router)
 
 
+# ===== STARTUP =====
 @app.on_event("startup")
 async def startup_event():
     init_db()
