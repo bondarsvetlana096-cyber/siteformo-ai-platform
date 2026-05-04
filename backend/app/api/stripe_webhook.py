@@ -1,6 +1,7 @@
 import os
 import inspect
 import base64
+import re
 import stripe
 import requests
 
@@ -107,6 +108,14 @@ def _questionnaire_link(order_id: Optional[str]) -> str:
     return f"{APP_BASE_URL}/extended-questionnaire?order_id={order_id or ''}"
 
 
+def _strip_links(value: Any) -> str:
+    """Remove URLs from email text so emails do not contain clickable links."""
+    text = str(value or "")
+    text = re.sub(r"https?://\S+", "[link removed]", text, flags=re.IGNORECASE)
+    text = re.sub(r"www\.\S+", "[link removed]", text, flags=re.IGNORECASE)
+    return text
+
+
 def _send_resend_email(to_email: str, subject: str, body: str):
     resend_api_key = os.getenv("RESEND_API_KEY")
     email_from = os.getenv("EMAIL_FROM", "SiteFormo <hello@siteformo.com>")
@@ -118,6 +127,8 @@ def _send_resend_email(to_email: str, subject: str, body: str):
     if not to_email:
         print("⚠️ Recipient email is missing. Email not sent.")
         return
+
+    body = _strip_links(body)
 
     response = requests.post(
         "https://api.resend.com/emails",
@@ -189,14 +200,14 @@ Telegram: {client_telegram}
 
 Project details from first quiz:
 
-Existing website: {source_url}
+Existing website: provided in order record, not included in email for safety
 Business / niche: {business_description}
 Goal: {goal}
 Style: {style}
 Urgency: {urgency}
 Feature: {feature}
 Scope: {scope}
-References: {references}
+References: provided in order record, not included in email for safety
 
 Next step:
 Wait for the client to complete the extended questionnaire.
@@ -217,8 +228,6 @@ Important flow:
 
 
 def send_client_payment_email(customer_email, order_id, tier, deposit_eur):
-    questionnaire_link = _questionnaire_link(order_id)
-
     subject = "✅ Payment received — complete your SiteFormo project brief"
 
     body = f"""
@@ -234,12 +243,10 @@ Order ID: {order_id or "Not provided"}
 
 Important next step:
 
-Please complete your extended project questionnaire here:
-
-{questionnaire_link}
+Please return to the SiteFormo website after payment and press the button on the payment-success page to complete your follow-up questionnaire.
 
 After you complete the questionnaire, we will prepare your design previews.
-When the previews are ready, you will receive a separate email with a link to review and select your design.
+When the previews are ready, we will contact you with the next step.
 
 SiteFormo
 """
@@ -309,6 +316,8 @@ Generation result:
 Attached:
 PDF file with Divi 5 ready website content.
 """
+
+    body = _strip_links(body)
 
     with open(pdf_path, "rb") as f:
         pdf_base64 = base64.b64encode(f.read()).decode("utf-8")
