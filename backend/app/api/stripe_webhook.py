@@ -22,7 +22,7 @@ router = APIRouter()
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
-APP_BASE_URL = os.getenv("APP_BASE_URL", "https://siteformo.com")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://ie.siteformo.com")
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "klon97048@gmail.com")
 
 
@@ -104,10 +104,6 @@ def _extract_order_contact(order):
     }
 
 
-def _questionnaire_link(order_id: Optional[str]) -> str:
-    return f"{APP_BASE_URL}/extended-questionnaire?order_id={order_id or ''}"
-
-
 def _strip_links(value: Any) -> str:
     """Remove URLs from email text so emails do not contain clickable links."""
     text = str(value or "")
@@ -116,39 +112,58 @@ def _strip_links(value: Any) -> str:
     return text
 
 
+def _format_eur(value: Any) -> str:
+    if value is None or value == "":
+        return "Unknown"
+
+    try:
+        number = float(value)
+        if number.is_integer():
+            return f"€{int(number)}"
+        return f"€{number:.2f}"
+    except Exception:
+        return f"€{value}"
+
+
 def _send_resend_email(to_email: str, subject: str, body: str):
     resend_api_key = os.getenv("RESEND_API_KEY")
     email_from = os.getenv("EMAIL_FROM", "SiteFormo <hello@siteformo.com>")
 
     if not resend_api_key:
         print("⚠️ RESEND_API_KEY is missing. Email not sent.")
-        return
+        return False
 
     if not to_email:
         print("⚠️ Recipient email is missing. Email not sent.")
-        return
+        return False
 
     body = _strip_links(body)
 
-    response = requests.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {resend_api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "from": email_from,
-            "to": [to_email],
-            "subject": subject,
-            "text": body,
-        },
-        timeout=15,
-    )
+    try:
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {resend_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": email_from,
+                "to": [to_email],
+                "subject": subject,
+                "text": body,
+            },
+            timeout=15,
+        )
+    except Exception as e:
+        print("❌ Resend request failed:", str(e))
+        return False
 
     if response.status_code >= 400:
         print("❌ Failed to send email:", response.status_code, response.text)
-    else:
-        print("✅ Email sent:", subject)
+        return False
+
+    print("✅ Email sent:", subject, "to", to_email)
+    return True
 
 
 def send_owner_payment_email(order_id, customer_email, tier, deposit_eur, order=None):
@@ -164,31 +179,26 @@ def send_owner_payment_email(order_id, customer_email, tier, deposit_eur, order=
     urgency = brief_answers.get("urgency") or "Not provided"
     feature = brief_answers.get("feature") or "Not provided"
     scope = brief_answers.get("scope") or "Not provided"
-    references = (
-        brief_answers.get("references")
-        or getattr(order, "reference_site_notes", None)
-        or "Not provided"
-    )
 
-    source_url = contact["source_url"] or "Not provided"
+    deposit_line = _format_eur(deposit_eur)
     business_description = contact["business_description"] or "Not provided"
-    subject = f"💰 Оплата в размере {deposit_eur} евро произведена"
+    subject = f"💰 SiteFormo payment received — {deposit_line}"
 
     body = f"""
-Оплата в размере {deposit_eur or "Unknown"} евро произведена.
+Payment received ✅
 
 Stripe payment received.
 Order status: APPROVED.
 
-ВАЖНО:
-Stripe только разблокирует расширенную анкету.
-Генерация сайта НЕ запускается после оплаты.
-Генерация запускается только после POST /extended-brief.
+IMPORTANT:
+Stripe only unlocks the follow-up questionnaire.
+Website generation does NOT start after payment.
+Generation starts only after POST /api/orders/extended-brief.
 
 Payment details:
 
 Package: {tier or "Unknown"}
-Deposit paid: €{deposit_eur or "Unknown"}
+Deposit paid: {deposit_line}
 Order ID: {order_id or "Not provided"}
 Order status: APPROVED
 
@@ -210,17 +220,17 @@ Scope: {scope}
 References: provided in order record, not included in email for safety
 
 Next step:
-Wait for the client to complete the extended questionnaire.
+Wait for the client to complete the follow-up questionnaire.
 No action is required from this owner email.
 
 Important flow:
-1. Stripe deposit unlocks the extended questionnaire for the client.
+1. Stripe deposit unlocks the follow-up questionnaire for the client.
 2. Full generation does NOT start after payment.
 3. Design preview generation starts only after POST /api/orders/extended-brief.
 4. The client receives the design previews link only after previews are ready.
 """
 
-    _send_resend_email(
+    return _send_resend_email(
         to_email=OWNER_EMAIL,
         subject=subject,
         body=body,
@@ -229,6 +239,7 @@ Important flow:
 
 def send_client_payment_email(customer_email, order_id, tier, deposit_eur):
     subject = "✅ Payment received — complete your SiteFormo project brief"
+    deposit_line = _format_eur(deposit_eur)
 
     body = f"""
 Thank you for your payment.
@@ -238,7 +249,7 @@ We have received your SiteFormo deposit.
 Payment details:
 
 Package: {tier or "Unknown"}
-Deposit paid: €{deposit_eur or "Unknown"}
+Deposit paid: {deposit_line}
 Order ID: {order_id or "Not provided"}
 
 Important next step:
@@ -251,7 +262,7 @@ When the previews are ready, we will contact you with the next step.
 SiteFormo
 """
 
-    _send_resend_email(
+    return _send_resend_email(
         to_email=customer_email,
         subject=subject,
         body=body,
@@ -281,10 +292,10 @@ def send_owner_generation_result_email_with_pdf(
     phone = extended_answers.get("phone") or getattr(order, "phone", "Not provided")
 
     if deposit_eur:
-        payment_line = f"Оплата в размере {deposit_eur} евро произведена."
-        deposit_line = f"€{deposit_eur}"
+        payment_line = f"Deposit payment received: {_format_eur(deposit_eur)}."
+        deposit_line = _format_eur(deposit_eur)
     else:
-        payment_line = "Owner bypass: оплата не требовалась."
+        payment_line = "Owner bypass: payment was not required."
         deposit_line = "Owner bypass / no payment"
 
     subject = f"✅ SiteFormo generated — Order {order_id}"
@@ -374,9 +385,10 @@ async def stripe_webhook(
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-        amount_total = session.get("amount_total", 0)
-        amount_eur = int(amount_total / 100)
-        
+
+        amount_total = _safe_get(session, "amount_total", 0) or 0
+        amount_eur = int(amount_total / 100) if amount_total else None
+
         metadata = _safe_get(session, "metadata", {}) or {}
 
         order_id = (
@@ -386,10 +398,10 @@ async def stripe_webhook(
 
         customer_email = (
             _safe_get(session, "customer_email")
-            or _safe_get(session, "customer_details", {}).get("email")
+            or _safe_get(_safe_get(session, "customer_details", {}) or {}, "email")
         )
 
-        tier = _safe_get(metadata, "tier", "")
+        tier = _safe_get(metadata, "tier", "") or _safe_get(metadata, "package_name", "")
         deposit_eur = _safe_get(metadata, "deposit_eur") or amount_eur
 
         print("🔥 STRIPE CHECKOUT COMPLETED")
@@ -443,21 +455,23 @@ async def stripe_webhook(
             raise HTTPException(status_code=500, detail="Failed to update order")
 
         try:
-            send_owner_payment_email(
+            owner_sent = send_owner_payment_email(
                 order_id=order_id,
                 customer_email=customer_email,
                 tier=tier,
                 deposit_eur=deposit_eur,
                 order=order,
             )
+            print("Owner payment email sent:", owner_sent)
 
             if customer_email:
-                send_client_payment_email(
+                client_sent = send_client_payment_email(
                     customer_email=customer_email,
                     order_id=order_id,
                     tier=tier,
                     deposit_eur=deposit_eur,
                 )
+                print("Client payment email sent:", client_sent)
             else:
                 print("⚠️ Client email missing. Client email not sent.")
 
