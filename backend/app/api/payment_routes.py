@@ -5,13 +5,26 @@ import stripe
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
-OWNER_EMAIL = os.getenv("OWNER_EMAIL", "klon97048@gmail.com")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://ie.siteformo.com")
+
+
+# ✅ WHITELIST (бот и тесты)
+WHITELIST_EMAILS = {
+    "klon97048@gmail.com",
+    "porto3011969@gmail.com"
+}
+
+WHITELIST_TELEGRAM = {
+    "@mironkasper"
+}
+
+WHITELIST_WHATSAPP = {
+    # добавишь позже если нужно
+}
 
 
 class CheckoutRequest(BaseModel):
@@ -22,41 +35,36 @@ class CheckoutRequest(BaseModel):
     package_range: str | None = None
     market: str | None = None
     customer_email: str | None = None
+    customer_phone: str | None = None
+    customer_telegram: str | None = None
+
     success_url: str | None = None
     cancel_url: str | None = None
 
 
-def _is_owner_email(email: str | None) -> bool:
-    return (email or "").strip().lower() == OWNER_EMAIL.strip().lower()
+def is_whitelisted(data: CheckoutRequest) -> bool:
+    email = (data.customer_email or "").lower().strip()
+    phone = (data.customer_phone or "").strip()
+    telegram = (data.customer_telegram or "").strip()
 
+    if email in WHITELIST_EMAILS:
+        return True
 
-def _safe_deposit(amount: int) -> int:
-    allowed_deposits = [475, 750, 1400, 2250]
+    if telegram in WHITELIST_TELEGRAM:
+        return True
 
-    if amount in allowed_deposits:
-        return amount
+    if phone in WHITELIST_WHATSAPP:
+        return True
 
-    raise HTTPException(status_code=400, detail="Invalid deposit amount.")
+    return False
 
 
 @router.post("/create-checkout")
 async def create_checkout(data: CheckoutRequest):
     if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="Stripe is not configured.")
+        raise HTTPException(status_code=500, detail="Stripe not configured")
 
-    deposit = _safe_deposit(data.amount)
-
-    order_id = (data.order_id or "").strip()
-    if not order_id or order_id.lower() in ["none", "null", "undefined"]:
-        order_id = str(uuid.uuid4())
-
-    if _is_owner_email(data.customer_email):
-        return {
-            "status": "owner_bypass",
-            "order_id": order_id,
-            "questionnaire_url": f"{APP_BASE_URL}/payment-success?order_id={order_id}&owner_bypass=1",
-            "deposit": deposit,
-        }
+    order_id = data.order_id or str(uuid.uuid4())
 
     success_url = (
         data.success_url
@@ -65,11 +73,18 @@ async def create_checkout(data: CheckoutRequest):
 
     cancel_url = (
         data.cancel_url
-        or os.getenv("FRONTEND_CANCEL_URL", f"{APP_BASE_URL}/?payment=cancel")
+        or f"{APP_BASE_URL}/?payment=cancel"
     )
 
-    product_name = data.package_name or f"SiteFormo {data.tier or 'Website'} deposit"
+    # 🔥 ВАЖНО: BYPASS ДЛЯ БОТА / ТЕСТОВ
+    if is_whitelisted(data):
+        return {
+            "status": "bypass",
+            "url": f"{APP_BASE_URL}/payment-success?bypass=1&order_id={order_id}",
+            "order_id": order_id
+        }
 
+    # обычный Stripe
     try:
         session = stripe.checkout.Session.create(
             mode="payment",
@@ -81,10 +96,9 @@ async def create_checkout(data: CheckoutRequest):
                     "price_data": {
                         "currency": "eur",
                         "product_data": {
-                            "name": product_name,
-                            "description": "50% project deposit",
+                            "name": data.package_name or "Website deposit",
                         },
-                        "unit_amount": deposit * 100,
+                        "unit_amount": data.amount * 100,
                     },
                     "quantity": 1,
                 }
@@ -93,19 +107,6 @@ async def create_checkout(data: CheckoutRequest):
                 "order_id": order_id,
                 "tier": data.tier or "",
                 "package_name": data.package_name or "",
-                "package_range": data.package_range or "",
-                "market": data.market or "",
-                "deposit_eur": str(deposit),
-            },
-            payment_intent_data={
-                "metadata": {
-                    "order_id": order_id,
-                    "tier": data.tier or "",
-                    "package_name": data.package_name or "",
-                    "package_range": data.package_range or "",
-                    "market": data.market or "",
-                    "deposit_eur": str(deposit),
-                }
             },
             success_url=success_url,
             cancel_url=cancel_url,
@@ -113,9 +114,7 @@ async def create_checkout(data: CheckoutRequest):
 
         return {
             "url": session.url,
-            "session_id": session.id,
-            "deposit": deposit,
-            "order_id": order_id,
+            "order_id": order_id
         }
 
     except Exception as e:
