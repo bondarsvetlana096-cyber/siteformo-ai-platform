@@ -940,7 +940,7 @@ class GenerationService:
         index: int,
     ) -> str:
         """
-        Divi-level structured prompt for realistic website preview generation.
+        Ultra-realistic Divi/Webflow-style website preview prompt.
         One call = one preview prompt.
         """
 
@@ -968,19 +968,40 @@ class GenerationService:
         sections = [s.get("type") for s in layout_spec.get("sections", [])]
 
         return f"""
-Create a HIGH-END, REALISTIC website homepage screenshot.
+Create an ULTRA-REALISTIC, LIVE-WEBSITE STYLE homepage screenshot.
 
-CRITICAL RULES:
-- This must look like a REAL live website, not a concept
-- Style level: premium Divi / Webflow / Framer agency website
-- No mockups
-- No UI kits
-- No device frames
-- No blurred text
+MAIN GOAL:
+The result must look like a real premium business website that is already live,
+not an AI concept, not a mockup, not a Dribbble shot.
+
+ABSOLUTELY FORBIDDEN:
 - No lorem ipsum
-- No placeholders
-- All visible text must be readable and realistic
-- Do not mention AI, OpenAI, SiteFormo, templates, prompts, or placeholders
+- No placeholder text
+- No "Your company"
+- No "Your business here"
+- No blurred text
+- No unreadable text
+- No fake UI frames
+- No phone, laptop, tablet or browser mockup frames
+- No abstract floating screens
+- No UI kits
+- No poster-like composition
+- No excessive gradients
+- No futuristic AI style
+- No text about AI, OpenAI, SiteFormo, templates, prompts or generated content
+
+REAL WEBSITE REQUIREMENTS:
+- Looks like a premium Divi / Webflow / Framer agency-built website
+- Full homepage screenshot, not a single hero banner
+- Real header with logo area and navigation menu
+- Real hero section with strong headline, short subheadline and primary CTA
+- Real services or features section with 3-4 clear cards
+- Real trust section with reviews, stats, awards or credibility proof
+- Real about / explanation block
+- Real final CTA section
+- Clean footer feeling if visible
+- All visible text must be realistic English business copy
+- Buttons must use real CTA text such as "Get a quote", "Book a call", "Start your project", "Contact us"
 
 DESIGN SYSTEM:
 - Colors: {layout_spec.get("design_system", {}).get("colors")}
@@ -988,25 +1009,19 @@ DESIGN SYSTEM:
 - Buttons: {layout_spec.get("design_system", {}).get("buttons")}
 
 STRUCTURE:
-The homepage MUST follow this section structure:
+The homepage must follow this section structure:
 {sections}
 
-REQUIRED SECTIONS:
-- Top navigation with logo and menu items
-- Hero with strong headline, subheadline, and CTA
-- Services or features section with 3-4 cards
-- Trust / proof section
-- About or explanation block
-- Final CTA section
-
-LAYOUT QUALITY:
-- Clean spacing
-- Premium typography
-- Clear hierarchy
-- Conversion-focused layout
-- Realistic alignment
+QUALITY BAR:
+- Premium spacing
+- Strong typography hierarchy
+- Modern grid layout
+- Good whitespace
+- Professional alignment
+- Conversion-focused
 - Mobile-first feeling
-- Looks ready to go live
+- Realistic images or visual blocks if needed
+- Looks trustworthy enough for a paying client
 
 BUSINESS:
 {business_name}
@@ -1030,7 +1045,7 @@ DETAILED BRIEF:
 {detailed_brief}
 
 OUTPUT:
-A realistic full homepage screenshot that looks like a premium website built by a professional agency and ready to be published.
+A realistic full homepage screenshot that looks like a premium business website ready to publish.
 """
 
 
