@@ -22,6 +22,7 @@ from app.services.auto_improvement_service import auto_improve
 from app.services.technical_check_service import technical_check_preview
 from app.services.pre_delivery_check_service import decide_preview_status
 from app.services.quality_package_rules import get_package_rules
+from app.services.divi_style_generation_service import DiviStyleGenerationService
 
 logger = logging.getLogger(__name__)
 
@@ -938,55 +939,67 @@ class GenerationService:
         item: Dict[str, str],
         index: int,
     ) -> str:
-        business_name = str(project_summary.get("business_name") or "Client business")
-        goal = str(project_summary.get("main_goal") or "get more clients")
-        style = str(item.get("style") or "modern premium")
-        colors = str(item.get("color_direction") or "clean premium palette")
-        plan = str(project_summary.get("plan") or "website package")
-        pages = project_summary.get("pages") or []
-        page_hint = ", ".join([str(p.get("name") or p) for p in pages[:5]]) if isinstance(pages, list) else str(pages)
-        detailed_brief = str(item.get("prompt") or "")
+        """
+        Divi-level structured prompt for realistic website preview generation.
+        """
+        divi = DiviStyleGenerationService()
+
+        for i in range(5):
+        layout_spec = divi.generate_layout_spec(project_summary, variant=i)
+
+            item = {
+                "style": layout_spec.get("style"),
+                "color_direction": layout_spec["design_system"]["colors"]["primary"],
+                "prompt": str(layout_spec["sections"]),
+            }
+
+            prompt = self._build_openai_homepage_image_prompt(
+                project_summary,
+                item,
+                i,
+    )
 
         return f"""
 Create a HIGH-END, REALISTIC website homepage screenshot.
 
 CRITICAL RULES:
 - This must look like a REAL live website, not a concept
+- Style level: premium Divi / Webflow / Framer agency website
 - No mockups
-- No dribbble-style compositions
 - No UI kits
-- No device frames, no iPhone frames, no laptop frames
-- No floating or abstract layouts
-- No fake UI frames
+- No device frames
+- No fake UI
 - No blurred text
 - No lorem ipsum
 - No placeholders like "Your business here"
 - All visible text must be readable and realistic
 - Do not mention AI, OpenAI, SiteFormo, templates, prompts, or placeholders
 
-STRUCTURE REQUIREMENTS:
+DESIGN SYSTEM:
+- Colors: {layout_spec.get("design_system", {}).get("colors")}
+- Fonts: {layout_spec.get("design_system", {}).get("fonts")}
+- Buttons: {layout_spec.get("design_system", {}).get("buttons")}
+
+STRUCTURE:
+The homepage MUST follow this section structure:
+{sections}
+
+REQUIRED SECTIONS:
 - Top navigation with logo and menu items
-- Hero section with strong headline, short subheadline, and primary CTA button
+- Hero with strong headline, subheadline, and CTA
 - Services or features section with 3-4 cards
-- Trust section with reviews, stats, awards, partner logos, or credibility proof
+- Trust / proof section with reviews, stats, awards, partner logos, or credibility proof
 - About or explanation block
 - Final CTA section
 
-LAYOUT RULES:
-- Clean modern layout like a premium Webflow or Framer site
-- Proper spacing between sections
-- Clear visual hierarchy
-- Large readable headings
-- Professional typography
-- Realistic alignment and spacing
-- Mobile-first layout feeling
-- Premium, trustworthy, conversion-focused look
-
-TEXT RULES:
-- Use real English marketing text
-- Headlines must sound like real businesses
-- CTA must be realistic, for example "Get a quote", "Book a call", or "Start your project"
-- Copy should match the business goal
+LAYOUT QUALITY:
+- Clean spacing
+- Premium typography
+- Clear hierarchy
+- Conversion-focused layout
+- Realistic alignment
+- Mobile-first feeling
+- Looks ready to go live
 
 BUSINESS:
 {business_name}
@@ -1010,8 +1023,7 @@ DETAILED BRIEF:
 {detailed_brief}
 
 OUTPUT:
-A realistic full homepage screenshot that looks ready to go live.
-The result should look like a premium website built by a professional agency and ready to be published.
+A realistic full homepage screenshot that looks like a premium website built by a professional agency and ready to be published.
 """
 
     def _generate_or_fallback_logo_image(
