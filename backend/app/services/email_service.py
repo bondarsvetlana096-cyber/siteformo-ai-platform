@@ -27,17 +27,6 @@ def _preview_image_url(preview: Any) -> Optional[str]:
 def send_design_previews_email(order: Any, previews: Iterable[Dict[str, Any]]):
     """
     Sends the client the generated design preview options.
-
-    Expected preview shape:
-    {
-      "id": "design_1" or DB UUID,
-      "image_url": "https://.../preview.png",
-      "label": "Design option 1"
-    }
-
-    Important: for best email rendering, image_url should be a real public HTTPS URL.
-    generation_service.py now uploads OpenAI images to Supabase Storage when these env vars exist:
-    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET.
     """
     if not RESEND_API_KEY:
         raise ValueError("RESEND_API_KEY is missing")
@@ -55,7 +44,7 @@ def send_design_previews_email(order: Any, previews: Iterable[Dict[str, Any]]):
     if not order_id:
         raise ValueError("Order ID is missing")
 
-    select_url = f"{FRONTEND_URL}/select-design?order_id={order_id}"
+    select_url = f"{FRONTEND_URL}/design-previews?order_id={order_id}"
 
     preview_blocks = ""
     preview_list = list(previews or [])
@@ -137,12 +126,12 @@ def send_design_previews_email(order: Any, previews: Iterable[Dict[str, Any]]):
         raise Exception(f"Resend error: {response.text}")
 
     return response.json()
-    
-    async def send_email(to: str, subject: str, html: str):
+
+
+async def send_email(to: str, subject: str, html: str):
     """
     Universal email sender used by worker and other services.
     """
-
     if not RESEND_API_KEY:
         raise ValueError("RESEND_API_KEY is missing")
 
