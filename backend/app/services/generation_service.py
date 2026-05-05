@@ -940,24 +940,27 @@ class GenerationService:
         index: int,
     ) -> str:
         """
-        Ultra-realistic Divi/Webflow-style website preview prompt.
+        Real business copy + offer + conversion-focused homepage screenshot prompt.
         One call = one preview prompt.
         """
 
         divi = DiviStyleGenerationService()
         layout_spec = divi.generate_layout_spec(project_summary, variant=index - 1)
 
-        business_name = str(project_summary.get("business_name") or "Client business")
+        business_name = str(project_summary.get("business_name") or "Business")
+        business_type = str(project_summary.get("business_type") or "service business")
         goal = str(project_summary.get("main_goal") or "get more clients")
-        style = str(item.get("style") or layout_spec.get("style") or "modern premium")
+        location = str(project_summary.get("location") or "Ireland")
+        style = str(item.get("style") or layout_spec.get("style") or "modern")
+
         colors = str(
             item.get("color_direction")
             or layout_spec.get("design_system", {}).get("colors", {}).get("primary")
-            or "clean premium palette"
+            or "clean palette"
         )
+
         plan = str(project_summary.get("plan") or "website package")
         pages = project_summary.get("pages") or []
-
         page_hint = (
             ", ".join([str(p.get("name") or p) for p in pages[:5]])
             if isinstance(pages, list)
@@ -968,84 +971,80 @@ class GenerationService:
         sections = [s.get("type") for s in layout_spec.get("sections", [])]
 
         return f"""
-Create an ULTRA-REALISTIC, LIVE-WEBSITE STYLE homepage screenshot.
+Create a REALISTIC, HIGH-CONVERTING business website homepage screenshot.
 
-MAIN GOAL:
-The result must look like a real premium business website that is already live,
-not an AI concept, not a mockup, not a Dribbble shot.
+CRITICAL:
+This must look like a real company website that sells services.
+It must not look like an AI-generated concept, poster, UI kit, or mockup.
 
 ABSOLUTELY FORBIDDEN:
 - No lorem ipsum
+- No fake text
 - No placeholder text
 - No "Your company"
 - No "Your business here"
 - No blurred text
 - No unreadable text
-- No fake UI frames
-- No phone, laptop, tablet or browser mockup frames
+- No UI kit layout
+- No device frames
+- No browser mockup frame
 - No abstract floating screens
-- No UI kits
-- No poster-like composition
-- No excessive gradients
-- No futuristic AI style
-- No text about AI, OpenAI, SiteFormo, templates, prompts or generated content
+- No AI-looking futuristic style
+- Do not mention AI, OpenAI, SiteFormo, templates, prompts, or generated content
 
-REAL WEBSITE REQUIREMENTS:
-- Looks like a premium Divi / Webflow / Framer agency-built website
-- Full homepage screenshot, not a single hero banner
-- Real header with logo area and navigation menu
-- Real hero section with strong headline, short subheadline and primary CTA
-- Real services or features section with 3-4 clear cards
-- Real trust section with reviews, stats, awards or credibility proof
-- Real about / explanation block
-- Real final CTA section
-- Clean footer feeling if visible
-- All visible text must be realistic English business copy
-- Buttons must use real CTA text such as "Get a quote", "Book a call", "Start your project", "Contact us"
+COPY QUALITY:
+- Write like a real business, not AI
+- Use clear, simple English
+- No generic phrases like "we provide high quality solutions"
+- No filler text
+- Strong, specific headline
+- Clear offer
+- Short, sharp service descriptions
+- Real CTA buttons such as "Get a Free Quote", "Book a Call", "Start Your Project", "Contact Us Today"
 
-DESIGN SYSTEM:
-- Colors: {layout_spec.get("design_system", {}).get("colors")}
-- Fonts: {layout_spec.get("design_system", {}).get("fonts")}
-- Buttons: {layout_spec.get("design_system", {}).get("buttons")}
+TRUST SECTION:
+Include realistic credibility elements:
+- Reviews
+- Ratings
+- Years of experience
+- Client results
+- Awards, stats, or proof elements where appropriate
 
-STRUCTURE:
-The homepage must follow this section structure:
-{sections}
-
-QUALITY BAR:
-- Premium spacing
-- Strong typography hierarchy
+DESIGN STYLE:
+- Premium Divi / Webflow / Framer agency-level website
+- Clean spacing
 - Modern grid layout
-- Good whitespace
+- Strong typography hierarchy
 - Professional alignment
 - Conversion-focused
 - Mobile-first feeling
-- Realistic images or visual blocks if needed
-- Looks trustworthy enough for a paying client
+- Looks ready to go live
 
-BUSINESS:
-{business_name}
+LAYOUT STRUCTURE:
+The homepage must follow this section structure:
+{sections}
 
-GOAL:
-{goal}
+REQUIRED SECTIONS:
+- Navigation with logo + menu
+- Hero with strong headline + subheadline + CTA
+- Services section with 3-4 services
+- Trust / reviews / proof section
+- About or explanation section
+- Final CTA section
 
-PACKAGE / PLAN:
-{plan}
-
-PAGE / CONTENT HINTS:
-{page_hint}
-
-STYLE DIRECTION:
-{style}
-
-COLOR DIRECTION:
-{colors}
-
-DETAILED BRIEF:
-{detailed_brief}
+BUSINESS DETAILS:
+Business: {business_name}
+Type: {business_type}
+Location: {location}
+Goal: {goal}
+Package / Plan: {plan}
+Content hints: {page_hint}
+Style direction: {style}
+Color direction: {colors}
+Detailed brief: {detailed_brief}
 
 OUTPUT:
-A realistic full homepage screenshot that looks like a premium business website ready to publish.
+A realistic homepage screenshot with real business text, a clear offer, strong CTA, and premium visual quality.
 """
 
 
