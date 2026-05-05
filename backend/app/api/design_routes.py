@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.db.session import get_db
 from app.models.order import Order, OrderStatus
 from app.services.generation_service import GenerationService
 
