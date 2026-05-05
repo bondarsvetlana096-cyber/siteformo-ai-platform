@@ -22,9 +22,6 @@ class AutoImprovementService:
         package: str,
         regeneration_prompt: str,
     ) -> str:
-        """
-        Improves generated website content using quality review feedback.
-        """
 
         if not self.client:
             return site_content
@@ -88,3 +85,43 @@ def auto_improve(
         package=package,
         regeneration_prompt=feedback_prompt,
     )
+
+
+# ✅ ВАЖНО: функция ДОЛЖНА быть на уровне файла (НЕ внутри другой функции)
+def improve_preview_prompt(original_prompt: str, feedback: str | None = None) -> str:
+    """
+    Improves the design preview prompt before quality generation.
+    """
+
+    if not original_prompt:
+        original_prompt = ""
+
+    improvement_instructions = """
+Improve this website design preview prompt.
+
+Make the result:
+- realistic
+- modern
+- conversion-focused
+- suitable for a real business website
+- clear for desktop and mobile screenshots
+- visually premium
+- not generic
+- not overly artistic
+- not like a concept poster
+
+The design should look like a real production website homepage.
+"""
+
+    if feedback:
+        improvement_instructions += f"""
+
+Additional quality feedback:
+{feedback}
+"""
+
+    return f"""
+{original_prompt}
+
+{improvement_instructions}
+""".strip()
