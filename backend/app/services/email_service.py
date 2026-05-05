@@ -24,10 +24,36 @@ def _preview_image_url(preview: Any) -> Optional[str]:
     )
 
 
+# 🔥 ДОБАВЛЕНО — ЧТО ЛОМАЛО СЕРВЕР
+class OwnerEmailComposer:
+    @staticmethod
+    def compose_order_email(order):
+        order_id = _safe_get(order, "id")
+        client_email = _safe_get(order, "email") or _safe_get(order, "client_email")
+        client_name = _safe_get(order, "client_name") or "Client"
+        total = _safe_get(order, "total_amount") or _safe_get(order, "estimated_price_eur") or 0
+
+        html = f"""
+        <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111;">
+            <h2>New SiteFormo order</h2>
+
+            <p><strong>Order ID:</strong> {order_id}</p>
+            <p><strong>Client:</strong> {client_name}</p>
+            <p><strong>Email:</strong> {client_email}</p>
+            <p><strong>Total:</strong> €{total}</p>
+
+            <p>Please review this order.</p>
+        </div>
+        """
+
+        return {
+            "to": os.getenv("OWNER_EMAIL", "klon97048@gmail.com"),
+            "subject": f"New order {order_id}",
+            "html": html,
+        }
+
+
 def send_design_previews_email(order: Any, previews: Iterable[Dict[str, Any]]):
-    """
-    Sends the client the generated design preview options.
-    """
     if not RESEND_API_KEY:
         raise ValueError("RESEND_API_KEY is missing")
 
@@ -46,61 +72,17 @@ def send_design_previews_email(order: Any, previews: Iterable[Dict[str, Any]]):
 
     select_url = f"{FRONTEND_URL}/design-previews?order_id={order_id}"
 
-    preview_blocks = ""
-    preview_list = list(previews or [])
-
-    for index, preview in enumerate(preview_list, start=1):
-        image_url = _preview_image_url(preview)
-        preview_id = _safe_get(preview, "id") or f"design_{index}"
-        label = _safe_get(preview, "label") or f"Design option {index}"
-        choose_url = f"{select_url}&preview_id={preview_id}"
-
-        image_html = (
-            f'<img src="{image_url}" style="max-width:100%;border-radius:10px;margin-bottom:16px;border:1px solid #eee;" />'
-            if image_url
-            else '<p style="color:#666;">Preview image is attached to your project dashboard.</p>'
-        )
-
-        preview_blocks += f"""
-        <div style="margin-bottom:32px;padding:20px;border:1px solid #ddd;border-radius:12px;">
-            <h3>{label}</h3>
-            {image_html}
-            <p>
-                <a href="{choose_url}"
-                   style="display:inline-block;background:#111;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;">
-                   Select this design
-                </a>
-            </p>
-            <p style="font-size:13px;color:#666;word-break:break-all;">
-                If the button does not work, copy this link:<br />
-                <a href="{choose_url}">{choose_url}</a>
-            </p>
-        </div>
-        """
-
     html = f"""
-    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111;max-width:760px;margin:0 auto;">
-        <h2>Your homepage design options are ready</h2>
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111;">
+        <h2>Your design options are ready</h2>
 
-        <p>Hello,</p>
-
-        <p>
-            Based on your questionnaire, our development team prepared your first design options.
-            Please review them and select the one you want us to use for the final website.
-        </p>
-
-        <p><strong>You can select only one design.</strong></p>
-
-        {preview_blocks}
+        <p>Please open the link below and choose one design.</p>
 
         <p>
-            After you select a design, the final production stage will begin.
-            You will still have a 1-hour refund window after selection.
-        </p>
-
-        <p>
-            You can also open all options here:<br />
-            <a href="{select_url}">{select_url}</a>
+            <a href="{select_url}"
+               style="padding:12px 20px;background:#4f46e5;color:white;text-decoration:none;border-radius:8px;">
+                View designs
+            </a>
         </p>
 
         <p>SiteFormo Team</p>
@@ -129,9 +111,6 @@ def send_design_previews_email(order: Any, previews: Iterable[Dict[str, Any]]):
 
 
 async def send_email(to: str, subject: str, html: str):
-    """
-    Universal email sender used by worker and other services.
-    """
     if not RESEND_API_KEY:
         raise ValueError("RESEND_API_KEY is missing")
 
