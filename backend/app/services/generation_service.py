@@ -100,12 +100,17 @@ class GenerationService:
                 preview_id=preview_id,
             )
 
+            divi_layout_spec = DiviStyleGenerationService().generate_layout_spec(
+                project_summary,
+                variant=index - 1,
+            )
+
             previews.append(
                 {
                     "id": preview_id,
                     "type": "homepage_screenshot",
                     "label": item["label"],
-                    "style": item["style"],
+                    "style": item.get("style") or divi_layout_spec.get("style", "modern"),
                     "color_direction": item.get("color_direction", ""),
                     "prompt": item["prompt"],
                     "preview_url": screenshot_url,
@@ -116,6 +121,19 @@ class GenerationService:
                     "screenshots_status": device_screenshots.get("status"),
                     "image_source": image_source,
                     "status": "READY",
+
+                    # SiteFormo design DNA.
+                    # This keeps final generation aligned with the preview selected by the client.
+                    "layout_spec": divi_layout_spec,
+                    "design_system": divi_layout_spec.get("design_system", {}),
+                    "sections": divi_layout_spec.get("sections", []),
+                    "preview_dna": {
+                        "style": item.get("style") or divi_layout_spec.get("style", "modern"),
+                        "color_direction": item.get("color_direction", ""),
+                        "design_system": divi_layout_spec.get("design_system", {}),
+                        "sections": divi_layout_spec.get("sections", []),
+                        "prompt": item.get("prompt", ""),
+                    },
                 }
             )
 
@@ -511,75 +529,757 @@ class GenerationService:
         return package
 
     def _generate_divi_html(self, order: Order) -> str:
-        if not self.client:
-            return self._fallback_divi_html(order)
+        """
+        Component-builder final generation.
 
-        prompt = self._build_final_generation_prompt(order)
+        Selected preview -> layout sections -> real HTML blocks.
+        This keeps the final website closer to what the client selected.
+        """
 
-        try:
-            response = self.client.responses.create(
-                model=self.model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a senior website conversion strategist and Divi 5 layout writer. "
-                            "Generate clean, mobile-first, editable HTML sections for a homepage. "
-                            "Use English only. Do not mention OpenAI. Do not include markdown fences."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-            )
+        business_name = escape(
+            getattr(order, "business_name", None)
+            or getattr(order, "source_url", None)
+            or "Client business"
+        )
 
-            output_text = getattr(response, "output_text", None)
+        description = escape(
+            getattr(order, "desired_site_description", None)
+            or "A premium website designed to convert visitors into qualified leads."
+        )
 
-            if output_text and output_text.strip():
-                return output_text.strip()
-
-            return self._fallback_divi_html(order)
-
-        except Exception as exc:
-            logger.exception("Final OpenAI generation failed: %s", exc)
-            return self._fallback_divi_html(order)
-
-    def _build_final_generation_prompt(self, order: Order) -> str:
-        business_name = getattr(order, "business_name", "") or "Client business"
-        source_url = getattr(order, "source_url", "") or ""
-        description = getattr(order, "desired_site_description", "") or ""
         brief_answers = (
             getattr(order, "extended_brief", None)
             or getattr(order, "brief_answers", None)
             or {}
         )
-        pricing_reasoning = getattr(order, "pricing_reasoning", "") or ""
-        selected_design = (
-            getattr(order, "selected_design_url", "") or getattr(order, "selected_design_id", "") or ""
+        if not isinstance(brief_answers, dict):
+            brief_answers = {"raw_brief": str(brief_answers)}
+
+        selected_design_id = (
+            getattr(order, "selected_design_id", "")
+            or getattr(order, "selected_design_url", "")
+            or ""
         )
 
-        return (
-            "Create a Divi 5-ready homepage HTML package based on the client's approved design direction.\n\n"
-            "Requirements:\n"
-            "- English only\n"
-            "- Mobile-first\n"
-            "- Premium, trustworthy, conversion-focused\n"
-            "- Follow the selected design direction as closely as text HTML can support\n"
-            "- Clear hero section\n"
-            "- Services / offer section\n"
-            "- Trust section\n"
-            "- FAQ section\n"
-            "- Final CTA section\n"
-            "- Use simple semantic HTML\n"
-            "- No external scripts\n"
-            "- No markdown fences\n\n"
-            "Project data:\n"
-            f"- Business name: {business_name}\n"
-            f"- Source URL / old site: {source_url}\n"
-            f"- Description: {description}\n"
-            f"- Pricing reasoning: {pricing_reasoning}\n"
-            f"- Selected design: {selected_design}\n"
-            f"- Brief answers: {brief_answers}\n"
+        design_previews = (
+            getattr(order, "design_previews", None)
+            or getattr(order, "preview_generation_payload", None)
+            or []
         )
+
+        if isinstance(design_previews, dict):
+            design_previews = design_previews.get("design_previews") or []
+
+        selected_preview: Dict[str, Any] = {}
+        if isinstance(design_previews, list):
+            for preview in design_previews:
+                if not isinstance(preview, dict):
+                    continue
+
+                preview_id = str(preview.get("id") or "")
+                preview_url = str(
+                    preview.get("preview_url")
+                    or preview.get("screenshot_url")
+                    or preview.get("image_url")
+                    or ""
+                )
+
+                if selected_design_id and (
+                    selected_design_id == preview_id
+                    or selected_design_id == preview_url
+                    or selected_design_id in {preview_id, preview_url}
+                ):
+                    selected_preview = preview
+                    break
+
+            if not selected_preview and design_previews:
+                selected_preview = design_previews[0] if isinstance(design_previews[0], dict) else {}
+
+        preview_dna = selected_preview.get("preview_dna") or {}
+        layout_spec = selected_preview.get("layout_spec") or {}
+
+        sections = (
+            preview_dna.get("sections")
+            or selected_preview.get("sections")
+            or layout_spec.get("sections")
+            or []
+        )
+
+        design_system = (
+            preview_dna.get("design_system")
+            or selected_preview.get("design_system")
+            or layout_spec.get("design_system")
+            or {}
+        )
+
+        colors = design_system.get("colors", {}) if isinstance(design_system, dict) else {}
+        primary = escape(str(colors.get("primary") or "#0A7CFF"))
+        secondary = escape(str(colors.get("secondary") or "#111111"))
+        background = escape(str(colors.get("background") or "#FFFFFF"))
+
+        service_names = self._extract_services_from_brief(brief_answers)
+        if not service_names:
+            service_names = ["Website Design", "Conversion Strategy", "Mobile Optimization"]
+
+        normalized_sections = [
+            str(section.get("type") if isinstance(section, dict) else section).lower()
+            for section in sections
+        ]
+
+        if not normalized_sections:
+            normalized_sections = [
+                "hero_split",
+                "services_cards",
+                "trust",
+                "about_split",
+                "faq",
+                "cta_big",
+            ]
+
+        html_sections: List[str] = []
+        html_sections.append(self._build_component_css(primary, secondary, background))
+        html_sections.append(self._component_header(business_name))
+
+        hero_added = False
+        services_added = False
+        trust_added = False
+        about_added = False
+        cta_added = False
+        faq_added = False
+
+        for section_type in normalized_sections:
+            if "hero" in section_type and not hero_added:
+                if "minimal" in section_type:
+                    html_sections.append(self._component_hero_minimal(business_name, description))
+                elif "center" in section_type:
+                    html_sections.append(self._component_hero_center(business_name, description))
+                else:
+                    html_sections.append(self._component_hero_split(business_name, description))
+                hero_added = True
+
+            elif any(key in section_type for key in ["service", "feature", "benefit"]) and not services_added:
+                html_sections.append(self._component_services(service_names))
+                services_added = True
+
+            elif any(key in section_type for key in ["trust", "testimonial", "stat", "logo"]) and not trust_added:
+                html_sections.append(self._component_trust())
+                trust_added = True
+
+            elif any(key in section_type for key in ["about", "process", "portfolio", "gallery"]) and not about_added:
+                html_sections.append(self._component_about(business_name))
+                about_added = True
+
+            elif "faq" in section_type and not faq_added:
+                html_sections.append(self._component_faq())
+                faq_added = True
+
+            elif "cta" in section_type and not cta_added:
+                html_sections.append(self._component_cta())
+                cta_added = True
+
+        if not hero_added:
+            html_sections.append(self._component_hero_split(business_name, description))
+        if not services_added:
+            html_sections.append(self._component_services(service_names))
+        if not trust_added:
+            html_sections.append(self._component_trust())
+        if not about_added:
+            html_sections.append(self._component_about(business_name))
+        if not faq_added:
+            html_sections.append(self._component_faq())
+        if not cta_added:
+            html_sections.append(self._component_cta())
+
+        html_sections.append(self._component_footer(business_name))
+
+        return "\\n\\n".join(html_sections).strip()
+
+    def _extract_services_from_brief(self, brief_answers: Dict[str, Any]) -> List[str]:
+        services: List[str] = []
+
+        if not isinstance(brief_answers, dict):
+            return services
+
+        possible_sources = [
+            brief_answers.get("services"),
+            brief_answers.get("service_names"),
+            brief_answers.get("selected_services"),
+        ]
+
+        answers = brief_answers.get("answers")
+        if isinstance(answers, dict):
+            possible_sources.extend([
+                answers.get("services"),
+                answers.get("service_names"),
+                answers.get("selected_services"),
+            ])
+
+        for source in possible_sources:
+            if isinstance(source, list):
+                for item in source:
+                    if isinstance(item, dict):
+                        value = item.get("name") or item.get("title") or item.get("selected")
+                    else:
+                        value = item
+                    if value:
+                        services.append(str(value))
+            elif isinstance(source, str) and source.strip():
+                services.extend([s.strip() for s in source.split(",") if s.strip()])
+
+        clean: List[str] = []
+        for item in services:
+            if item not in clean:
+                clean.append(item)
+
+        return clean[:4]
+
+    def _build_component_css(self, primary: str, secondary: str, background: str) -> str:
+        return f"""
+<style>
+  :root {{
+    --sf-primary: {primary};
+    --sf-secondary: {secondary};
+    --sf-bg: {background};
+    --sf-muted: #64748b;
+    --sf-card: #ffffff;
+    --sf-border: #e5e7eb;
+    --sf-radius: 24px;
+  }}
+  .siteformo-page {{
+    background: var(--sf-bg);
+    color: var(--sf-secondary);
+    font-family: Inter, Arial, sans-serif;
+    line-height: 1.5;
+  }}
+  .siteformo-container {{
+    width: min(1120px, calc(100% - 40px));
+    margin: 0 auto;
+  }}
+  .siteformo-header {{
+    padding: 22px 0;
+    border-bottom: 1px solid var(--sf-border);
+    background: rgba(255,255,255,.92);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(10px);
+  }}
+  .siteformo-nav {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+  }}
+  .siteformo-logo {{
+    font-weight: 800;
+    font-size: 20px;
+    letter-spacing: -0.03em;
+  }}
+  .siteformo-menu {{
+    display: flex;
+    gap: 22px;
+    color: var(--sf-muted);
+    font-size: 14px;
+  }}
+  .siteformo-button,
+  .siteformo-button-secondary {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding: 0 22px;
+    border-radius: 999px;
+    text-decoration: none;
+    font-weight: 700;
+  }}
+  .siteformo-button {{
+    background: var(--sf-primary);
+    color: #fff;
+  }}
+  .siteformo-button-secondary {{
+    background: #f8fafc;
+    color: var(--sf-secondary);
+    border: 1px solid var(--sf-border);
+  }}
+  .siteformo-hero {{
+    padding: 92px 0 70px;
+  }}
+  .siteformo-hero-grid {{
+    display: grid;
+    grid-template-columns: 1.05fr .95fr;
+    gap: 54px;
+    align-items: center;
+  }}
+  .siteformo-eyebrow {{
+    color: var(--sf-primary);
+    text-transform: uppercase;
+    font-size: 13px;
+    letter-spacing: .12em;
+    font-weight: 800;
+    margin-bottom: 14px;
+  }}
+  .siteformo-hero h1,
+  .siteformo-section h2 {{
+    letter-spacing: -0.05em;
+    line-height: 1.02;
+    margin: 0;
+  }}
+  .siteformo-hero h1 {{
+    font-size: clamp(42px, 6vw, 74px);
+    max-width: 780px;
+  }}
+  .siteformo-hero p {{
+    color: var(--sf-muted);
+    font-size: 19px;
+    max-width: 620px;
+    margin: 22px 0 30px;
+  }}
+  .siteformo-actions {{
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+  }}
+  .siteformo-visual {{
+    min-height: 420px;
+    border-radius: 34px;
+    background:
+      radial-gradient(circle at 22% 18%, rgba(255,255,255,.95), transparent 28%),
+      linear-gradient(135deg, var(--sf-primary), #111827);
+    box-shadow: 0 28px 80px rgba(15, 23, 42, .18);
+    position: relative;
+    overflow: hidden;
+  }}
+  .siteformo-visual::after {{
+    content: "";
+    position: absolute;
+    inset: 42px;
+    border-radius: 26px;
+    border: 1px solid rgba(255,255,255,.35);
+    background: rgba(255,255,255,.12);
+  }}
+  .siteformo-section {{
+    padding: 76px 0;
+  }}
+  .siteformo-section h2 {{
+    font-size: clamp(32px, 4vw, 52px);
+    max-width: 740px;
+  }}
+  .siteformo-section-intro {{
+    color: var(--sf-muted);
+    font-size: 18px;
+    max-width: 680px;
+    margin: 18px 0 34px;
+  }}
+  .siteformo-grid {{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+  }}
+  .siteformo-card {{
+    background: var(--sf-card);
+    border: 1px solid var(--sf-border);
+    border-radius: var(--sf-radius);
+    padding: 28px;
+    box-shadow: 0 16px 45px rgba(15, 23, 42, .06);
+  }}
+  .siteformo-card h3 {{
+    font-size: 21px;
+    margin: 0 0 10px;
+  }}
+  .siteformo-card p {{
+    color: var(--sf-muted);
+    margin: 0;
+  }}
+  .siteformo-trust {{
+    background: #0f172a;
+    color: #fff;
+    border-radius: 36px;
+    padding: 42px;
+  }}
+  .siteformo-trust-grid {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+  }}
+  .siteformo-stat strong {{
+    display: block;
+    font-size: 32px;
+  }}
+  .siteformo-stat span {{
+    color: #cbd5e1;
+    font-size: 14px;
+  }}
+  .siteformo-about {{
+    display: grid;
+    grid-template-columns: .85fr 1.15fr;
+    gap: 42px;
+    align-items: center;
+  }}
+  .siteformo-faq-item {{
+    border-top: 1px solid var(--sf-border);
+    padding: 22px 0;
+  }}
+  .siteformo-faq-item h3 {{
+    margin: 0 0 8px;
+  }}
+  .siteformo-faq-item p {{
+    margin: 0;
+    color: var(--sf-muted);
+  }}
+  .siteformo-final-cta {{
+    background: linear-gradient(135deg, var(--sf-primary), #111827);
+    color: #fff;
+    border-radius: 38px;
+    padding: 58px;
+    text-align: center;
+  }}
+  .siteformo-final-cta h2 {{
+    font-size: clamp(34px, 5vw, 58px);
+    letter-spacing: -0.05em;
+    margin: 0 0 14px;
+  }}
+  .siteformo-final-cta p {{
+    color: rgba(255,255,255,.82);
+    max-width: 620px;
+    margin: 0 auto 28px;
+  }}
+  .siteformo-footer {{
+    padding: 36px 0;
+    color: var(--sf-muted);
+    font-size: 14px;
+  }}
+  @media (max-width: 820px) {{
+    .siteformo-menu {{
+      display: none;
+    }}
+    .siteformo-hero-grid,
+    .siteformo-about,
+    .siteformo-grid,
+    .siteformo-trust-grid {{
+      grid-template-columns: 1fr;
+    }}
+    .siteformo-hero {{
+      padding-top: 58px;
+    }}
+    .siteformo-visual {{
+      min-height: 280px;
+    }}
+    .siteformo-final-cta {{
+      padding: 36px 22px;
+    }}
+  }}
+</style>
+""".strip()
+
+    def _component_header(self, business_name: str) -> str:
+        return f"""
+<div class="siteformo-page">
+<header class="siteformo-header">
+  <div class="siteformo-container siteformo-nav">
+    <div class="siteformo-logo">{business_name}</div>
+    <nav class="siteformo-menu">
+      <span>Services</span>
+      <span>About</span>
+      <span>Reviews</span>
+      <span>FAQ</span>
+    </nav>
+    <a class="siteformo-button" href="#contact">Get a Quote</a>
+  </div>
+</header>
+""".strip()
+
+    def _component_hero_split(self, business_name: str, description: str) -> str:
+        return f"""
+<section class="siteformo-hero">
+  <div class="siteformo-container siteformo-hero-grid">
+    <div>
+      <div class="siteformo-eyebrow">Premium Website Experience</div>
+      <h1>{business_name} — built to turn visitors into customers</h1>
+      <p>{description}</p>
+      <div class="siteformo-actions">
+        <a class="siteformo-button" href="#contact">Get a Free Quote</a>
+        <a class="siteformo-button-secondary" href="#services">View Services</a>
+      </div>
+    </div>
+    <div class="siteformo-visual" aria-hidden="true"></div>
+  </div>
+</section>
+""".strip()
+
+    def _component_hero_center(self, business_name: str, description: str) -> str:
+        return f"""
+<section class="siteformo-hero">
+  <div class="siteformo-container" style="text-align:center;">
+    <div class="siteformo-eyebrow">Built for Growth</div>
+    <h1 style="margin-left:auto;margin-right:auto;">{business_name} websites that look premium and convert better</h1>
+    <p style="margin-left:auto;margin-right:auto;">{description}</p>
+    <div class="siteformo-actions" style="justify-content:center;">
+      <a class="siteformo-button" href="#contact">Start Your Project</a>
+      <a class="siteformo-button-secondary" href="#services">Explore Services</a>
+    </div>
+  </div>
+</section>
+""".strip()
+
+    def _component_hero_minimal(self, business_name: str, description: str) -> str:
+        return f"""
+<section class="siteformo-hero">
+  <div class="siteformo-container">
+    <div class="siteformo-eyebrow">Clean. Clear. Effective.</div>
+    <h1>{business_name} with a website that explains your value instantly</h1>
+    <p>{description}</p>
+    <a class="siteformo-button" href="#contact">Book a Call</a>
+  </div>
+</section>
+""".strip()
+
+    def _component_services(self, services: List[str]) -> str:
+        cards = []
+        for service in services[:4]:
+            safe = escape(str(service))
+            cards.append(
+                f"""
+      <div class="siteformo-card">
+        <h3>{safe}</h3>
+        <p>Clear, professional and conversion-focused delivery designed around your business goals.</p>
+      </div>
+""".strip()
+            )
+
+        return f"""
+<section id="services" class="siteformo-section">
+  <div class="siteformo-container">
+    <h2>Services designed to move your business forward</h2>
+    <p class="siteformo-section-intro">A clear structure helps visitors understand what you offer, why it matters and how to take action.</p>
+    <div class="siteformo-grid">
+      {" ".join(cards)}
+    </div>
+  </div>
+</section>
+""".strip()
+
+    def _component_trust(self) -> str:
+        return """
+<section class="siteformo-section">
+  <div class="siteformo-container">
+    <div class="siteformo-trust">
+      <h2>Built to create trust before the first message</h2>
+      <p class="siteformo-section-intro" style="color:#cbd5e1;">Your website should make the business feel credible, active and easy to choose.</p>
+      <div class="siteformo-trust-grid">
+        <div class="siteformo-stat"><strong>4.9★</strong><span>Customer rating</span></div>
+        <div class="siteformo-stat"><strong>24h</strong><span>Fast response path</span></div>
+        <div class="siteformo-stat"><strong>100%</strong><span>Mobile-ready layout</span></div>
+        <div class="siteformo-stat"><strong>3</strong><span>Revision rounds included</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+""".strip()
+
+    def _component_about(self, business_name: str) -> str:
+        return f"""
+<section class="siteformo-section">
+  <div class="siteformo-container siteformo-about">
+    <div>
+      <div class="siteformo-eyebrow">Why it works</div>
+      <h2>A website structure that makes the offer easy to understand</h2>
+    </div>
+    <div class="siteformo-card">
+      <p>{business_name} needs more than a good-looking page. The layout is built to guide visitors from first impression to trust, then toward a clear action.</p>
+      <p style="margin-top:14px;">Every section has a job: explain the value, show credibility and make it simple to enquire.</p>
+    </div>
+  </div>
+</section>
+""".strip()
+
+    def _component_faq(self) -> str:
+        return """
+<section class="siteformo-section">
+  <div class="siteformo-container">
+    <h2>Questions visitors usually ask</h2>
+    <div class="siteformo-faq-item">
+      <h3>What makes this business different?</h3>
+      <p>The page explains the offer clearly, supports trust and gives visitors a simple next step.</p>
+    </div>
+    <div class="siteformo-faq-item">
+      <h3>Is the website mobile-ready?</h3>
+      <p>Yes. The structure is designed to work clearly across desktop, tablet and mobile screens.</p>
+    </div>
+    <div class="siteformo-faq-item">
+      <h3>How do visitors get started?</h3>
+      <p>They can use the main call-to-action buttons to request a quote, book a call or send an enquiry.</p>
+    </div>
+  </div>
+</section>
+""".strip()
+
+    def _component_cta(self) -> str:
+        return """
+<section id="contact" class="siteformo-section">
+  <div class="siteformo-container">
+    <div class="siteformo-final-cta">
+      <h2>Ready to turn more visitors into enquiries?</h2>
+      <p>Use a clear, premium website to explain your offer and make the next step simple.</p>
+      <a class="siteformo-button" style="background:#fff;color:#111827;" href="#contact">Contact Us Today</a>
+    </div>
+  </div>
+</section>
+""".strip()
+
+    def _component_footer(self, business_name: str) -> str:
+        return f"""
+<footer class="siteformo-footer">
+  <div class="siteformo-container">
+    © {business_name}. Website package prepared for launch.
+  </div>
+</footer>
+</div>
+""".strip()
+
+
+    def _build_final_generation_prompt(self, order: Order) -> str:
+        business_name = getattr(order, "business_name", "") or "Client business"
+        source_url = getattr(order, "source_url", "") or ""
+        description = getattr(order, "desired_site_description", "") or ""
+
+        brief_answers = (
+            getattr(order, "extended_brief", None)
+            or getattr(order, "brief_answers", None)
+            or {}
+        )
+        if not isinstance(brief_answers, dict):
+            brief_answers = {"raw_brief": str(brief_answers)}
+
+        pricing_reasoning = getattr(order, "pricing_reasoning", "") or ""
+
+        selected_design_id = (
+            getattr(order, "selected_design_id", "")
+            or getattr(order, "selected_design_url", "")
+            or ""
+        )
+
+        design_previews = (
+            getattr(order, "design_previews", None)
+            or getattr(order, "preview_generation_payload", None)
+            or []
+        )
+
+        if isinstance(design_previews, dict):
+            design_previews = design_previews.get("design_previews") or []
+
+        selected_preview: Dict[str, Any] = {}
+        if isinstance(design_previews, list):
+            for preview in design_previews:
+                if not isinstance(preview, dict):
+                    continue
+
+                preview_id = str(preview.get("id") or "")
+                preview_url = str(
+                    preview.get("preview_url")
+                    or preview.get("screenshot_url")
+                    or preview.get("image_url")
+                    or ""
+                )
+
+                if selected_design_id and (
+                    selected_design_id == preview_id
+                    or selected_design_id == preview_url
+                    or selected_design_id in {preview_id, preview_url}
+                ):
+                    selected_preview = preview
+                    break
+
+            if not selected_preview and design_previews:
+                selected_preview = design_previews[0] if isinstance(design_previews[0], dict) else {}
+
+        preview_dna = selected_preview.get("preview_dna") or {}
+        layout_spec = selected_preview.get("layout_spec") or {}
+        design_system = (
+            preview_dna.get("design_system")
+            or selected_preview.get("design_system")
+            or layout_spec.get("design_system")
+            or {}
+        )
+        sections = (
+            preview_dna.get("sections")
+            or selected_preview.get("sections")
+            or layout_spec.get("sections")
+            or []
+        )
+        style = (
+            preview_dna.get("style")
+            or selected_preview.get("style")
+            or layout_spec.get("style")
+            or "modern premium"
+        )
+        color_direction = (
+            preview_dna.get("color_direction")
+            or selected_preview.get("color_direction")
+            or ""
+        )
+        selected_preview_prompt = (
+            preview_dna.get("prompt")
+            or selected_preview.get("prompt")
+            or ""
+        )
+        selected_preview_url = (
+            selected_preview.get("preview_url")
+            or selected_preview.get("screenshot_url")
+            or selected_preview.get("image_url")
+            or getattr(order, "selected_design_url", "")
+            or ""
+        )
+
+        return f"""
+Create a Divi 5-ready homepage HTML package based on the client's SELECTED design preview.
+
+CRITICAL MATCHING RULES:
+- The final website must follow the selected preview as closely as HTML can support.
+- Do not invent a totally different website.
+- Keep the same style direction, section order, visual hierarchy, and conversion logic.
+- Use the selected design DNA below as the source of truth.
+- English only.
+- Mobile-first.
+- Premium, trustworthy, conversion-focused.
+- Use simple semantic HTML sections.
+- No external scripts.
+- No markdown fences.
+- Do not mention AI, OpenAI, SiteFormo internals, prompts, or generated content.
+
+SELECTED PREVIEW DNA:
+- Selected design id/url: {selected_design_id}
+- Selected preview URL: {selected_preview_url}
+- Style: {style}
+- Color direction: {color_direction}
+- Design system: {design_system}
+- Sections: {sections}
+- Original preview prompt: {selected_preview_prompt}
+
+REQUIRED FINAL SITE STRUCTURE:
+- Header / navigation
+- Hero with strong headline, short subheadline, and clear CTA
+- Services / offer section
+- Trust / proof section
+- About or explanation block
+- FAQ section
+- Final CTA section
+- Footer
+
+COPY QUALITY:
+- Write like a real business, not AI.
+- Use clear, specific English.
+- No lorem ipsum.
+- No placeholders.
+- No generic filler like 'we provide high quality solutions'.
+- CTA buttons should be realistic, for example: Get a Free Quote, Book a Call, Start Your Project, Contact Us Today.
+
+Project data:
+- Business name: {business_name}
+- Source URL / old site: {source_url}
+- Description: {description}
+- Pricing reasoning: {pricing_reasoning}
+- Brief answers: {brief_answers}
+"""
 
     def _fallback_divi_html(self, order: Order) -> str:
         business_name = escape(
