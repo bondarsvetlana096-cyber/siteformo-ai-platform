@@ -137,3 +137,31 @@ def send_design_previews_email(order: Any, previews: Iterable[Dict[str, Any]]):
         raise Exception(f"Resend error: {response.text}")
 
     return response.json()
+    
+    async def send_email(to: str, subject: str, html: str):
+    """
+    Universal email sender used by worker and other services.
+    """
+
+    if not RESEND_API_KEY:
+        raise ValueError("RESEND_API_KEY is missing")
+
+    response = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "from": EMAIL_FROM,
+            "to": [to],
+            "subject": subject,
+            "html": html,
+        },
+        timeout=20,
+    )
+
+    if response.status_code >= 400:
+        raise Exception(f"Resend error: {response.text}")
+
+    return response.json()
