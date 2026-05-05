@@ -1,127 +1,98 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 
 class DiviStyleGenerationService:
     """
-    Generates structured, premium website layouts similar to Divi designs.
-    NOT raw HTML first — but structured layout system.
+    5 DISTINCT layout systems (real UX differences, not just colors)
     """
 
-    def generate_layout_spec(self, brief: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Step 1: Create design system + sections
-        """
+    def generate_layout_spec(self, brief: Dict[str, Any], variant: int = 0) -> Dict[str, Any]:
+        layouts = self._get_layouts(brief)
+        return layouts[variant % len(layouts)]
 
-        business_type = brief.get("business_type", "business")
-        style = brief.get("style", "modern")
-        pages = brief.get("pages", ["home"])
+    def _get_layouts(self, brief: Dict[str, Any]) -> List[Dict[str, Any]]:
+        business = brief.get("business_type", "business")
 
-        return {
-            "design_system": {
-                "colors": {
-                    "primary": "#0A7CFF",
-                    "secondary": "#111111",
-                    "background": "#FFFFFF",
-                    "accent": "#F5F7FA"
-                },
-                "fonts": {
-                    "heading": "Inter",
-                    "body": "Inter"
-                },
-                "buttons": {
-                    "style": "rounded",
-                    "size": "medium"
-                },
-                "spacing": "balanced"
+        return [
+
+            # 🔵 1. MODERN SAAS (clean, product style)
+            {
+                "style": "modern_saas",
+                "design_system": self._design("#0A7CFF"),
+                "sections": [
+                    {"type": "navbar"},
+                    {"type": "hero_center"},
+                    {"type": "logos"},
+                    {"type": "features_grid"},
+                    {"type": "cta_inline"},
+                ],
             },
 
-            "sections": [
-                {
-                    "type": "hero",
-                    "headline": f"{business_type.capitalize()} that stands out",
-                    "subheadline": "We help you grow faster with a modern website",
-                    "cta": "Get started"
-                },
-                {
-                    "type": "trust",
-                    "items": ["Trusted by clients", "5-star reviews", "Fast delivery"]
-                },
-                {
-                    "type": "services",
-                    "style": "cards",
-                    "items": [
-                        "Service 1",
-                        "Service 2",
-                        "Service 3"
-                    ]
-                },
-                {
-                    "type": "portfolio",
-                    "style": "grid",
-                    "items": 6
-                },
-                {
-                    "type": "process",
-                    "steps": [
-                        "Contact",
-                        "Planning",
-                        "Design",
-                        "Launch"
-                    ]
-                },
-                {
-                    "type": "testimonials",
-                    "style": "slider"
-                },
-                {
-                    "type": "cta",
-                    "headline": "Ready to start?",
-                    "button": "Contact us"
-                },
-                {
-                    "type": "footer"
-                }
-            ],
+            # 🟣 2. PREMIUM AGENCY (dark, high-end)
+            {
+                "style": "premium_agency",
+                "design_system": self._design("#111111"),
+                "sections": [
+                    {"type": "navbar_dark"},
+                    {"type": "hero_split"},
+                    {"type": "portfolio_grid"},
+                    {"type": "testimonials_large"},
+                    {"type": "cta_big"},
+                ],
+            },
 
-            "pages": pages,
-            "style": style
+            # 🟠 3. BOLD MARKETING (conversion focused)
+            {
+                "style": "bold_conversion",
+                "design_system": self._design("#FF6A00"),
+                "sections": [
+                    {"type": "navbar"},
+                    {"type": "hero_big"},
+                    {"type": "benefits_blocks"},
+                    {"type": "stats_bar"},
+                    {"type": "cta_strong"},
+                ],
+            },
+
+            # 🟢 4. MINIMAL LUXURY (clean & elegant)
+            {
+                "style": "minimal_luxury",
+                "design_system": self._design("#2ECC71"),
+                "sections": [
+                    {"type": "navbar_minimal"},
+                    {"type": "hero_minimal"},
+                    {"type": "services_cards"},
+                    {"type": "about_split"},
+                    {"type": "cta_clean"},
+                ],
+            },
+
+            # 🔴 5. CREATIVE STUDIO (visual, bold)
+            {
+                "style": "creative_studio",
+                "design_system": self._design("#E74C3C"),
+                "sections": [
+                    {"type": "navbar_creative"},
+                    {"type": "hero_visual"},
+                    {"type": "gallery_masonry"},
+                    {"type": "process_steps"},
+                    {"type": "cta_creative"},
+                ],
+            },
+        ]
+
+    def _design(self, primary: str) -> Dict[str, Any]:
+        return {
+            "colors": {
+                "primary": primary,
+                "secondary": "#111111",
+                "background": "#FFFFFF",
+            },
+            "fonts": {
+                "heading": "Inter",
+                "body": "Inter"
+            },
+            "buttons": {
+                "style": "rounded"
+            }
         }
-
-    def generate_html(self, spec: Dict[str, Any]) -> str:
-        """
-        Step 2: Convert spec into clean HTML (Divi-like structure)
-        """
-
-        html = "<html><head><title>SiteFormo</title></head><body>"
-
-        for section in spec["sections"]:
-            section_type = section["type"]
-
-            if section_type == "hero":
-                html += f"""
-                <section style="padding:80px;text-align:center;">
-                    <h1>{section['headline']}</h1>
-                    <p>{section['subheadline']}</p>
-                    <button>{section['cta']}</button>
-                </section>
-                """
-
-            elif section_type == "services":
-                html += "<section><div style='display:flex;gap:20px;'>"
-                for item in section["items"]:
-                    html += f"<div><h3>{item}</h3></div>"
-                html += "</div></section>"
-
-            elif section_type == "cta":
-                html += f"""
-                <section style="text-align:center;padding:60px;">
-                    <h2>{section['headline']}</h2>
-                    <button>{section['button']}</button>
-                </section>
-                """
-
-            elif section_type == "footer":
-                html += "<footer style='padding:40px;text-align:center;'>© SiteFormo</footer>"
-
-        html += "</body></html>"
-        return html

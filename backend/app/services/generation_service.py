@@ -691,6 +691,7 @@ class GenerationService:
             html_sections.append(self._component_cta())
 
         html_sections.append(self._component_footer(business_name))
+        html_sections.append(self._component_animation_script())
 
         return "\\n\\n".join(html_sections).strip()
 
@@ -741,214 +742,460 @@ class GenerationService:
     --sf-secondary: {secondary};
     --sf-bg: {background};
     --sf-muted: #64748b;
-    --sf-card: #ffffff;
-    --sf-border: #e5e7eb;
-    --sf-radius: 24px;
+    --sf-card: rgba(255, 255, 255, .86);
+    --sf-border: rgba(148, 163, 184, .28);
+    --sf-radius: 28px;
+    --sf-radius-xl: 40px;
+    --sf-shadow-soft: 0 18px 55px rgba(15, 23, 42, .08);
+    --sf-shadow-hover: 0 30px 90px rgba(15, 23, 42, .16);
+    --sf-section-space: 92px;
+    --sf-gradient-dark: linear-gradient(135deg, #0f172a 0%, #111827 48%, #020617 100%);
+    --sf-gradient-premium: radial-gradient(circle at 20% 10%, rgba(255,255,255,.88), transparent 25%), linear-gradient(135deg, var(--sf-primary), #111827);
   }}
+
+  * {{
+    box-sizing: border-box;
+  }}
+
+  html {{
+    scroll-behavior: smooth;
+  }}
+
   .siteformo-page {{
-    background: var(--sf-bg);
+    background:
+      radial-gradient(circle at top left, color-mix(in srgb, var(--sf-primary) 10%, transparent), transparent 34%),
+      radial-gradient(circle at 85% 12%, rgba(15, 23, 42, .07), transparent 24%),
+      var(--sf-bg);
     color: var(--sf-secondary);
-    font-family: Inter, Arial, sans-serif;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
     line-height: 1.5;
+    overflow-x: hidden;
   }}
+
   .siteformo-container {{
-    width: min(1120px, calc(100% - 40px));
+    width: min(1160px, calc(100% - 40px));
     margin: 0 auto;
   }}
+
   .siteformo-header {{
-    padding: 22px 0;
-    border-bottom: 1px solid var(--sf-border);
-    background: rgba(255,255,255,.92);
+    padding: 18px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, .18);
+    background: rgba(255,255,255,.78);
     position: sticky;
     top: 0;
-    z-index: 10;
-    backdrop-filter: blur(10px);
+    z-index: 20;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
   }}
+
   .siteformo-nav {{
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 24px;
   }}
+
   .siteformo-logo {{
-    font-weight: 800;
+    font-weight: 900;
     font-size: 20px;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.04em;
+    color: var(--sf-secondary);
   }}
+
   .siteformo-menu {{
     display: flex;
-    gap: 22px;
+    gap: 24px;
     color: var(--sf-muted);
     font-size: 14px;
+    font-weight: 650;
   }}
+
+  .siteformo-menu span {{
+    position: relative;
+  }}
+
+  .siteformo-menu span::after {{
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -8px;
+    height: 2px;
+    border-radius: 999px;
+    background: var(--sf-primary);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform .25s ease;
+  }}
+
+  .siteformo-menu span:hover::after {{
+    transform: scaleX(1);
+  }}
+
   .siteformo-button,
   .siteformo-button-secondary {{
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 48px;
-    padding: 0 22px;
+    min-height: 50px;
+    padding: 0 24px;
     border-radius: 999px;
     text-decoration: none;
-    font-weight: 700;
+    font-weight: 800;
+    letter-spacing: -.01em;
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease, background .25s ease;
+    will-change: transform;
   }}
+
   .siteformo-button {{
-    background: var(--sf-primary);
+    background: linear-gradient(135deg, var(--sf-primary), color-mix(in srgb, var(--sf-primary) 62%, #111827));
     color: #fff;
+    box-shadow: 0 14px 36px color-mix(in srgb, var(--sf-primary) 28%, transparent);
   }}
+
   .siteformo-button-secondary {{
-    background: #f8fafc;
+    background: rgba(255, 255, 255, .72);
     color: var(--sf-secondary);
     border: 1px solid var(--sf-border);
+    backdrop-filter: blur(10px);
   }}
+
+  .siteformo-button:hover,
+  .siteformo-button-secondary:hover {{
+    transform: translateY(-3px) scale(1.025);
+    box-shadow: var(--sf-shadow-hover);
+  }}
+
   .siteformo-hero {{
-    padding: 92px 0 70px;
+    padding: 106px 0 78px;
+    position: relative;
   }}
+
+  .siteformo-hero::before {{
+    content: "";
+    position: absolute;
+    width: 520px;
+    height: 520px;
+    border-radius: 999px;
+    right: -220px;
+    top: -190px;
+    background: color-mix(in srgb, var(--sf-primary) 18%, transparent);
+    filter: blur(26px);
+    pointer-events: none;
+  }}
+
   .siteformo-hero-grid {{
     display: grid;
-    grid-template-columns: 1.05fr .95fr;
-    gap: 54px;
+    grid-template-columns: 1.03fr .97fr;
+    gap: 58px;
     align-items: center;
+    position: relative;
+    z-index: 1;
   }}
+
   .siteformo-eyebrow {{
     color: var(--sf-primary);
     text-transform: uppercase;
-    font-size: 13px;
-    letter-spacing: .12em;
-    font-weight: 800;
-    margin-bottom: 14px;
+    font-size: 12px;
+    letter-spacing: .16em;
+    font-weight: 900;
+    margin-bottom: 16px;
   }}
+
   .siteformo-hero h1,
   .siteformo-section h2 {{
-    letter-spacing: -0.05em;
-    line-height: 1.02;
+    letter-spacing: -0.06em;
+    line-height: .98;
     margin: 0;
   }}
+
   .siteformo-hero h1 {{
-    font-size: clamp(42px, 6vw, 74px);
-    max-width: 780px;
+    font-size: clamp(44px, 6.4vw, 82px);
+    max-width: 850px;
   }}
+
   .siteformo-hero p {{
     color: var(--sf-muted);
-    font-size: 19px;
-    max-width: 620px;
-    margin: 22px 0 30px;
+    font-size: clamp(18px, 2vw, 21px);
+    max-width: 640px;
+    margin: 24px 0 32px;
   }}
+
   .siteformo-actions {{
     display: flex;
     gap: 14px;
     flex-wrap: wrap;
   }}
+
   .siteformo-visual {{
-    min-height: 420px;
-    border-radius: 34px;
-    background:
-      radial-gradient(circle at 22% 18%, rgba(255,255,255,.95), transparent 28%),
-      linear-gradient(135deg, var(--sf-primary), #111827);
-    box-shadow: 0 28px 80px rgba(15, 23, 42, .18);
+    min-height: 450px;
+    border-radius: var(--sf-radius-xl);
+    background: var(--sf-gradient-premium);
+    box-shadow: 0 34px 100px rgba(15, 23, 42, .22);
     position: relative;
     overflow: hidden;
+    transform-style: preserve-3d;
+    transition: transform .6s ease, box-shadow .6s ease;
   }}
+
+  .siteformo-visual::before {{
+    content: "";
+    position: absolute;
+    inset: 26px;
+    border-radius: 32px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.25), rgba(255,255,255,.08)),
+      rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.32);
+    backdrop-filter: blur(18px);
+  }}
+
   .siteformo-visual::after {{
     content: "";
     position: absolute;
-    inset: 42px;
-    border-radius: 26px;
-    border: 1px solid rgba(255,255,255,.35);
-    background: rgba(255,255,255,.12);
+    left: 58px;
+    right: 58px;
+    bottom: 62px;
+    height: 150px;
+    border-radius: 28px;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,.92) 0 30%, rgba(255,255,255,.38) 30% 100%);
+    box-shadow: 0 22px 60px rgba(2,6,23,.22);
+    opacity: .92;
   }}
+
+  .siteformo-visual:hover {{
+    transform: translateY(-8px) rotateX(1deg) rotateY(-1deg) scale(1.015);
+    box-shadow: 0 42px 115px rgba(15, 23, 42, .28);
+  }}
+
   .siteformo-section {{
-    padding: 76px 0;
+    padding: var(--sf-section-space) 0;
+    position: relative;
   }}
+
   .siteformo-section h2 {{
-    font-size: clamp(32px, 4vw, 52px);
-    max-width: 740px;
+    font-size: clamp(34px, 4.3vw, 58px);
+    max-width: 780px;
   }}
+
   .siteformo-section-intro {{
     color: var(--sf-muted);
     font-size: 18px;
-    max-width: 680px;
-    margin: 18px 0 34px;
+    max-width: 700px;
+    margin: 20px 0 38px;
   }}
+
   .siteformo-grid {{
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 22px;
+    gap: 24px;
   }}
+
   .siteformo-card {{
     background: var(--sf-card);
     border: 1px solid var(--sf-border);
     border-radius: var(--sf-radius);
-    padding: 28px;
-    box-shadow: 0 16px 45px rgba(15, 23, 42, .06);
+    padding: 30px;
+    box-shadow: var(--sf-shadow-soft);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    position: relative;
+    overflow: hidden;
+    transition: transform .3s ease, box-shadow .3s ease, border-color .3s ease;
+    will-change: transform;
   }}
+
+  .siteformo-card::before {{
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--sf-primary) 10%, transparent), transparent 45%);
+    opacity: 0;
+    transition: opacity .3s ease;
+    pointer-events: none;
+  }}
+
+  .siteformo-card:hover {{
+    transform: translateY(-10px);
+    box-shadow: var(--sf-shadow-hover);
+    border-color: color-mix(in srgb, var(--sf-primary) 36%, var(--sf-border));
+  }}
+
+  .siteformo-card:hover::before {{
+    opacity: 1;
+  }}
+
   .siteformo-card h3 {{
-    font-size: 21px;
+    font-size: 22px;
+    letter-spacing: -0.03em;
     margin: 0 0 10px;
+    position: relative;
   }}
+
   .siteformo-card p {{
     color: var(--sf-muted);
     margin: 0;
+    position: relative;
   }}
+
   .siteformo-trust {{
-    background: #0f172a;
+    background: var(--sf-gradient-dark);
     color: #fff;
-    border-radius: 36px;
-    padding: 42px;
+    border-radius: var(--sf-radius-xl);
+    padding: 50px;
+    box-shadow: 0 28px 90px rgba(2, 6, 23, .24);
+    position: relative;
+    overflow: hidden;
   }}
+
+  .siteformo-trust::before {{
+    content: "";
+    position: absolute;
+    width: 420px;
+    height: 420px;
+    border-radius: 999px;
+    right: -140px;
+    top: -180px;
+    background: color-mix(in srgb, var(--sf-primary) 32%, transparent);
+    filter: blur(22px);
+  }}
+
+  .siteformo-trust > * {{
+    position: relative;
+    z-index: 1;
+  }}
+
   .siteformo-trust-grid {{
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 18px;
   }}
+
+  .siteformo-stat {{
+    padding: 20px;
+    border-radius: 24px;
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.12);
+  }}
+
   .siteformo-stat strong {{
     display: block;
-    font-size: 32px;
+    font-size: 34px;
+    letter-spacing: -0.04em;
   }}
+
   .siteformo-stat span {{
     color: #cbd5e1;
     font-size: 14px;
   }}
+
   .siteformo-about {{
     display: grid;
     grid-template-columns: .85fr 1.15fr;
-    gap: 42px;
+    gap: 46px;
     align-items: center;
   }}
+
   .siteformo-faq-item {{
     border-top: 1px solid var(--sf-border);
-    padding: 22px 0;
+    padding: 24px 0;
+    transition: padding-left .25s ease, border-color .25s ease;
   }}
+
+  .siteformo-faq-item:hover {{
+    padding-left: 12px;
+    border-color: color-mix(in srgb, var(--sf-primary) 42%, var(--sf-border));
+  }}
+
   .siteformo-faq-item h3 {{
     margin: 0 0 8px;
+    letter-spacing: -0.025em;
   }}
+
   .siteformo-faq-item p {{
     margin: 0;
     color: var(--sf-muted);
   }}
+
   .siteformo-final-cta {{
-    background: linear-gradient(135deg, var(--sf-primary), #111827);
+    background:
+      radial-gradient(circle at 18% 14%, rgba(255,255,255,.35), transparent 26%),
+      linear-gradient(135deg, var(--sf-primary), #111827);
     color: #fff;
-    border-radius: 38px;
-    padding: 58px;
+    border-radius: var(--sf-radius-xl);
+    padding: 66px;
     text-align: center;
+    box-shadow: 0 30px 95px color-mix(in srgb, var(--sf-primary) 18%, rgba(15, 23, 42, .25));
+    overflow: hidden;
+    position: relative;
   }}
+
+  .siteformo-final-cta::after {{
+    content: "";
+    position: absolute;
+    inset: auto -90px -150px auto;
+    width: 360px;
+    height: 360px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.18);
+    filter: blur(12px);
+  }}
+
+  .siteformo-final-cta > * {{
+    position: relative;
+    z-index: 1;
+  }}
+
   .siteformo-final-cta h2 {{
-    font-size: clamp(34px, 5vw, 58px);
-    letter-spacing: -0.05em;
-    margin: 0 0 14px;
+    font-size: clamp(36px, 5vw, 64px);
+    letter-spacing: -0.06em;
+    line-height: .98;
+    margin: 0 0 16px;
   }}
+
   .siteformo-final-cta p {{
-    color: rgba(255,255,255,.82);
-    max-width: 620px;
-    margin: 0 auto 28px;
+    color: rgba(255,255,255,.84);
+    max-width: 640px;
+    margin: 0 auto 30px;
+    font-size: 18px;
   }}
+
   .siteformo-footer {{
-    padding: 36px 0;
+    padding: 40px 0;
     color: var(--sf-muted);
     font-size: 14px;
   }}
-  @media (max-width: 820px) {{
+
+  .siteformo-reveal {{
+    opacity: 0;
+    transform: translateY(34px);
+    transition: opacity .72s ease, transform .72s ease;
+  }}
+
+  .siteformo-reveal.siteformo-visible {{
+    opacity: 1;
+    transform: translateY(0);
+  }}
+
+  .siteformo-reveal-delay-1 {{ transition-delay: .08s; }}
+  .siteformo-reveal-delay-2 {{ transition-delay: .16s; }}
+  .siteformo-reveal-delay-3 {{ transition-delay: .24s; }}
+
+  @media (prefers-reduced-motion: reduce) {{
+    html {{ scroll-behavior: auto; }}
+    .siteformo-reveal,
+    .siteformo-card,
+    .siteformo-button,
+    .siteformo-button-secondary,
+    .siteformo-visual,
+    .siteformo-faq-item {{
+      transition: none !important;
+      transform: none !important;
+    }}
+  }}
+
+  @media (max-width: 920px) {{
     .siteformo-menu {{
       display: none;
     }}
@@ -959,13 +1206,27 @@ class GenerationService:
       grid-template-columns: 1fr;
     }}
     .siteformo-hero {{
-      padding-top: 58px;
+      padding-top: 62px;
     }}
     .siteformo-visual {{
-      min-height: 280px;
+      min-height: 300px;
     }}
+    .siteformo-trust,
     .siteformo-final-cta {{
-      padding: 36px 22px;
+      padding: 38px 24px;
+    }}
+  }}
+
+  @media (max-width: 520px) {{
+    .siteformo-container {{
+      width: min(100% - 28px, 1160px);
+    }}
+    .siteformo-actions {{
+      flex-direction: column;
+    }}
+    .siteformo-button,
+    .siteformo-button-secondary {{
+      width: 100%;
     }}
   }}
 </style>
@@ -1134,6 +1395,39 @@ class GenerationService:
   </div>
 </footer>
 </div>
+""".strip()
+
+
+    def _component_animation_script(self) -> str:
+        return """
+<script>
+(function () {
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const targets = document.querySelectorAll('.siteformo-hero, .siteformo-section, .siteformo-card, .siteformo-trust, .siteformo-final-cta');
+
+  targets.forEach((element, index) => {
+    element.classList.add('siteformo-reveal');
+    if (index % 3 === 1) element.classList.add('siteformo-reveal-delay-1');
+    if (index % 3 === 2) element.classList.add('siteformo-reveal-delay-2');
+  });
+
+  if (reduceMotion || !('IntersectionObserver' in window)) {
+    targets.forEach(element => element.classList.add('siteformo-visible'));
+    return;
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('siteformo-visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -60px 0px' });
+
+  targets.forEach(element => observer.observe(element));
+})();
+</script>
 """.strip()
 
 
