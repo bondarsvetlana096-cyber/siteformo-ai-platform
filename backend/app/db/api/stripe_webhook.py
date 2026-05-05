@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.session import get_db
 from app.models.order import Order
-from app.services import generation_service
 from app.services.pdf_service import create_divi_pdf
 
 
@@ -401,6 +400,7 @@ async def stripe_webhook(
             or _safe_get(_safe_get(session, "customer_details", {}) or {}, "email")
         )
 
+        payment_stage = _safe_get(metadata, "payment_stage", "deposit") or "deposit"
         tier = _safe_get(metadata, "tier", "") or _safe_get(metadata, "package_name", "")
         deposit_eur = _safe_get(metadata, "deposit_eur") or amount_eur
 
@@ -410,8 +410,6 @@ async def stripe_webhook(
         print("Customer email:", customer_email)
         print("Tier:", tier)
         print("Deposit EUR:", deposit_eur)
-
-        payment_type = _safe_get(metadata, "type", "deposit") or "deposit"
 
         if not order_id:
             print("❌ No order_id found in Stripe metadata or client_reference_id")
@@ -436,12 +434,14 @@ async def stripe_webhook(
             customer_email = contact["client_email"]
 
         try:
-            if payment_type == "final_payment":
+            if payment_stage == "final_balance":
                 _set_if_exists(order, "status", "DELIVERED")
                 _set_if_exists(order, "payment_status", "FINAL_PAID")
                 _set_if_exists(order, "final_payment_paid", True)
-                _set_if_exists(order, "final_paid_at", __import__("datetime").datetime.datetime.utcnow())
+                _set_if_exists(order, "final_payment_eur", amount_eur)
             else:
+                # Deposit only unlocks the extended questionnaire.
+                # It must NOT start preview or full generation.
                 _set_if_exists(order, "status", "APPROVED")
                 _set_if_exists(order, "payment_status", "PAID")
                 _set_if_exists(order, "deposit_paid", True)
@@ -462,33 +462,32 @@ async def stripe_webhook(
             print("❌ Failed to update order:", str(e))
             raise HTTPException(status_code=500, detail="Failed to update order")
 
-        if payment_type == "final_payment":
-            print("✅ Final payment received. Order marked as delivered.")
-            return {"status": "ok", "type": "final_payment", "order_id": order_id}
-
-        try:
-            owner_sent = send_owner_payment_email(
-                order_id=order_id,
-                customer_email=customer_email,
-                tier=tier,
-                deposit_eur=deposit_eur,
-                order=order,
-            )
-            print("Owner payment email sent:", owner_sent)
-
-            if customer_email:
-                client_sent = send_client_payment_email(
-                    customer_email=customer_email,
+        if payment_stage != "final_balance":
+            try:
+                owner_sent = send_owner_payment_email(
                     order_id=order_id,
+                    customer_email=customer_email,
                     tier=tier,
                     deposit_eur=deposit_eur,
+                    order=order,
                 )
-                print("Client payment email sent:", client_sent)
-            else:
-                print("⚠️ Client email missing. Client email not sent.")
+                print("Owner payment email sent:", owner_sent)
 
-        except Exception as e:
-            print("⚠️ Payment email failed, but order is already approved:", str(e))
+                if customer_email:
+                    client_sent = send_client_payment_email(
+                        customer_email=customer_email,
+                        order_id=order_id,
+                        tier=tier,
+                        deposit_eur=deposit_eur,
+                    )
+                    print("Client payment email sent:", client_sent)
+                else:
+                    print("⚠️ Client email missing. Client email not sent.")
+
+            except Exception as e:
+                print("⚠️ Payment email failed, but order is already approved:", str(e))
+        else:
+            print("✅ Final payment received. Delivery can be unlocked.")
 
     return {"status": "ok"}
 

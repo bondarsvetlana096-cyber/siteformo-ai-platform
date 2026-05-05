@@ -1,9 +1,15 @@
 import inspect
 import logging
 import os
+import asyncio
+import threading
 import base64
+import uuid
 from datetime import datetime
 from html import escape
+from urllib.parse import quote
+
+import requests
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
@@ -11,6 +17,11 @@ from sqlalchemy.orm import Session
 
 from app.models.order import FinalPackage, Order, OrderStatus
 from app.services.prompt_service import build_ai_prompt, build_preview_variation_prompts
+from app.services.quality_review_service import review_site
+from app.services.auto_improvement_service import auto_improve
+from app.services.technical_check_service import technical_check_preview
+from app.services.pre_delivery_check_service import decide_preview_status
+from app.services.quality_package_rules import get_package_rules
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +72,10 @@ class GenerationService:
         extended_brief: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Builds a structured preview payload.
+        Builds a structured preview payload with real OpenAI-generated homepage screenshot concepts.
 
-        At this stage it intentionally returns preview prompts/placeholders instead of
-        claiming that real screenshots were generated. The next implementation step can
-        replace preview_url values with uploaded OpenAI-generated image URLs.
+        If OpenAI image generation or public asset upload is unavailable, the method falls
+        back to the existing lightweight SVG previews instead of breaking the order flow.
         """
         extended_brief = extended_brief or {}
         logo_ordered = bool(extended_brief.get("logo_ordered"))
@@ -76,18 +86,34 @@ class GenerationService:
 
         previews = []
         for index, item in enumerate(prompts, start=1):
-            screenshot_url = self._build_screenshot_preview_url(project_summary, item, index)
+            screenshot_url, image_source = self._generate_or_fallback_preview_image(
+                project_summary=project_summary,
+                item=item,
+                index=index,
+                image_kind="homepage",
+            )
+            preview_id = f"design_{index}"
+            device_screenshots = self._schedule_device_screenshots_if_enabled(
+                url=screenshot_url,
+                order_id=str(project_summary.get("order_id") or "unknown-order"),
+                preview_id=preview_id,
+            )
+
             previews.append(
                 {
-                    "id": f"design_{index}",
+                    "id": preview_id,
                     "type": "homepage_screenshot",
                     "label": item["label"],
                     "style": item["style"],
-                    "color_direction": item["color_direction"],
+                    "color_direction": item.get("color_direction", ""),
                     "prompt": item["prompt"],
                     "preview_url": screenshot_url,
                     "screenshot_url": screenshot_url,
                     "image_url": screenshot_url,
+                    "desktop_image_url": device_screenshots.get("desktop_image_url") or screenshot_url,
+                    "mobile_image_url": device_screenshots.get("mobile_image_url") or screenshot_url,
+                    "screenshots_status": device_screenshots.get("status"),
+                    "image_source": image_source,
                     "status": "READY",
                 }
             )
@@ -96,6 +122,11 @@ class GenerationService:
         if logo_ordered:
             logo_prompts = self._build_logo_prompts(project_summary)
             for index, item in enumerate(logo_prompts, start=1):
+                logo_url, logo_source = self._generate_or_fallback_logo_image(
+                    project_summary=project_summary,
+                    item=item,
+                    index=index,
+                )
                 logo_previews.append(
                     {
                         "id": f"logo_{index}",
@@ -103,8 +134,9 @@ class GenerationService:
                         "label": item["label"],
                         "style": item["style"],
                         "prompt": item["prompt"],
-                        "preview_url": self._svg_data_url(item["label"], item["style"], ["#ffffff", "#f8fafc", "#111827", "#111827"], "Logo concept"),
-                        "image_url": self._svg_data_url(item["label"], item["style"], ["#ffffff", "#f8fafc", "#111827", "#111827"], "Logo concept"),
+                        "preview_url": logo_url,
+                        "image_url": logo_url,
+                        "image_source": logo_source,
                         "status": "READY",
                     }
                 )
@@ -149,6 +181,147 @@ class GenerationService:
 
         logger.info("Design previews prepared for order %s", _safe_get(order, "id"))
         return preview_payload
+
+
+    def _extract_package_for_quality(self, order: Order) -> str:
+        """
+        Normalise package/tier for the final HTML quality gate.
+        Supports both public package names and backend tier names.
+        """
+        extended_brief = (
+            getattr(order, "extended_brief", None)
+            or getattr(order, "brief_answers", None)
+            or {}
+        )
+
+        if isinstance(extended_brief, dict):
+            value = (
+                extended_brief.get("package_key")
+                or extended_brief.get("plan")
+                or extended_brief.get("package")
+                or extended_brief.get("tier")
+            )
+            if value:
+                return str(value).strip().lower()
+
+        value = (
+            getattr(order, "package_key", None)
+            or getattr(order, "recommended_tier", None)
+            or getattr(order, "tier", None)
+            or "starter"
+        )
+        return str(value).strip().lower()
+
+    def _run_final_html_quality_pipeline(
+        self,
+        order: Order,
+        html: str,
+    ) -> Dict[str, Any]:
+        """
+        Runs quality checks against the real final generated HTML.
+
+        This is the important production layer:
+        final HTML -> technical check -> AI review -> auto-fix loop -> final decision.
+        """
+        extended_brief = (
+            getattr(order, "extended_brief", None)
+            or getattr(order, "brief_answers", None)
+            or {}
+        )
+        if not isinstance(extended_brief, dict):
+            extended_brief = {"raw_brief": str(extended_brief)}
+
+        package_value = self._extract_package_for_quality(order)
+        rules = get_package_rules(package_value)
+
+        package = str(rules.get("package") or package_value or "starter")
+        target_score = float(rules.get("target_score") or 7.5)
+        max_iterations = int(rules.get("max_quality_iterations") or rules.get("max_iterations") or 1)
+        max_warnings = int(rules.get("max_warnings") or 5)
+
+        current_html = html or ""
+        history: List[Dict[str, Any]] = []
+        final_decision: Dict[str, Any] = {
+            "status": "MANUAL_REVIEW_REQUIRED",
+            "ready_to_send": False,
+            "overall_score": 0,
+            "critical_errors": ["No quality decision produced"],
+            "warnings": [],
+        }
+
+        for attempt in range(0, max_iterations + 1):
+            preview_like_payload = {
+                "id": "final_html",
+                "type": "final_divi_html",
+                "label": "Final generated website",
+                "prompt": current_html,
+                "html": current_html,
+            }
+
+            # Reuse your existing technical checker safely.
+            technical = technical_check_preview(preview_like_payload, extended_brief)
+
+            # Review the actual HTML, not just the concept prompt.
+            review = review_site(
+                site_content=current_html,
+                brief=extended_brief,
+                package=package,
+                target_score=target_score,
+            )
+
+            decision = decide_preview_status(
+                technical,
+                review,
+                target_score,
+                max_warnings,
+            )
+
+            history.append(
+                {
+                    "attempt": attempt,
+                    "technical": technical,
+                    "review": review,
+                    "decision": decision,
+                }
+            )
+
+            final_decision = decision
+
+            if decision.get("ready_to_send"):
+                break
+
+            if attempt >= max_iterations:
+                break
+
+            regeneration_prompt = (
+                review.get("regeneration_prompt")
+                or "Improve this final website HTML with stronger offer clarity, hero, CTA, trust elements, mobile readiness and package fit."
+            )
+
+            current_html = auto_improve(
+                site_text=current_html,
+                feedback_prompt=regeneration_prompt,
+                brief=extended_brief,
+                package=package,
+            )
+
+        ready = bool(final_decision.get("ready_to_send"))
+        status = "READY_TO_SEND" if ready else "MANUAL_REVIEW_REQUIRED"
+
+        return {
+            "status": status,
+            "ready_to_send": ready,
+            "package": package,
+            "target_score": target_score,
+            "max_iterations": max_iterations,
+            "final_score": float(final_decision.get("overall_score") or 0),
+            "critical_errors": final_decision.get("critical_errors") or [],
+            "warnings": final_decision.get("warnings") or [],
+            "history": history,
+            "final_decision": final_decision,
+            "html": current_html,
+        }
+
 
     # ---------------------------------------------------------------------
     # NEW FLOW: FULL GENERATION AFTER DESIGN APPROVAL
@@ -242,8 +415,15 @@ class GenerationService:
         note: str = "Generated automatically after owner approval.",
     ) -> FinalPackage:
         """
-        Creates a final Divi-ready package after approval.
-        Safe fallback: if OpenAI fails, still creates a usable package.
+        Creates a final Divi-ready package after design approval.
+
+        NEW:
+        The generated final HTML now passes through the SiteFormo quality pipeline:
+        technical check -> AI review -> auto-improvement loop -> final gate.
+
+        If the HTML is not ready after the package's max quality attempts, the order
+        is marked MANUAL_REVIEW_REQUIRED and the best improved HTML is still saved
+        for owner review.
         """
 
         existing_package = (
@@ -254,7 +434,10 @@ class GenerationService:
         )
 
         if existing_package:
-            order.status = OrderStatus.FINAL_READY
+            try:
+                order.status = OrderStatus.FINAL_READY
+            except Exception:
+                self._set_if_exists(order, "status", "FINAL_READY")
             db.commit()
             db.refresh(order)
             return existing_package
@@ -264,25 +447,65 @@ class GenerationService:
             or _safe_get(order, "selected_design_url")
             or "A"
         )
-        divi_html = self._generate_divi_html(order)
+
+        raw_divi_html = self._generate_divi_html(order)
+
+        quality_result = self._run_final_html_quality_pipeline(order, raw_divi_html)
+        final_divi_html = quality_result["html"]
+
         brief_markdown = self._build_brief_markdown(order)
+
+        quality_report_markdown = (
+            "\n\n---\n"
+            "## SiteFormo Final HTML Quality Report\n"
+            f"- Status: {quality_result.get('status')}\n"
+            f"- Ready to send: {quality_result.get('ready_to_send')}\n"
+            f"- Package: {quality_result.get('package')}\n"
+            f"- Target score: {quality_result.get('target_score')}\n"
+            f"- Final score: {quality_result.get('final_score')}\n"
+            f"- Critical errors: {quality_result.get('critical_errors')}\n"
+            f"- Warnings: {quality_result.get('warnings')}\n"
+        )
 
         package = FinalPackage(
             order_id=order.id,
             selected_concept_label=str(selected_concept_label),
-            divi_html=divi_html,
-            brief_markdown=brief_markdown,
-            notes=note,
+            divi_html=final_divi_html,
+            brief_markdown=brief_markdown + quality_report_markdown,
+            notes=(
+                note
+                + f"\n\nFinal HTML quality status: {quality_result.get('status')}. "
+                + f"Final score: {quality_result.get('final_score')}."
+            ),
         )
 
         db.add(package)
-        order.status = OrderStatus.FINAL_READY
+
+        self._set_if_exists(order, "final_quality_report", quality_result)
+
+        if quality_result.get("ready_to_send"):
+            try:
+                order.status = OrderStatus.FINAL_PAYMENT_REQUIRED
+            except Exception:
+                self._set_if_exists(order, "status", "FINAL_PAYMENT_REQUIRED")
+            self._set_if_exists(order, "generation_status", "FINAL_PAYMENT_REQUIRED")
+        else:
+            try:
+                order.status = OrderStatus.MANUAL_REVIEW_REQUIRED
+            except Exception:
+                self._set_if_exists(order, "status", "MANUAL_REVIEW_REQUIRED")
+            self._set_if_exists(order, "generation_status", "MANUAL_REVIEW_REQUIRED")
 
         db.commit()
         db.refresh(order)
         db.refresh(package)
 
-        logger.info("Final package generated for order %s", order.id)
+        logger.info(
+            "Final package generated for order %s with quality status %s and score %s",
+            order.id,
+            quality_result.get("status"),
+            quality_result.get("final_score"),
+        )
 
         return package
 
@@ -603,6 +826,332 @@ class GenerationService:
             if isinstance(item, dict) and item.get("id") == answer_id:
                 return item.get("selected") or item.get("extra") or item.get("other")
         return None
+
+
+    def _schedule_device_screenshots_if_enabled(
+        self,
+        url: str,
+        order_id: str,
+        preview_id: str,
+    ) -> Dict[str, str]:
+        """
+        Optional Playwright screenshot hook.
+
+        By default this does NOT block preview generation. If you enable
+        SITEFORMO_ENABLE_PLAYWRIGHT_SCREENSHOTS=true and have
+        app/services/screenshot_service.py installed, screenshots are generated
+        in a background thread so FastAPI/Railway does not crash from asyncio.run()
+        inside an existing event loop.
+
+        The immediate payload still returns desktop_image_url/mobile_image_url
+        as the generated preview URL, so the UI and email keep working while
+        background screenshots are being prepared.
+        """
+        enabled = os.getenv("SITEFORMO_ENABLE_PLAYWRIGHT_SCREENSHOTS", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+        if not enabled:
+            return {
+                "status": "disabled",
+                "desktop_image_url": url,
+                "mobile_image_url": url,
+            }
+
+        try:
+            from app.services.screenshot_service import generate_screenshots
+
+            def _runner() -> None:
+                try:
+                    asyncio.run(
+                        generate_screenshots(
+                            url=url,
+                            order_id=order_id,
+                            preview_id=preview_id,
+                        )
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Background screenshot generation failed for order %s preview %s: %s",
+                        order_id,
+                        preview_id,
+                        exc,
+                    )
+
+            threading.Thread(target=_runner, daemon=True).start()
+            return {
+                "status": "queued",
+                "desktop_image_url": url,
+                "mobile_image_url": url,
+            }
+        except Exception as exc:
+            logger.exception(
+                "Could not schedule screenshot generation for order %s preview %s: %s",
+                order_id,
+                preview_id,
+                exc,
+            )
+            return {
+                "status": "failed_to_schedule",
+                "desktop_image_url": url,
+                "mobile_image_url": url,
+            }
+
+    def _generate_or_fallback_preview_image(
+        self,
+        project_summary: Dict[str, Any],
+        item: Dict[str, str],
+        index: int,
+        image_kind: str = "homepage",
+    ) -> tuple[str, str]:
+        """Generate one real OpenAI homepage preview image and return a public URL when possible."""
+        fallback_url = self._build_screenshot_preview_url(project_summary, item, index)
+
+        if not self.client:
+            logger.warning("OPENAI_API_KEY is missing. Using SVG fallback for design preview %s.", index)
+            return fallback_url, "svg_fallback_no_openai_key"
+
+        prompt = self._build_openai_homepage_image_prompt(project_summary, item, index)
+
+        try:
+            image_bytes = self._generate_openai_image_bytes(prompt)
+            if not image_bytes:
+                return fallback_url, "svg_fallback_empty_openai_image"
+
+            public_url = self._store_generated_image(
+                image_bytes=image_bytes,
+                order_id=str(project_summary.get("order_id") or "unknown-order"),
+                filename=f"design-preview-{index}.png",
+                content_type="image/png",
+            )
+            return public_url, "openai_image"
+        except Exception as exc:
+            logger.exception("OpenAI design preview image generation failed for option %s: %s", index, exc)
+            return fallback_url, "svg_fallback_openai_error"
+
+    def _build_openai_homepage_image_prompt(
+        self,
+        project_summary: Dict[str, Any],
+        item: Dict[str, str],
+        index: int,
+    ) -> str:
+        business_name = str(project_summary.get("business_name") or "Client business")
+        goal = str(project_summary.get("main_goal") or "get more clients")
+        style = str(item.get("style") or "modern premium")
+        colors = str(item.get("color_direction") or "clean premium palette")
+        plan = str(project_summary.get("plan") or "website package")
+        pages = project_summary.get("pages") or []
+        page_hint = ", ".join([str(p.get("name") or p) for p in pages[:5]]) if isinstance(pages, list) else str(pages)
+        detailed_brief = str(item.get("prompt") or "")
+
+        return f"""
+Create a HIGH-END, REALISTIC website homepage screenshot.
+
+CRITICAL RULES:
+- This must look like a REAL live website, not a concept
+- No mockups
+- No dribbble-style compositions
+- No UI kits
+- No device frames, no iPhone frames, no laptop frames
+- No floating or abstract layouts
+- No fake UI frames
+- No blurred text
+- No lorem ipsum
+- No placeholders like "Your business here"
+- All visible text must be readable and realistic
+- Do not mention AI, OpenAI, SiteFormo, templates, prompts, or placeholders
+
+STRUCTURE REQUIREMENTS:
+- Top navigation with logo and menu items
+- Hero section with strong headline, short subheadline, and primary CTA button
+- Services or features section with 3-4 cards
+- Trust section with reviews, stats, awards, partner logos, or credibility proof
+- About or explanation block
+- Final CTA section
+
+LAYOUT RULES:
+- Clean modern layout like a premium Webflow or Framer site
+- Proper spacing between sections
+- Clear visual hierarchy
+- Large readable headings
+- Professional typography
+- Realistic alignment and spacing
+- Mobile-first layout feeling
+- Premium, trustworthy, conversion-focused look
+
+TEXT RULES:
+- Use real English marketing text
+- Headlines must sound like real businesses
+- CTA must be realistic, for example "Get a quote", "Book a call", or "Start your project"
+- Copy should match the business goal
+
+BUSINESS:
+{business_name}
+
+GOAL:
+{goal}
+
+PACKAGE / PLAN:
+{plan}
+
+PAGE / CONTENT HINTS:
+{page_hint}
+
+STYLE DIRECTION:
+{style}
+
+COLOR DIRECTION:
+{colors}
+
+DETAILED BRIEF:
+{detailed_brief}
+
+OUTPUT:
+A realistic full homepage screenshot that looks ready to go live.
+The result should look like a premium website built by a professional agency and ready to be published.
+"""
+
+    def _generate_or_fallback_logo_image(
+        self,
+        project_summary: Dict[str, Any],
+        item: Dict[str, str],
+        index: int,
+    ) -> tuple[str, str]:
+        fallback_url = self._svg_data_url(
+            item["label"],
+            item["style"],
+            ["#ffffff", "#f8fafc", "#111827", "#111827"],
+            "Logo concept",
+        )
+
+        if not self.client:
+            logger.warning("OPENAI_API_KEY is missing. Using SVG fallback for logo concept %s.", index)
+            return fallback_url, "svg_fallback_no_openai_key"
+
+        prompt = self._build_openai_logo_image_prompt(project_summary, item, index)
+
+        try:
+            image_bytes = self._generate_openai_image_bytes(prompt)
+            if not image_bytes:
+                return fallback_url, "svg_fallback_empty_openai_image"
+
+            public_url = self._store_generated_image(
+                image_bytes=image_bytes,
+                order_id=str(project_summary.get("order_id") or "unknown-order"),
+                filename=f"logo-concept-{index}.png",
+                content_type="image/png",
+            )
+            return public_url, "openai_image"
+        except Exception as exc:
+            logger.exception("OpenAI logo image generation failed for option %s: %s", index, exc)
+            return fallback_url, "svg_fallback_openai_error"
+
+    def _generate_openai_image_bytes(self, prompt: str) -> Optional[bytes]:
+        """
+        Generate PNG bytes with the OpenAI Images API.
+
+        Uses environment overrides:
+        - OPENAI_IMAGE_MODEL, default gpt-image-1
+        - OPENAI_IMAGE_SIZE, default 1024x1024
+        - OPENAI_IMAGE_QUALITY, default medium
+        """
+        if not self.client:
+            return None
+
+        size = os.getenv("OPENAI_IMAGE_SIZE", "1024x1024").strip() or "1024x1024"
+        quality = os.getenv("OPENAI_IMAGE_QUALITY", "medium").strip() or "medium"
+
+        response = self.client.images.generate(
+            model=self.image_model,
+            prompt=prompt,
+            size=size,
+            quality=quality,
+            n=1,
+        )
+
+        image_data = response.data[0]
+        b64_json = getattr(image_data, "b64_json", None)
+        if b64_json:
+            return base64.b64decode(b64_json)
+
+        # Some compatible providers return a URL instead of b64_json.
+        image_url = getattr(image_data, "url", None)
+        if image_url:
+            downloaded = requests.get(image_url, timeout=45)
+            downloaded.raise_for_status()
+            return downloaded.content
+
+        return None
+
+    def _store_generated_image(
+        self,
+        image_bytes: bytes,
+        order_id: str,
+        filename: str,
+        content_type: str = "image/png",
+    ) -> str:
+        """
+        Upload generated preview images to Supabase Storage when configured.
+
+        Email clients need a real public URL. If Supabase public storage is not
+        configured, this returns a data URL fallback so the WordPress UI still works.
+        """
+        safe_order_id = quote(str(order_id), safe="") or "unknown-order"
+        unique_name = f"{uuid.uuid4().hex}-{filename}"
+        key = f"design-previews/{safe_order_id}/{unique_name}"
+
+        supabase_url = (os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or "").rstrip("/")
+        service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or ""
+        bucket = os.getenv("SUPABASE_STORAGE_BUCKET") or os.getenv("SUPABASE_BUCKET") or "siteformo-assets"
+
+        if supabase_url and service_key and bucket:
+            upload_url = f"{supabase_url}/storage/v1/object/{bucket}/{key}"
+            response = requests.post(
+                upload_url,
+                headers={
+                    "apikey": service_key,
+                    "Authorization": f"Bearer {service_key}",
+                    "Content-Type": content_type,
+                    "x-upsert": "true",
+                },
+                data=image_bytes,
+                timeout=45,
+            )
+            response.raise_for_status()
+            return f"{supabase_url}/storage/v1/object/public/{bucket}/{key}"
+
+        public_base_url = (os.getenv("SITEFORMO_PUBLIC_ASSET_BASE_URL") or "").rstrip("/")
+        local_dir = os.getenv("SITEFORMO_GENERATED_ASSET_DIR")
+        if public_base_url and local_dir:
+            local_root = os.path.abspath(local_dir)
+            local_path = os.path.join(local_root, key)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            with open(local_path, "wb") as f:
+                f.write(image_bytes)
+            return f"{public_base_url}/{key}"
+
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        return f"data:{content_type};base64,{encoded}"
+
+    def _build_openai_logo_image_prompt(
+        self,
+        project_summary: Dict[str, Any],
+        item: Dict[str, str],
+        index: int,
+    ) -> str:
+        business_name = str(project_summary.get("business_name") or "Client business")
+        return (
+            "Create one clean logo concept on a plain white background. "
+            "No mockup, no business card, no wall sign, no shadows, no 3D render. "
+            "The logo should be scalable and suitable for a website header. "
+            f"Business name: {business_name}. "
+            f"Logo option {index}: {item.get('label')}. "
+            f"Style: {item.get('style')}. "
+            f"Detailed brief: {item.get('prompt')}."
+        )
 
     def _svg_data_url(self, title: str, subtitle: str, palette: List[str], badge: str = "Homepage preview") -> str:
         """Create a lightweight screenshot-like SVG data URL."""

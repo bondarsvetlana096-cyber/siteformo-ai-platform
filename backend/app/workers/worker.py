@@ -9,6 +9,8 @@ from app.db.session import SessionLocal
 from app.models.order import Order
 from app.services import generation_service
 from app.services.email_service import send_email
+from app.services.design_quality_pipeline_service import DesignQualityPipelineService
+from app.services.pipeline_result_service import persist_quality_pipeline_result
 
 
 async def process_job(job):
@@ -32,15 +34,22 @@ async def process_job(job):
             order.extended_brief or {}
         )
 
-        order.status = "DESIGN_PREVIEWS_READY"
-        order.design_previews = result.get("design_previews", [])
-        order.logo_previews = result.get("logo_previews", [])
-        order.preview_generation_payload = result
-
-        db.commit()
-        db.refresh(order)
-
         print("✅ Generated previews")
+
+        quality_pipeline = DesignQualityPipelineService()
+        quality_result = quality_pipeline.run_for_order(
+            order=order,
+            preview_payload=result,
+            extended_brief=order.extended_brief or {},
+        )
+
+        persist_quality_pipeline_result(db, order, quality_result)
+
+        print(f"✅ Quality pipeline finished: {quality_result.get('status')} score={quality_result.get('average_score')}")
+
+        if quality_result.get("status") != "READY_TO_SEND":
+            print("⚠️ Preview email skipped because manual review is required")
+            return
 
         # 📧 EMAIL FIXED: first try order.client.email, then extended_brief.contact.email
         client_email = None

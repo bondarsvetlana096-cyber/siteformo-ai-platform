@@ -18,7 +18,6 @@ from app.services.launch_link_service import LaunchLinkService
 from fastapi import HTTPException
 from app.services import generation_service
 from app.services.email_service import OwnerEmailComposer, send_email
-from app.services.generation_queue_service import create_generation_job
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -290,6 +289,35 @@ def _build_final_package_from_selected_design(
     )
 
     order.status = _status("FULL_PRODUCTION_STARTED", "FINAL_READY")
+
+
+
+def _queue_final_generation_job(db: Session, order_id: str) -> None:
+    """Queue the real final-generation worker after the client selects a design."""
+    existing_job = db.execute(
+        text(
+            """
+            select id
+            from generation_jobs
+            where order_id = :order_id
+              and job_type = 'FINAL_GENERATION'
+              and status in ('PENDING', 'PROCESSING', 'COMPLETED')
+            limit 1
+            """
+        ),
+        {"order_id": str(order_id)},
+    ).first()
+
+    if not existing_job:
+        db.execute(
+            text(
+                """
+                insert into generation_jobs (order_id, job_type, status)
+                values (:order_id, 'FINAL_GENERATION', 'PENDING')
+                """
+            ),
+            {"order_id": str(order_id)},
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -586,10 +614,6 @@ async def approve_design(
     """
     order = _get_order_or_404(db, order_id)
 
-    payload_order_id = payload.get("order_id")
-    if payload_order_id and str(payload_order_id) != str(order_id):
-        raise HTTPException(status_code=400, detail="Order ID mismatch")
-
     blocked_statuses = []
     for status_name in [
         "DESIGN_APPROVED",
@@ -640,9 +664,7 @@ async def approve_design(
 
     previews = getattr(order, "design_previews", None) or []
     selected_id = (
-        payload.get("preview_id")
-        or payload.get("selected_preview_id")
-        or payload.get("selected_design_id")
+        payload.get("selected_design_id")
         or payload.get("selected_id")
         or payload.get("design_id")
     )
@@ -726,10 +748,12 @@ async def approve_design(
 
     order.status = _status("FULL_PRODUCTION_STARTED", "FINAL_READY")
 
-    db.commit()
+    # Do not create or deliver the final package here. The client selection only
+    # starts the production pipeline. A worker should process this job and later
+    # move the order to READY_FOR_REVIEW / FINAL_PAYMENT_REQUIRED.
+    _queue_final_generation_job(db, str(order.id))
 
-    # Queue final website generation. Do not generate synchronously in the HTTP request.
-    create_generation_job(str(order.id), "FINAL_GENERATION")
+    db.commit()
     db.refresh(order)
 
     return {

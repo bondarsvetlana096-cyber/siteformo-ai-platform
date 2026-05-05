@@ -1,221 +1,139 @@
-from __future__ import annotations
-
 import os
-from html import escape
+from typing import Any, Dict, Iterable, Optional
 
-import httpx
+import requests
 
-from app.core.config import settings
-from app.services.approval_service import ApprovalService
-
-
-RESEND_API_URL = "https://api.resend.com/emails"
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+EMAIL_FROM = os.getenv("EMAIL_FROM", "SiteFormo <hello@siteformo.com>")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://siteformo.com").rstrip("/")
 
 
-def _setting(name: str, default=None):
-    return os.getenv(name) or getattr(settings, name.lower(), default)
+def _safe_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-async def send_email(to: str | None, subject: str, html: str):
-    api_key = os.getenv("RESEND_API_KEY")
-    from_email = os.getenv("EMAIL_FROM") or "SiteFormo <hello@siteformo.com>"
-    owner_email = os.getenv("OWNER_EMAIL") or getattr(
-        settings,
-        "owner_email",
-        "klon97048@gmail.com",
+def _preview_image_url(preview: Any) -> Optional[str]:
+    return (
+        _safe_get(preview, "image_url")
+        or _safe_get(preview, "preview_url")
+        or _safe_get(preview, "screenshot_url")
     )
 
-    if not api_key:
-        raise RuntimeError("RESEND_API_KEY is not set")
 
-    recipient = to or owner_email
+def send_design_previews_email(order: Any, previews: Iterable[Dict[str, Any]]):
+    """
+    Sends the client the generated design preview options.
 
-    if not recipient:
-        raise RuntimeError("Email recipient is not set")
-
-    payload = {
-        "from": from_email,
-        "to": [recipient],
-        "subject": subject,
-        "html": html,
+    Expected preview shape:
+    {
+      "id": "design_1" or DB UUID,
+      "image_url": "https://.../preview.png",
+      "label": "Design option 1"
     }
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    Important: for best email rendering, image_url should be a real public HTTPS URL.
+    generation_service.py now uploads OpenAI images to Supabase Storage when these env vars exist:
+    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET.
+    """
+    if not RESEND_API_KEY:
+        raise ValueError("RESEND_API_KEY is missing")
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.post(
-            RESEND_API_URL,
-            json=payload,
-            headers=headers,
+    client_email = (
+        _safe_get(order, "client_email")
+        or _safe_get(order, "email")
+        or _safe_get(order, "contact_email")
+    )
+
+    if not client_email:
+        raise ValueError("Client email is missing")
+
+    order_id = _safe_get(order, "id") or _safe_get(order, "order_id")
+    if not order_id:
+        raise ValueError("Order ID is missing")
+
+    select_url = f"{FRONTEND_URL}/select-design?order_id={order_id}"
+
+    preview_blocks = ""
+    preview_list = list(previews or [])
+
+    for index, preview in enumerate(preview_list, start=1):
+        image_url = _preview_image_url(preview)
+        preview_id = _safe_get(preview, "id") or f"design_{index}"
+        label = _safe_get(preview, "label") or f"Design option {index}"
+        choose_url = f"{select_url}&preview_id={preview_id}"
+
+        image_html = (
+            f'<img src="{image_url}" style="max-width:100%;border-radius:10px;margin-bottom:16px;border:1px solid #eee;" />'
+            if image_url
+            else '<p style="color:#666;">Preview image is attached to your project dashboard.</p>'
         )
 
-    if response.status_code >= 300:
-        raise RuntimeError(
-            f"Resend error: {response.status_code} {response.text}"
-        )
+        preview_blocks += f"""
+        <div style="margin-bottom:32px;padding:20px;border:1px solid #ddd;border-radius:12px;">
+            <h3>{label}</h3>
+            {image_html}
+            <p>
+                <a href="{choose_url}"
+                   style="display:inline-block;background:#111;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;">
+                   Select this design
+                </a>
+            </p>
+            <p style="font-size:13px;color:#666;word-break:break-all;">
+                If the button does not work, copy this link:<br />
+                <a href="{choose_url}">{choose_url}</a>
+            </p>
+        </div>
+        """
 
-    print("EMAIL SENT ✅")
+    html = f"""
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111;max-width:760px;margin:0 auto;">
+        <h2>Your homepage design options are ready</h2>
+
+        <p>Hello,</p>
+
+        <p>
+            Based on your questionnaire, our development team prepared your first design options.
+            Please review them and select the one you want us to use for the final website.
+        </p>
+
+        <p><strong>You can select only one design.</strong></p>
+
+        {preview_blocks}
+
+        <p>
+            After you select a design, the final production stage will begin.
+            You will still have a 1-hour refund window after selection.
+        </p>
+
+        <p>
+            You can also open all options here:<br />
+            <a href="{select_url}">{select_url}</a>
+        </p>
+
+        <p>SiteFormo Team</p>
+    </div>
+    """
+
+    response = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "from": EMAIL_FROM,
+            "to": [client_email],
+            "subject": "Your SiteFormo design options are ready",
+            "html": html,
+        },
+        timeout=20,
+    )
+
+    if response.status_code >= 400:
+        raise Exception(f"Resend error: {response.text}")
 
     return response.json()
-
-
-class OwnerEmailComposer:
-    @staticmethod
-    def _owner_email() -> str:
-        return os.getenv("OWNER_EMAIL") or getattr(
-            settings,
-            "owner_email",
-            "klon97048@gmail.com",
-        )
-
-    @staticmethod
-    def compose_order_email(order) -> dict:
-        client = getattr(order, "client", None)
-
-        client_email = escape(getattr(client, "email", "") or "Not provided")
-        client_whatsapp = escape(getattr(client, "whatsapp", "") or "Not provided")
-        client_telegram = escape(getattr(client, "telegram", "") or "Not provided")
-
-        business_name = escape(getattr(order, "business_name", "") or "Not provided")
-        source_url = escape(getattr(order, "source_url", "") or "Not provided")
-        description = escape(
-            getattr(order, "desired_site_description", "") or "Not provided"
-        )
-        tier = escape(str(getattr(order, "recommended_tier", "") or "Not provided"))
-        price = escape(str(getattr(order, "estimated_price_eur", "") or "Not provided"))
-        reasoning = escape(
-            getattr(order, "pricing_reasoning", "") or "Not provided"
-        )
-
-        approve_url = ApprovalService.build_action_url(order.id, "approve")
-        reject_url = ApprovalService.build_action_url(order.id, "reject")
-
-        subject = f"SiteFormo payment approval required: {business_name}"
-
-        html = f"""
-        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;">
-            <h2>New SiteFormo Order</h2>
-
-            <h3>Client</h3>
-            <p><strong>Email:</strong> {client_email}</p>
-            <p><strong>WhatsApp:</strong> {client_whatsapp}</p>
-            <p><strong>Telegram:</strong> {client_telegram}</p>
-
-            <h3>Project</h3>
-            <p><strong>Business name:</strong> {business_name}</p>
-            <p><strong>Source URL:</strong> {source_url}</p>
-            <p><strong>Description:</strong> {description}</p>
-
-            <h3>Pricing</h3>
-            <p><strong>Recommended tier:</strong> {tier}</p>
-            <p><strong>Estimated price EUR:</strong> {price}</p>
-            <p><strong>Reasoning:</strong> {reasoning}</p>
-
-            <p style="margin-top:28px;">
-                <a href="{approve_url}" style="background:#16a34a;color:white;padding:14px 20px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:bold;">
-                    APPROVE PAYMENT
-                </a>
-
-                <a href="{reject_url}" style="background:#dc2626;color:white;padding:14px 20px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:bold;margin-left:10px;">
-                    REJECT
-                </a>
-            </p>
-
-            <p style="margin-top:24px;color:#6b7280;font-size:13px;">
-                If the approve button is clicked, the client will be allowed to continue to the extended brief and final generation flow.
-            </p>
-        </div>
-        """
-
-        return {
-            "to": OwnerEmailComposer._owner_email(),
-            "subject": subject,
-            "html": html,
-        }
-
-    @staticmethod
-    def compose_delivery_email(order, brief_markdown: str) -> dict:
-        client = getattr(order, "client", None)
-
-        client_email = escape(getattr(client, "email", "") or "Not provided")
-        business_name = escape(getattr(order, "business_name", "") or "Not provided")
-        source_url = escape(getattr(order, "source_url", "") or "Not provided")
-        description = escape(
-            getattr(order, "desired_site_description", "") or "Not provided"
-        )
-        brief = escape(brief_markdown or "No extended brief provided")
-
-        subject = f"SiteFormo final package ready: {business_name}"
-
-        html = f"""
-        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;">
-            <h2>Final SiteFormo Package Ready</h2>
-
-            <h3>Client</h3>
-            <p><strong>Email:</strong> {client_email}</p>
-
-            <h3>Project</h3>
-            <p><strong>Business name:</strong> {business_name}</p>
-            <p><strong>Source URL:</strong> {source_url}</p>
-            <p><strong>Description:</strong> {description}</p>
-
-            <h3>Extended brief</h3>
-            <pre style="white-space:pre-wrap;background:#f4f4f4;padding:16px;border-radius:8px;">{brief}</pre>
-
-            <p>The Divi 5-ready final package has been generated and is ready for visual review.</p>
-        </div>
-        """
-
-        return {
-            "to": OwnerEmailComposer._owner_email(),
-            "subject": subject,
-            "html": html,
-        }
-
-async def send_demo_email(
-    to: str,
-    subject: str,
-    title: str,
-    body_text: str,
-    cta_label: str | None = None,
-    cta_url: str | None = None,
-    footer_text: str | None = None,
-):
-    """Send a branded SiteFormo demo/follow-up email via the configured email provider."""
-    safe_title = escape(title or subject or "SiteFormo")
-    safe_body = escape(body_text or "").replace("\n", "<br>")
-    safe_footer = escape(footer_text or "")
-
-    button_html = ""
-    if cta_label and cta_url:
-        safe_cta_label = escape(cta_label)
-        safe_cta_url = escape(cta_url, quote=True)
-        button_html = f'''
-            <p style="margin-top:24px;">
-                <a href="{safe_cta_url}" style="background:#111827;color:white;padding:13px 18px;text-decoration:none;border-radius:8px;display:inline-block;font-weight:bold;">
-                    {safe_cta_label}
-                </a>
-            </p>
-        '''
-
-    footer_html = ""
-    if safe_footer:
-        footer_html = f'''
-            <p style="margin-top:28px;color:#6b7280;font-size:13px;">
-                {safe_footer}
-            </p>
-        '''
-
-    html = f'''
-    <div style="font-family:Arial,sans-serif;line-height:1.55;color:#111827;max-width:640px;margin:0 auto;">
-        <h2>{safe_title}</h2>
-        <p>{safe_body}</p>
-        {button_html}
-        {footer_html}
-    </div>
-    '''
-
-    return await send_email(to=to, subject=subject, html=html)

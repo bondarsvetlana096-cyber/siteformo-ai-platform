@@ -105,7 +105,6 @@ async def create_checkout(data: CheckoutRequest):
             ],
             metadata={
                 "order_id": order_id,
-                "type": "deposit",
                 "tier": data.tier or "",
                 "package_name": data.package_name or "",
             },
@@ -121,65 +120,67 @@ async def create_checkout(data: CheckoutRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/orders/{order_id}/create-final-checkout")
-async def create_final_checkout(order_id: str):
-    """Create Stripe Checkout for the remaining balance after final production."""
+
+class FinalCheckoutRequest(BaseModel):
+    order_id: str
+    total_amount: int = Field(..., ge=1)
+    deposit_amount: int = Field(..., ge=0)
+    customer_email: str | None = None
+    success_url: str | None = None
+    cancel_url: str | None = None
+
+
+@router.post("/create-final-checkout")
+async def create_final_checkout(data: FinalCheckoutRequest):
+    """Create Stripe Checkout for the remaining balance only.
+
+    Deposit Checkout unlocks the questionnaire. Final Checkout unlocks delivery.
+    """
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
-    # Import here to avoid changing old route dependencies.
-    from app.db.session import SessionLocal
-    from app.models.order import Order, OrderStatus
+    remaining_balance = max(int(data.total_amount) - int(data.deposit_amount), 0)
 
-    db = SessionLocal()
+    if remaining_balance <= 0:
+        raise HTTPException(status_code=400, detail="Remaining balance must be greater than zero")
+
+    success_url = data.success_url or f"{APP_BASE_URL}/final-payment-success?session_id={{CHECKOUT_SESSION_ID}}&order_id={data.order_id}"
+    cancel_url = data.cancel_url or f"{APP_BASE_URL}/final-payment-cancelled?order_id={data.order_id}"
+
     try:
-        order = db.query(Order).filter(Order.id == order_id).first()
-        if not order:
-            raise HTTPException(status_code=404, detail="Order not found")
-
-        if order.status != getattr(OrderStatus, "FINAL_PAYMENT_REQUIRED", "final_payment_required"):
-            raise HTTPException(
-                status_code=400,
-                detail="Final payment is not available for this order",
-            )
-
-        total = int(getattr(order, "estimated_price_eur", 0) or 0)
-        deposit = int(total / 2)
-        remaining = max(total - deposit, 0)
-
-        if remaining <= 0:
-            raise HTTPException(status_code=400, detail="No remaining balance")
-
-        client_email = None
-        client = getattr(order, "client", None)
-        if client:
-            client_email = getattr(client, "email", None)
-
         session = stripe.checkout.Session.create(
             mode="payment",
             payment_method_types=["card"],
-            customer_email=client_email or None,
-            client_reference_id=order_id,
+            customer_email=data.customer_email or None,
+            client_reference_id=data.order_id,
             line_items=[
                 {
                     "price_data": {
                         "currency": "eur",
                         "product_data": {
-                            "name": "Website development - final payment",
+                            "name": "SiteFormo final project balance",
                         },
-                        "unit_amount": remaining * 100,
+                        "unit_amount": remaining_balance * 100,
                     },
                     "quantity": 1,
                 }
             ],
             metadata={
-                "order_id": order_id,
-                "type": "final_payment",
+                "order_id": data.order_id,
+                "payment_stage": "final_balance",
+                "total_amount": str(data.total_amount),
+                "deposit_amount": str(data.deposit_amount),
+                "remaining_balance": str(remaining_balance),
             },
-            success_url=f"{APP_BASE_URL}/final-payment-success?order_id={order_id}",
-            cancel_url=f"{APP_BASE_URL}/processing?order_id={order_id}&payment=cancelled",
+            success_url=success_url,
+            cancel_url=cancel_url,
         )
 
-        return {"url": session.url, "checkout_url": session.url, "order_id": order_id}
-    finally:
-        db.close()
+        return {
+            "success": True,
+            "url": session.url,
+            "order_id": data.order_id,
+            "remaining_balance": remaining_balance,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
