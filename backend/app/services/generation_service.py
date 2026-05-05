@@ -941,23 +941,31 @@ class GenerationService:
     ) -> str:
         """
         Divi-level structured prompt for realistic website preview generation.
+        One call = one preview prompt.
         """
+
         divi = DiviStyleGenerationService()
+        layout_spec = divi.generate_layout_spec(project_summary, variant=index - 1)
 
-        for i in range(5):
-        layout_spec = divi.generate_layout_spec(project_summary, variant=i)
+        business_name = str(project_summary.get("business_name") or "Client business")
+        goal = str(project_summary.get("main_goal") or "get more clients")
+        style = str(item.get("style") or layout_spec.get("style") or "modern premium")
+        colors = str(
+            item.get("color_direction")
+            or layout_spec.get("design_system", {}).get("colors", {}).get("primary")
+            or "clean premium palette"
+        )
+        plan = str(project_summary.get("plan") or "website package")
+        pages = project_summary.get("pages") or []
 
-            item = {
-                "style": layout_spec.get("style"),
-                "color_direction": layout_spec["design_system"]["colors"]["primary"],
-                "prompt": str(layout_spec["sections"]),
-            }
+        page_hint = (
+            ", ".join([str(p.get("name") or p) for p in pages[:5]])
+            if isinstance(pages, list)
+            else str(pages)
+        )
 
-            prompt = self._build_openai_homepage_image_prompt(
-                project_summary,
-                item,
-                i,
-    )
+        detailed_brief = str(item.get("prompt") or "")
+        sections = [s.get("type") for s in layout_spec.get("sections", [])]
 
         return f"""
 Create a HIGH-END, REALISTIC website homepage screenshot.
@@ -968,10 +976,9 @@ CRITICAL RULES:
 - No mockups
 - No UI kits
 - No device frames
-- No fake UI
 - No blurred text
 - No lorem ipsum
-- No placeholders like "Your business here"
+- No placeholders
 - All visible text must be readable and realistic
 - Do not mention AI, OpenAI, SiteFormo, templates, prompts, or placeholders
 
@@ -988,7 +995,7 @@ REQUIRED SECTIONS:
 - Top navigation with logo and menu items
 - Hero with strong headline, subheadline, and CTA
 - Services or features section with 3-4 cards
-- Trust / proof section with reviews, stats, awards, partner logos, or credibility proof
+- Trust / proof section
 - About or explanation block
 - Final CTA section
 
@@ -1025,6 +1032,7 @@ DETAILED BRIEF:
 OUTPUT:
 A realistic full homepage screenshot that looks like a premium website built by a professional agency and ready to be published.
 """
+
 
     def _generate_or_fallback_logo_image(
         self,
