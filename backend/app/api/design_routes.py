@@ -124,7 +124,7 @@ async def approve_design(
             service.start_full_generation_for_order(
                 db=local_db,
                 order=fresh_order,
-                note="Full generation started after client selected design preview.",
+                note="Full website generation started after the client selected a design preview and confirmed the project scope.",
             )
         finally:
             local_db.close()

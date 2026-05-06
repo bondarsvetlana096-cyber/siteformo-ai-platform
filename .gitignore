@@ -21,6 +21,7 @@ qa/node_modules/
 *.env
 node_modules/
 qa/node_modules/
+*.zip
 
 # QA noise
 qa/screenshots/

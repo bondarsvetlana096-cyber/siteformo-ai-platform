@@ -68,7 +68,7 @@ async def create_checkout(data: CheckoutRequest):
 
     success_url = (
         data.success_url
-        or f"{APP_BASE_URL}/payment-success?session_id={{CHECKOUT_SESSION_ID}}&order_id={order_id}"
+        or f"{APP_BASE_URL}/design-previews?session_id={{CHECKOUT_SESSION_ID}}&order_id={order_id}"
     )
 
     cancel_url = (
@@ -96,7 +96,7 @@ async def create_checkout(data: CheckoutRequest):
                     "price_data": {
                         "currency": "eur",
                         "product_data": {
-                            "name": data.package_name or "Website deposit",
+                            "name": data.package_name or "Estimated project deposit",
                         },
                         "unit_amount": data.amount * 100,
                     },
@@ -105,7 +105,7 @@ async def create_checkout(data: CheckoutRequest):
             ],
             metadata={
                 "order_id": order_id,
-                "type": "deposit",
+                "type": "estimated_deposit",
                 "tier": data.tier or "",
                 "package_name": data.package_name or "",
             },

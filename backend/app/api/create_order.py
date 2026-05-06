@@ -10,7 +10,7 @@ router = APIRouter()
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://siteformo.com")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://ie.siteformo.com")
 
 
 class CreateOrderRequest(BaseModel):
@@ -87,11 +87,11 @@ async def create_order(data: CreateOrderRequest):
                 "source": data.source or "direct",
             },
             success_url=(
-                f"{FRONTEND_URL}/payment-success"
+                f"{FRONTEND_URL}/design-previews"
                 f"?order_id={order_id}"
                 f"&plan={package}"
                 f"&deposit={deposit}"
-                f"&total={total}"
+                f"&total={total}&stage=paid"
             ),
             cancel_url=f"{FRONTEND_URL}/?payment=cancelled",
         )
