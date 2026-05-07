@@ -68,7 +68,7 @@ async def create_checkout(data: CheckoutRequest):
 
     success_url = (
         data.success_url
-        or f"{APP_BASE_URL}/design-previews?session_id={{CHECKOUT_SESSION_ID}}&order_id={order_id}"
+         or f"{APP_BASE_URL}/payment-success?session_id={{CHECKOUT_SESSION_ID}}&order_id={order_id}"
     )
 
     cancel_url = (
