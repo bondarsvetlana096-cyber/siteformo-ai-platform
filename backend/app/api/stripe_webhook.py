@@ -191,9 +191,9 @@ Stripe payment received.
 Order status: APPROVED.
 
 IMPORTANT:
-Stripe only unlocks the follow-up questionnaire.
-Website generation does NOT start after payment.
-Generation starts only after POST /api/orders/extended-brief.
+Payment was completed through Stripe.
+The development team should review the confirmed brief and continue the order flow.
+Do not include links in emails.
 
 Payment details:
 
@@ -220,14 +220,13 @@ Scope: {scope}
 References: provided in order record, not included in email for safety
 
 Next step:
-Wait for the client to complete the follow-up questionnaire.
-No action is required from this owner email.
+Check the order in the SiteFormo admin/backend records and continue the design-preview flow.
 
 Important flow:
-1. Stripe deposit unlocks the follow-up questionnaire for the client.
-2. Full generation does NOT start after payment.
-3. Design preview generation starts only after POST /api/orders/extended-brief.
-4. The client receives the design previews link only after previews are ready.
+1. Stripe deposit confirms the order deposit.
+2. The client should continue on the website after payment.
+3. Design previews and logo options, if ordered, are prepared after project review.
+4. No links are included in this email by design.
 """
 
     return _send_resend_email(
@@ -238,7 +237,7 @@ Important flow:
 
 
 def send_client_payment_email(customer_email, order_id, tier, deposit_eur):
-    subject = "✅ Payment received — complete your SiteFormo project brief"
+    subject = "✅ SiteFormo payment received"
     deposit_line = _format_eur(deposit_eur)
 
     body = f"""
@@ -254,10 +253,10 @@ Order ID: {order_id or "Not provided"}
 
 Important next step:
 
-Please return to the SiteFormo website after payment and press the button on the payment-success page to complete your follow-up questionnaire.
+Please stay on the SiteFormo website after payment.
+The next page will guide you to continue with your design-preview step.
 
-After you complete the questionnaire, we will prepare your design previews.
-When the previews are ready, we will contact you with the next step.
+Our development team will review your confirmed project brief and prepare the next stage of your order.
 
 SiteFormo
 """
@@ -267,7 +266,6 @@ SiteFormo
         subject=subject,
         body=body,
     )
-
 
 def send_owner_generation_result_email_with_pdf(
     order,
@@ -423,12 +421,45 @@ async def stripe_webhook(
         order = _load_order(db, order_id)
 
         if not order:
-            print("❌ Order not found in database:", order_id)
-            return {
-                "status": "error",
-                "reason": "order_not_found",
-                "order_id": order_id,
-            }
+            print("⚠️ Order not found in database, but payment is real. Sending payment emails from Stripe metadata:", order_id)
+
+            try:
+                owner_sent = send_owner_payment_email(
+                    order_id=order_id,
+                    customer_email=customer_email,
+                    tier=tier,
+                    deposit_eur=deposit_eur,
+                    order=None,
+                )
+                print("Owner payment email sent without DB order:", owner_sent)
+
+                client_sent = False
+                if customer_email:
+                    client_sent = send_client_payment_email(
+                        customer_email=customer_email,
+                        order_id=order_id,
+                        tier=tier,
+                        deposit_eur=deposit_eur,
+                    )
+                    print("Client payment email sent without DB order:", client_sent)
+                else:
+                    print("⚠️ Client email missing in Stripe session. Client email not sent.")
+
+                return {
+                    "status": "ok",
+                    "warning": "order_not_found_email_fallback_used",
+                    "order_id": order_id,
+                    "owner_email_sent": owner_sent,
+                    "client_email_sent": client_sent,
+                }
+            except Exception as e:
+                print("❌ Payment received but fallback emails failed:", str(e))
+                return {
+                    "status": "ok",
+                    "warning": "order_not_found_and_fallback_email_failed",
+                    "order_id": order_id,
+                    "error": str(e),
+                }
 
         contact = _extract_order_contact(order)
 
