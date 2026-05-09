@@ -1,30 +1,22 @@
+# secrets
 .env
-backend/.env
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.db
-.venv/
-venv/
 .env.*
 !.env.example
-.pytest_cache/
-.idea/
-.vscode/
-.env
-*.env
-qa.env
-node_modules/
-qa/node_modules/
-.env
-*.env
-node_modules/
-qa/node_modules/
-*.zip
+!.env.local.example
+!.env.railway.example
 
-# QA noise
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+siteformo_local.db
+
+# node / qa
+node_modules/
 qa/screenshots/
-qa/*.png
-qa/*.jpg
-qa/*.json
+qa/reports/
+*.png
+
+# system
+.DS_Store
