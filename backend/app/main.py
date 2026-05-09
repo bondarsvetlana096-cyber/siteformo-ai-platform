@@ -1,4 +1,6 @@
 import asyncio
+import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,25 +21,27 @@ from app.api.admin_routes import router as admin_routes_router
 from app.api.create_order import router as create_order_router
 from app.api.review_routes import router as review_router
 
-# Channels
+# Safe channels
 from app.channels.health import router as health_router
-from app.channels.telegram import router as telegram_router
-from app.channels.whatsapp import router as whatsapp_router
 from app.channels.web_chat import router as web_chat_router
 
 
+def env_enabled(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
 app = FastAPI(
-    title="SiteFormo AI Sales Platform",
-    version="1.0.0",
+    title="SiteFormo Production Platform",
+    version="2.0.0",
 )
 
-# ===== FIXED CORS (ВАЖНО) =====
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://ie.siteformo.com",
         "https://siteformo.com",
         "https://www.siteformo.com",
+        "https://preview.siteformo.com",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -46,14 +50,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+static_dir = Path(__file__).resolve().parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
-# Health endpoints
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "SiteFormo AI Sales Platform"}
+    return {
+        "status": "ok",
+        "service": "SiteFormo Production Platform",
+        "logic": "questionnaire -> production -> protected preview -> revisions -> approval -> zip delivery",
+    }
 
 
 @app.get("/health")
@@ -61,15 +69,13 @@ def health():
     return {"status": "ok"}
 
 
-# ===== ROUTERS =====
+# Core routers
 app.include_router(api_router)
 app.include_router(channel_router)
 app.include_router(create_order_router)
 
 app.include_router(health_router)
 app.include_router(web_chat_router)
-app.include_router(telegram_router)
-app.include_router(whatsapp_router)
 
 app.include_router(leads_router)
 app.include_router(order_router)
@@ -79,11 +85,26 @@ app.include_router(stripe_webhook_router)
 app.include_router(admin_routes_router)
 app.include_router(review_router)
 
-# ===== STARTUP =====
+
+# Optional legacy/integration channels.
+# These are disabled by default so Telegram/OpenAI cannot break payment/review backend startup.
+if env_enabled("ENABLE_TELEGRAM_CHANNEL"):
+    from app.channels.telegram import router as telegram_router
+
+    app.include_router(telegram_router)
+
+
+if env_enabled("ENABLE_WHATSAPP_CHANNEL"):
+    from app.channels.whatsapp import router as whatsapp_router
+
+    app.include_router(whatsapp_router)
+
+
 @app.on_event("startup")
 async def startup_event():
     init_db()
 
     if settings.enable_guided_followups:
         from app.services.lead_nurturing import followup_worker
+
         asyncio.create_task(followup_worker())
