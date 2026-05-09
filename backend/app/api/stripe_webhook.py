@@ -237,13 +237,30 @@ Important flow:
 
 
 def send_client_payment_email(customer_email, order_id, tier, deposit_eur):
-    subject = "✅ SiteFormo payment received"
+    subject = "✅ Your SiteFormo project has entered production"
+
     deposit_line = _format_eur(deposit_eur)
+    tier_lower = str(tier or "").lower().strip()
+
+    if tier_lower == "starter":
+        revision_text = """
+• your package includes 1 revision round
+• revisions are intended for refinements, not complete redesigns
+"""
+    else:
+        revision_text = """
+• your package includes 2 revision rounds
+• one revision round means one grouped list of changes submitted together
+• revisions are intended for refinements, not complete redesigns
+• changing the selected design direction or rebuilding the website from scratch is not included in revisions
+"""
 
     body = f"""
-Thank you for your payment.
+Production started successfully.
 
-We have received your SiteFormo deposit.
+Your project has been added to the SiteFormo production pipeline.
+
+Our production team is now preparing your website structure, visual direction and homepage presentation based on the selections you made earlier.
 
 Payment details:
 
@@ -251,14 +268,29 @@ Package: {tier or "Unknown"}
 Deposit paid: {deposit_line}
 Order ID: {order_id or "Not provided"}
 
-Important next step:
+What happens next?
 
-Please stay on the SiteFormo website after payment.
-The next page will guide you to continue with your design-preview step.
+1. Your website enters the production phase.
 
-Our development team will review your confirmed project brief and prepare the next stage of your order.
+2. When your website preview is ready, you will receive a private review access message by email.
 
-SiteFormo
+3. You will be able to review your completed website and check pages and interactions.
+
+4. You will submit requested changes through a simple revision form.
+
+5. After your final approval, your final ZIP package will be prepared for delivery.
+
+Please note:
+
+{revision_text}
+• final ZIP/source files are delivered only after revision completion and final approval
+• please include all requested changes together whenever possible
+
+You may request cancellation within 1 hour after payment confirmation.
+If production work has not significantly started yet,
+your deposit will be refunded within 24 hours.
+
+Thank you for choosing SiteFormo.
 """
 
     return _send_resend_email(
@@ -468,7 +500,7 @@ async def stripe_webhook(
 
         try:
             if payment_type == "final_payment":
-                _set_if_exists(order, "status", "DELIVERED")
+                _set_if_exists(order, "status", "FINAL_APPROVED")
                 _set_if_exists(order, "payment_status", "FINAL_PAID")
                 _set_if_exists(order, "final_payment_paid", True)
                 _set_if_exists(order, "final_paid_at", __import__("datetime").datetime.datetime.utcnow())
@@ -494,7 +526,7 @@ async def stripe_webhook(
             raise HTTPException(status_code=500, detail="Failed to update order")
 
         if payment_type == "final_payment":
-            print("✅ Final payment received. Order marked as delivered.")
+            print("✅ Final payment received. Final delivery still requires final approval if not already recorded.")
             return {"status": "ok", "type": "final_payment", "order_id": order_id}
 
         try:

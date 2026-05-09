@@ -454,9 +454,10 @@ class GenerationService:
 
         if existing_package:
             try:
-                order.status = OrderStatus.FINAL_READY
+                order.status = OrderStatus.READY_FOR_REVIEW
             except Exception:
-                self._set_if_exists(order, "status", "FINAL_READY")
+                self._set_if_exists(order, "status", "READY_FOR_REVIEW")
+            self._set_if_exists(order, "generation_status", "READY_FOR_REVIEW")
             db.commit()
             db.refresh(order)
             return existing_package
@@ -503,11 +504,13 @@ class GenerationService:
         self._set_if_exists(order, "final_quality_report", quality_result)
 
         if quality_result.get("ready_to_send"):
+            # Current SiteFormo rule: completed website goes to protected review.
+            # Final ZIP/source delivery is locked until revision completion and final approval.
             try:
-                order.status = OrderStatus.FINAL_PAYMENT_REQUIRED
+                order.status = OrderStatus.READY_FOR_REVIEW
             except Exception:
-                self._set_if_exists(order, "status", "FINAL_PAYMENT_REQUIRED")
-            self._set_if_exists(order, "generation_status", "FINAL_PAYMENT_REQUIRED")
+                self._set_if_exists(order, "status", "READY_FOR_REVIEW")
+            self._set_if_exists(order, "generation_status", "READY_FOR_REVIEW")
         else:
             try:
                 order.status = OrderStatus.MANUAL_REVIEW_REQUIRED

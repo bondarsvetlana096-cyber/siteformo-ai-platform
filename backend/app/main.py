@@ -17,7 +17,7 @@ from app.api.payment_routes import router as payment_router
 from app.api.stripe_webhook import router as stripe_webhook_router
 from app.api.admin_routes import router as admin_routes_router
 from app.api.create_order import router as create_order_router
-from app.api.design_routes import router as design_router
+from app.api.review_routes import router as review_router
 
 # Channels
 from app.channels.health import router as health_router
@@ -77,7 +77,7 @@ app.include_router(request_router)
 app.include_router(payment_router)
 app.include_router(stripe_webhook_router)
 app.include_router(admin_routes_router)
-app.include_router(design_router)
+app.include_router(review_router)
 
 # ===== STARTUP =====
 @app.on_event("startup")

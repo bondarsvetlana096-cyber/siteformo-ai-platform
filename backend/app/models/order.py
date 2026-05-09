@@ -25,6 +25,10 @@ class OrderStatus:
     REFUND_WINDOW_ACTIVE = 'refund_window_active'
     FULL_PRODUCTION_STARTED = 'full_production_started'
     READY_FOR_REVIEW = 'ready_for_review'
+    REVISION_REQUESTED = 'revision_requested'
+    REVISION_IN_PROGRESS = 'revision_in_progress'
+    AWAITING_FINAL_APPROVAL = 'awaiting_final_approval'
+    FINAL_APPROVED = 'final_approved'
     FINAL_PAYMENT_REQUIRED = 'final_payment_required'
 
     # Legacy/fallback statuses kept for old routes
@@ -51,6 +55,8 @@ class SupportedLanguage:
 class PricingTier:
     STARTER = 'starter'
     BUSINESS = 'business'
+    REFERENCE = 'reference'
+    ADVANCED = 'advanced'
     PREMIUM = 'premium'
 
 
@@ -117,6 +123,20 @@ class Order(Base):
     refund_window_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     generation_status: Mapped[str | None] = mapped_column(String(64), index=True)
     full_generation_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    selected_example_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    viewed_examples: Mapped[list | None] = mapped_column(JSON)
+    example_tracking_payload: Mapped[dict | None] = mapped_column(JSON)
+    entry_source: Mapped[str | None] = mapped_column(String(128), index=True)
+    design_direction: Mapped[str | None] = mapped_column(String(128), index=True)
+    interaction_style: Mapped[str | None] = mapped_column(String(64), index=True)
+    production_payload: Mapped[dict | None] = mapped_column(JSON)
+    protected_preview_url: Mapped[str | None] = mapped_column(Text)
+    review_token_hash: Mapped[str | None] = mapped_column(String(128), index=True)
+    revision_rounds_allowed: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    revision_rounds_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    revision_requests: Mapped[list | None] = mapped_column(JSON)
+    final_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    final_zip_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

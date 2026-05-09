@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from app.services import generation_service
 from app.services.email_service import OwnerEmailComposer, send_email
 from app.services.generation_queue_service import create_generation_job
+from app.services.review_service import apply_creative_payload, package_revision_rounds
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -534,6 +535,7 @@ async def submit_extended_brief(payload: dict, db: Session = Depends(get_db)):
     order.status = _status("BRIEF_SUBMITTED", "APPROVED")
     _set_if_exists(order, "extended_brief", payload)
     _set_if_exists(order, "brief_answers", payload)
+    apply_creative_payload(order)
 
     # Create one queue job for this order.
     # If a PENDING / PROCESSING / COMPLETED job already exists, do not duplicate it.
@@ -742,5 +744,5 @@ async def approve_design(
         "selected_screenshot_url": selected_screenshot_url,
         "refund_window_started_at": now.isoformat(),
         "refund_window_expires_at": refund_until.isoformat(),
-        "message": "Design approved. One-hour refund window has started and full production has been queued.",
+        "message": "Design approved. Full production has been queued. After production the client receives protected review access, not final ZIP delivery.",
     }

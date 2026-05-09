@@ -1,6 +1,6 @@
 from app.services.db.postgres import engine
 from app.services.db.models import Base as LeadBase
-from app.services.db.migrations import run_lightweight_migrations
+from app.services.db.migrations import run_lightweight_migrations, run_order_logic_migrations
 
 
 def init_db() -> None:
@@ -17,5 +17,6 @@ def init_db() -> None:
         from app.models import request  # noqa: F401
 
         AppBase.metadata.create_all(bind=app_engine)
+        run_order_logic_migrations(app_engine)
     except Exception as exc:
         print(f"[DB WARNING] Guided web-chat tables were not initialized. Error: {exc}")

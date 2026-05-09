@@ -123,63 +123,13 @@ async def create_checkout(data: CheckoutRequest):
 
 @router.post("/orders/{order_id}/create-final-checkout")
 async def create_final_checkout(order_id: str):
-    """Create Stripe Checkout for the remaining balance after final production."""
-    if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="Stripe not configured")
+    """Legacy endpoint intentionally disabled.
 
-    # Import here to avoid changing old route dependencies.
-    from app.db.session import SessionLocal
-    from app.models.order import Order, OrderStatus
-
-    db = SessionLocal()
-    try:
-        order = db.query(Order).filter(Order.id == order_id).first()
-        if not order:
-            raise HTTPException(status_code=404, detail="Order not found")
-
-        if order.status != getattr(OrderStatus, "FINAL_PAYMENT_REQUIRED", "final_payment_required"):
-            raise HTTPException(
-                status_code=400,
-                detail="Final payment is not available for this order",
-            )
-
-        total = int(getattr(order, "estimated_price_eur", 0) or 0)
-        deposit = int(total / 2)
-        remaining = max(total - deposit, 0)
-
-        if remaining <= 0:
-            raise HTTPException(status_code=400, detail="No remaining balance")
-
-        client_email = None
-        client = getattr(order, "client", None)
-        if client:
-            client_email = getattr(client, "email", None)
-
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            payment_method_types=["card"],
-            customer_email=client_email or None,
-            client_reference_id=order_id,
-            line_items=[
-                {
-                    "price_data": {
-                        "currency": "eur",
-                        "product_data": {
-                            "name": "Website development - final payment",
-                        },
-                        "unit_amount": remaining * 100,
-                    },
-                    "quantity": 1,
-                }
-            ],
-            metadata={
-                "order_id": order_id,
-                "type": "final_payment",
-            },
-            success_url=f"{APP_BASE_URL}/final-payment-success?order_id={order_id}",
-            cancel_url=f"{APP_BASE_URL}/processing?order_id={order_id}&payment=cancelled",
-        )
-
-        return {"url": session.url, "checkout_url": session.url, "order_id": order_id}
-    finally:
-        db.close()
+    Current SiteFormo flow does not unlock delivery through a final-payment page.
+    The final ZIP/source package is unlocked only after protected review, revision
+    completion and explicit final approval.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy final checkout disabled. Use protected review and final approval before ZIP delivery.",
+    )

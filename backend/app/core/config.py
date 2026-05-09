@@ -128,6 +128,25 @@ class Settings(BaseSettings):
     postgresql_url: str | None = None
     supabase_db_url: str | None = None
 
+
+    # Current SiteFormo production/review logic
+    app_base_url: str | None = "https://ie.siteformo.com"
+    backend_url: str | None = None
+    design_previews_url: str | None = "https://ie.siteformo.com/design-previews/"
+    interaction_style_url: str | None = "https://ie.siteformo.com/homepage-interaction-style/"
+    production_confirmation_url: str | None = "https://ie.siteformo.com/production-confirmation/"
+    payment_success_url: str | None = "https://ie.siteformo.com/payment-success/"
+    preview_base_url: str | None = "https://preview.siteformo.com"
+    review_base_url: str | None = "https://siteformo.com/review"
+    review_signing_secret: str = "change-me-review-signing-secret"
+    starter_revision_rounds: int = 1
+    default_revision_rounds: int = 2
+    protected_review_enabled: bool = True
+    final_zip_after_approval_only: bool = True
+    example_tracking_enabled: bool = True
+    interaction_style_enabled: bool = True
+    starter_skips_interaction_style: bool = True
+
     # Telemetry
     sentry_dsn: str | None = None
     posthog_api_key: str | None = None
@@ -189,6 +208,14 @@ class Settings(BaseSettings):
         "sentry_dsn",
         "posthog_api_key",
         "posthog_host",
+        "app_base_url",
+        "backend_url",
+        "design_previews_url",
+        "interaction_style_url",
+        "production_confirmation_url",
+        "payment_success_url",
+        "preview_base_url",
+        "review_base_url",
         "turnstile_secret_key",
         "admin_api_key",
         "owner_telegram_chat_id",
