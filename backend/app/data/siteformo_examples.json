@@ -1,0 +1,134 @@
+[
+  {
+    "id": "starter_service_clean_01",
+    "package": "starter",
+    "industry_group": "local_service",
+    "title": "Clean Local Service",
+    "design_direction": "clean_simple",
+    "recommended_interaction_styles": [],
+    "complexity": 1,
+    "preview_url": "https://starter.siteformo.com/service-clean-01/",
+    "description": "Simple one-page direction for local services that need a clear offer, trust block and contact action."
+  },
+  {
+    "id": "starter_personal_brand_01",
+    "package": "starter",
+    "industry_group": "personal_brand",
+    "title": "Personal Brand Landing",
+    "design_direction": "warm_minimal",
+    "recommended_interaction_styles": [],
+    "complexity": 1,
+    "preview_url": "https://starter.siteformo.com/personal-brand-01/",
+    "description": "Focused one-page structure for consultants, freelancers and personal service providers."
+  },
+  {
+    "id": "business_law_smooth_01",
+    "package": "business",
+    "industry_group": "legal",
+    "title": "Premium Legal Service",
+    "design_direction": "minimal_premium",
+    "recommended_interaction_styles": ["smooth", "premium"],
+    "complexity": 3,
+    "preview_url": "https://business.siteformo.com/legal-premium-01/",
+    "description": "Clean, professional homepage direction for service businesses that need trust, clarity and premium positioning."
+  },
+  {
+    "id": "business_medical_smooth_01",
+    "package": "business",
+    "industry_group": "medical",
+    "title": "Private Clinic",
+    "design_direction": "clean_trust",
+    "recommended_interaction_styles": ["smooth"],
+    "complexity": 3,
+    "preview_url": "https://business.siteformo.com/clinic-01/",
+    "description": "Calm, clear and trustworthy structure for clinics, consultants and appointment-based services."
+  },
+  {
+    "id": "business_finance_premium_01",
+    "package": "business",
+    "industry_group": "finance",
+    "title": "Financial Consultant",
+    "design_direction": "corporate_premium",
+    "recommended_interaction_styles": ["smooth", "premium"],
+    "complexity": 3,
+    "preview_url": "https://business.siteformo.com/finance-premium-01/",
+    "description": "Professional direction for financial, insurance and consulting businesses where credibility matters first."
+  },
+  {
+    "id": "business_beauty_dynamic_01",
+    "package": "business",
+    "industry_group": "beauty",
+    "title": "Beauty Studio",
+    "design_direction": "soft_visual",
+    "recommended_interaction_styles": ["smooth", "dynamic"],
+    "complexity": 3,
+    "preview_url": "https://business.siteformo.com/beauty-studio-01/",
+    "description": "Elegant service presentation for beauty, wellness and appointment-based brands."
+  },
+  {
+    "id": "reference_realestate_dynamic_01",
+    "package": "reference",
+    "industry_group": "real_estate",
+    "title": "Real Estate Presentation",
+    "design_direction": "visual_editorial",
+    "recommended_interaction_styles": ["dynamic", "premium"],
+    "complexity": 4,
+    "preview_url": "https://reference.siteformo.com/realestate-01/",
+    "description": "Visual, property-focused direction with stronger presentation rhythm and premium section flow."
+  },
+  {
+    "id": "reference_restaurant_visual_01",
+    "package": "reference",
+    "industry_group": "restaurant",
+    "title": "Restaurant Experience",
+    "design_direction": "atmospheric_visual",
+    "recommended_interaction_styles": ["smooth", "dynamic"],
+    "complexity": 4,
+    "preview_url": "https://reference.siteformo.com/restaurant-01/",
+    "description": "Atmospheric direction for restaurants, cafes and hospitality businesses with strong visual presentation."
+  },
+  {
+    "id": "reference_agency_premium_01",
+    "package": "reference",
+    "industry_group": "agency",
+    "title": "Creative Agency",
+    "design_direction": "bold_editorial",
+    "recommended_interaction_styles": ["dynamic", "premium"],
+    "complexity": 4,
+    "preview_url": "https://reference.siteformo.com/agency-premium-01/",
+    "description": "Stronger visual identity for agencies, studios and creative companies that need memorable presentation."
+  },
+  {
+    "id": "advanced_saas_premium_01",
+    "package": "advanced",
+    "industry_group": "online_service",
+    "title": "Online Service Platform",
+    "design_direction": "tech_premium",
+    "recommended_interaction_styles": ["dynamic", "premium"],
+    "complexity": 5,
+    "preview_url": "https://advanced.siteformo.com/saas-premium-01/",
+    "description": "Advanced direction for online services, platforms and digital products with richer content and feature presentation."
+  },
+  {
+    "id": "advanced_education_dynamic_01",
+    "package": "advanced",
+    "industry_group": "education",
+    "title": "Education Platform",
+    "design_direction": "structured_modern",
+    "recommended_interaction_styles": ["smooth", "dynamic"],
+    "complexity": 5,
+    "preview_url": "https://advanced.siteformo.com/education-01/",
+    "description": "Structured multi-section direction for education, courses and expert-led digital services."
+  },
+  {
+    "id": "advanced_luxury_premium_01",
+    "package": "advanced",
+    "industry_group": "luxury_service",
+    "title": "Luxury Service",
+    "design_direction": "cinematic_luxury",
+    "recommended_interaction_styles": ["premium"],
+    "complexity": 5,
+    "preview_url": "https://advanced.siteformo.com/luxury-service-01/",
+    "description": "High-end visual direction for premium service brands that need cinematic depth and refined presentation."
+  }
+]

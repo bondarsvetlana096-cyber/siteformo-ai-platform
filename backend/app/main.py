@@ -20,6 +20,7 @@ from app.api.stripe_webhook import router as stripe_webhook_router
 from app.api.admin_routes import router as admin_routes_router
 from app.api.create_order import router as create_order_router
 from app.api.review_routes import router as review_router
+from app.api.example_routes import router as example_router
 
 # Safe channels
 from app.channels.health import router as health_router
@@ -32,7 +33,7 @@ def env_enabled(name: str, default: str = "false") -> bool:
 
 app = FastAPI(
     title="SiteFormo Production Platform",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 app.add_middleware(
@@ -42,6 +43,10 @@ app.add_middleware(
         "https://siteformo.com",
         "https://www.siteformo.com",
         "https://preview.siteformo.com",
+        "https://starter.siteformo.com",
+        "https://business.siteformo.com",
+        "https://reference.siteformo.com",
+        "https://advanced.siteformo.com",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -60,7 +65,8 @@ def root():
     return {
         "status": "ok",
         "service": "SiteFormo Production Platform",
-        "logic": "questionnaire -> production -> protected preview -> revisions -> approval -> zip delivery",
+        "version": "2.1.0",
+        "logic": "questionnaire -> examples -> design direction -> interaction style -> production -> protected preview -> revisions -> approval -> zip delivery",
     }
 
 
@@ -84,10 +90,11 @@ app.include_router(payment_router)
 app.include_router(stripe_webhook_router)
 app.include_router(admin_routes_router)
 app.include_router(review_router)
+app.include_router(example_router)
 
 
 # Optional legacy/integration channels.
-# These are disabled by default so Telegram/OpenAI cannot break payment/review backend startup.
+# Disabled by default so Telegram/OpenAI cannot block payment/review/example backend startup.
 if env_enabled("ENABLE_TELEGRAM_CHANNEL"):
     from app.channels.telegram import router as telegram_router
 
