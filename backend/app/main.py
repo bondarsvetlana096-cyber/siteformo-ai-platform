@@ -21,6 +21,7 @@ from app.api.admin_routes import router as admin_routes_router
 from app.api.create_order import router as create_order_router
 from app.api.review_routes import router as review_router
 from app.api.example_routes import router as example_router
+from app.api.website_analysis import router as website_analysis_router
 
 # Safe channels
 from app.channels.health import router as health_router
@@ -91,6 +92,7 @@ app.include_router(stripe_webhook_router)
 app.include_router(admin_routes_router)
 app.include_router(review_router)
 app.include_router(example_router)
+app.include_router(website_analysis_router)
 
 
 # Optional legacy/integration channels.
