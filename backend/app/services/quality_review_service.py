@@ -56,18 +56,9 @@ def _safe_json_loads(raw: str) -> Dict[str, Any]:
 
 
 def _normalise_package(package: str) -> str:
-    value = str(package or "starter").strip().lower()
+    from app.services.package_rules_service import normalize_package
 
-    if value in {"premium", "reference"}:
-        return "premium"
-
-    if value in {"custom", "advanced"}:
-        return "custom"
-
-    if value in {"starter", "business"}:
-        return value
-
-    return "starter"
+    return normalize_package(package)
 
 
 def _fallback_review(site_content: str, brief: Dict[str, Any], package: str, target_score: float) -> Dict[str, Any]:
@@ -90,7 +81,7 @@ def _fallback_review(site_content: str, brief: Dict[str, Any], package: str, tar
     if "lorem ipsum" in text or "your company" in text or "placeholder" in text:
         score -= 1.5
 
-    if package in {"premium", "custom"}:
+    if package in {"reference", "advanced"}:
         score -= 0.4
 
     score = max(0, min(round(score, 2), 8.2))
@@ -129,7 +120,7 @@ def decide_next_action(result: Dict[str, Any], target_score: float, package: str
         if float(categories.get(key) or 0) < 7:
             return "REGENERATE"
 
-    if package in {"premium", "custom"}:
+    if package in {"reference", "advanced"}:
         if float(categories.get("visual_quality") or 0) < 8:
             return "AUTO_FIX"
         if float(categories.get("package_fit") or 0) < 8:
@@ -196,7 +187,7 @@ Strict rules:
 - If trust elements are missing, trust_elements must be below 8.
 - If the website does not match the client brief, brief_alignment must be below 8.
 - If it looks like a cheap template, visual_quality must be below 8.
-- For Premium and Custom, be stricter.
+- For Reference and Advanced, be stricter.
 - Penalize lorem ipsum, placeholders, fake claims, generic AI text, and missing contact section.
 
 Return ONLY valid JSON.

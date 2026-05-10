@@ -22,6 +22,8 @@ from app.services.auto_improvement_service import auto_improve
 from app.services.technical_check_service import technical_check_preview
 from app.services.pre_delivery_check_service import decide_preview_status
 from app.services.quality_package_rules import get_package_rules
+from app.services.canonical_brief_service import build_canonical_brief, store_canonical_brief_on_order, get_or_build_canonical_brief
+from app.services.generation_orchestrator_service import GenerationOrchestratorService
 from app.services.divi_style_generation_service import DiviStyleGenerationService
 
 logger = logging.getLogger(__name__)
@@ -237,109 +239,19 @@ class GenerationService:
         html: str,
     ) -> Dict[str, Any]:
         """
-        Runs quality checks against the real final generated HTML.
+        Central final quality pipeline.
 
-        This is the important production layer:
-        final HTML -> technical check -> AI review -> auto-fix loop -> final decision.
+        Flow:
+        Canonical Brief -> Generate v1 -> Technical Review -> AI Review ->
+        Auto Improvement -> Review again -> Ready or Manual Review.
+
+        Cost protection:
+        The orchestrator enforces the global hard cap of max 3 improvement rounds.
         """
-        extended_brief = (
-            getattr(order, "extended_brief", None)
-            or getattr(order, "brief_answers", None)
-            or {}
+        return GenerationOrchestratorService().run_final_html_pipeline(
+            order=order,
+            initial_html=html,
         )
-        if not isinstance(extended_brief, dict):
-            extended_brief = {"raw_brief": str(extended_brief)}
-
-        package_value = self._extract_package_for_quality(order)
-        rules = get_package_rules(package_value)
-
-        package = str(rules.get("package") or package_value or "starter")
-        target_score = float(rules.get("target_score") or 7.5)
-        max_iterations = int(rules.get("max_quality_iterations") or rules.get("max_iterations") or 1)
-        max_warnings = int(rules.get("max_warnings") or 5)
-
-        current_html = html or ""
-        history: List[Dict[str, Any]] = []
-        final_decision: Dict[str, Any] = {
-            "status": "MANUAL_REVIEW_REQUIRED",
-            "ready_to_send": False,
-            "overall_score": 0,
-            "critical_errors": ["No quality decision produced"],
-            "warnings": [],
-        }
-
-        for attempt in range(0, max_iterations + 1):
-            preview_like_payload = {
-                "id": "final_html",
-                "type": "final_divi_html",
-                "label": "Final generated website",
-                "prompt": current_html,
-                "html": current_html,
-            }
-
-            # Reuse your existing technical checker safely.
-            technical = technical_check_preview(preview_like_payload, extended_brief)
-
-            # Review the actual HTML, not just the concept prompt.
-            review = review_site(
-                site_content=current_html,
-                brief=extended_brief,
-                package=package,
-                target_score=target_score,
-            )
-
-            decision = decide_preview_status(
-                technical,
-                review,
-                target_score,
-                max_warnings,
-            )
-
-            history.append(
-                {
-                    "attempt": attempt,
-                    "technical": technical,
-                    "review": review,
-                    "decision": decision,
-                }
-            )
-
-            final_decision = decision
-
-            if decision.get("ready_to_send"):
-                break
-
-            if attempt >= max_iterations:
-                break
-
-            regeneration_prompt = (
-                review.get("regeneration_prompt")
-                or "Improve this final website HTML with stronger offer clarity, hero, CTA, trust elements, mobile readiness and package fit."
-            )
-
-            current_html = auto_improve(
-                site_text=current_html,
-                feedback_prompt=regeneration_prompt,
-                brief=extended_brief,
-                package=package,
-            )
-
-        ready = bool(final_decision.get("ready_to_send"))
-        status = "READY_TO_SEND" if ready else "MANUAL_REVIEW_REQUIRED"
-
-        return {
-            "status": status,
-            "ready_to_send": ready,
-            "package": package,
-            "target_score": target_score,
-            "max_iterations": max_iterations,
-            "final_score": float(final_decision.get("overall_score") or 0),
-            "critical_errors": final_decision.get("critical_errors") or [],
-            "warnings": final_decision.get("warnings") or [],
-            "history": history,
-            "final_decision": final_decision,
-            "html": current_html,
-        }
 
 
     # ---------------------------------------------------------------------
@@ -467,6 +379,9 @@ class GenerationService:
             or _safe_get(order, "selected_design_url")
             or "A"
         )
+
+        canonical_brief = build_canonical_brief(order)
+        store_canonical_brief_on_order(order, canonical_brief)
 
         raw_divi_html = self._generate_divi_html(order)
 
@@ -1435,106 +1350,23 @@ class GenerationService:
 
 
     def _build_final_generation_prompt(self, order: Order) -> str:
-        business_name = getattr(order, "business_name", "") or "Client business"
-        source_url = getattr(order, "source_url", "") or ""
-        description = getattr(order, "desired_site_description", "") or ""
+        """Build a generation prompt only from the Canonical Brief.
 
-        brief_answers = (
-            getattr(order, "extended_brief", None)
-            or getattr(order, "brief_answers", None)
-            or {}
-        )
-        if not isinstance(brief_answers, dict):
-            brief_answers = {"raw_brief": str(brief_answers)}
+        This prevents prompt fragmentation: the example site, first questionnaire,
+        second questionnaire, selected design preview and effects page are first
+        normalized into one production brief.
+        """
+        import json
 
-        pricing_reasoning = getattr(order, "pricing_reasoning", "") or ""
-
-        selected_design_id = (
-            getattr(order, "selected_design_id", "")
-            or getattr(order, "selected_design_url", "")
-            or ""
-        )
-
-        design_previews = (
-            getattr(order, "design_previews", None)
-            or getattr(order, "preview_generation_payload", None)
-            or []
-        )
-
-        if isinstance(design_previews, dict):
-            design_previews = design_previews.get("design_previews") or []
-
-        selected_preview: Dict[str, Any] = {}
-        if isinstance(design_previews, list):
-            for preview in design_previews:
-                if not isinstance(preview, dict):
-                    continue
-
-                preview_id = str(preview.get("id") or "")
-                preview_url = str(
-                    preview.get("preview_url")
-                    or preview.get("screenshot_url")
-                    or preview.get("image_url")
-                    or ""
-                )
-
-                if selected_design_id and (
-                    selected_design_id == preview_id
-                    or selected_design_id == preview_url
-                    or selected_design_id in {preview_id, preview_url}
-                ):
-                    selected_preview = preview
-                    break
-
-            if not selected_preview and design_previews:
-                selected_preview = design_previews[0] if isinstance(design_previews[0], dict) else {}
-
-        preview_dna = selected_preview.get("preview_dna") or {}
-        layout_spec = selected_preview.get("layout_spec") or {}
-        design_system = (
-            preview_dna.get("design_system")
-            or selected_preview.get("design_system")
-            or layout_spec.get("design_system")
-            or {}
-        )
-        sections = (
-            preview_dna.get("sections")
-            or selected_preview.get("sections")
-            or layout_spec.get("sections")
-            or []
-        )
-        style = (
-            preview_dna.get("style")
-            or selected_preview.get("style")
-            or layout_spec.get("style")
-            or "modern premium"
-        )
-        color_direction = (
-            preview_dna.get("color_direction")
-            or selected_preview.get("color_direction")
-            or ""
-        )
-        selected_preview_prompt = (
-            preview_dna.get("prompt")
-            or selected_preview.get("prompt")
-            or ""
-        )
-        selected_preview_url = (
-            selected_preview.get("preview_url")
-            or selected_preview.get("screenshot_url")
-            or selected_preview.get("image_url")
-            or getattr(order, "selected_design_url", "")
-            or ""
-        )
+        canonical_brief = get_or_build_canonical_brief(order)
 
         return f"""
-Create a Divi 5-ready homepage HTML package based on the client's SELECTED design preview.
+Create a Divi 5-ready website package using ONLY this Canonical Brief.
 
-CRITICAL MATCHING RULES:
-- The final website must follow the selected preview as closely as HTML can support.
-- Do not invent a totally different website.
-- Keep the same style direction, section order, visual hierarchy, and conversion logic.
-- Use the selected design DNA below as the source of truth.
+CRITICAL RULES:
+- Do not copy the source/reference/example website. Use it only as a style, expectation and complexity signal.
+- Follow selected preview DNA, design system, section logic and motion profile.
+- Follow package constraints exactly. Do not add features outside the package.
 - English only.
 - Mobile-first.
 - Premium, trustworthy, conversion-focused.
@@ -1543,39 +1375,8 @@ CRITICAL MATCHING RULES:
 - No markdown fences.
 - Do not mention AI, OpenAI, SiteFormo internals, prompts, or generated content.
 
-SELECTED PREVIEW DNA:
-- Selected design id/url: {selected_design_id}
-- Selected preview URL: {selected_preview_url}
-- Style: {style}
-- Color direction: {color_direction}
-- Design system: {design_system}
-- Sections: {sections}
-- Original preview prompt: {selected_preview_prompt}
-
-REQUIRED FINAL SITE STRUCTURE:
-- Header / navigation
-- Hero with strong headline, short subheadline, and clear CTA
-- Services / offer section
-- Trust / proof section
-- About or explanation block
-- FAQ section
-- Final CTA section
-- Footer
-
-COPY QUALITY:
-- Write like a real business, not AI.
-- Use clear, specific English.
-- No lorem ipsum.
-- No placeholders.
-- No generic filler like 'we provide high quality solutions'.
-- CTA buttons should be realistic, for example: Get a Free Quote, Book a Call, Start Your Project, Contact Us Today.
-
-Project data:
-- Business name: {business_name}
-- Source URL / old site: {source_url}
-- Description: {description}
-- Pricing reasoning: {pricing_reasoning}
-- Brief answers: {brief_answers}
+CANONICAL BRIEF JSON:
+{json.dumps(canonical_brief, ensure_ascii=False, indent=2)[:22000]}
 """
 
     def _fallback_divi_html(self, order: Order) -> str:
