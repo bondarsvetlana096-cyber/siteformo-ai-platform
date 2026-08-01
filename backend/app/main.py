@@ -22,7 +22,6 @@ from app.api.create_order import router as create_order_router
 from app.api.review_routes import router as review_router
 from app.api.example_routes import router as example_router
 from app.api.website_analysis import router as website_analysis_router
-from app.api.demo_contact_email import router as demo_contact_email_router
 
 # Safe channels
 from app.channels.health import router as health_router
@@ -49,7 +48,6 @@ app.add_middleware(
         "https://business.siteformo.com",
         "https://reference.siteformo.com",
         "https://advanced.siteformo.com",
-        "https://dev.siteformo.com",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -95,7 +93,6 @@ app.include_router(admin_routes_router)
 app.include_router(review_router)
 app.include_router(example_router)
 app.include_router(website_analysis_router)
-app.include_router(demo_contact_email_router)
 
 
 # Optional legacy/integration channels.
