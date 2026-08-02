@@ -74,6 +74,7 @@ class ContactEmailResponse(BaseModel):
     status: str
     message_id: str
     replayed: bool = False
+    remaining_deliveries: int = Field(ge=0, le=2)
 
 
 @router.post(
@@ -122,6 +123,7 @@ async def send_demo_contact_email(
             status="provider_accepted",
             message_id=claim.provider_message_id,
             replayed=True,
+            remaining_deliveries=claim.remaining_deliveries or 0,
         )
 
     try:
@@ -144,5 +146,9 @@ async def send_demo_contact_email(
         await finalize_failed(identity, exc.code)
         raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
 
-    await finalize_accepted(identity, acceptance.message_id)
-    return ContactEmailResponse(status="provider_accepted", message_id=acceptance.message_id)
+    remaining_deliveries = await finalize_accepted(identity, acceptance.message_id)
+    return ContactEmailResponse(
+        status="provider_accepted",
+        message_id=acceptance.message_id,
+        remaining_deliveries=remaining_deliveries,
+    )

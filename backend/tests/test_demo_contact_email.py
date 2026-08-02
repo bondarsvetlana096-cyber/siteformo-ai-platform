@@ -52,7 +52,7 @@ def install_success_mocks(
 ) -> tuple[AsyncMock, AsyncMock, AsyncMock, AsyncMock]:
     claim = AsyncMock(return_value=Claim(ClaimKind.ACQUIRED))
     send = AsyncMock(return_value=ProviderAcceptance(message_id="provider-test-id", http_status=200))
-    accepted = AsyncMock(return_value=None)
+    accepted = AsyncMock(return_value=1)
     failed = AsyncMock(return_value=None)
     monkeypatch.setattr(api, "claim_once", claim)
     monkeypatch.setattr(api, "send_with_resend", send)
@@ -76,6 +76,7 @@ def test_any_valid_recipient_is_delivered_to_exact_normalized_address(
         "status": "provider_accepted",
         "message_id": "provider-test-id",
         "replayed": False,
+        "remaining_deliveries": 1,
     }
     assert send.await_args.args[1] == "visitor@example.com"
     assert send.await_args.args[3] == EXAMPLE_ID
@@ -85,8 +86,11 @@ def test_any_valid_recipient_is_delivered_to_exact_normalized_address(
 def test_two_independent_deliveries_are_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
     claim, send, accepted, _ = install_success_mocks(monkeypatch)
     first = post(payload(idempotency_key="contact-public-first-0001"))
+    accepted.return_value = 0
     second = post(payload(idempotency_key="contact-public-second-0002"))
     assert first.status_code == second.status_code == 202
+    assert first.json()["remaining_deliveries"] == 1
+    assert second.json()["remaining_deliveries"] == 0
     assert claim.await_count == send.await_count == accepted.await_count == 2
 
 
@@ -143,7 +147,13 @@ def test_idempotent_replay_returns_acceptance_without_provider(
     monkeypatch.setattr(
         api,
         "claim_once",
-        AsyncMock(return_value=Claim(ClaimKind.REPLAY_ACCEPTED, provider_message_id="stored-id")),
+        AsyncMock(
+            return_value=Claim(
+                ClaimKind.REPLAY_ACCEPTED,
+                provider_message_id="stored-id",
+                remaining_deliveries=0,
+            )
+        ),
     )
     response = post(payload())
     assert response.status_code == 202
@@ -151,6 +161,7 @@ def test_idempotent_replay_returns_acceptance_without_provider(
         "status": "provider_accepted",
         "message_id": "stored-id",
         "replayed": True,
+        "remaining_deliveries": 0,
     }
     send.assert_not_awaited()
     accepted.assert_not_awaited()
@@ -162,6 +173,8 @@ def test_concurrent_capacity_is_reserved_atomically_in_redis_script() -> None:
     assert "HINCRBY" in canary.FINALIZE_ACCEPTED_SCRIPT
     assert "accepted >" in canary.FINALIZE_ACCEPTED_SCRIPT
     assert "EXPIRE', KEYS[2]" not in canary.CLAIM_SCRIPT
+    assert "remaining_deliveries" in canary.CLAIM_SCRIPT
+    assert "remaining_deliveries" in canary.FINALIZE_ACCEPTED_SCRIPT
 
 
 @pytest.mark.parametrize("address", ["not-an-email", "bad\r\n@example.com", "missing@"])

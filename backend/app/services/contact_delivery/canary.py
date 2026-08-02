@@ -34,7 +34,12 @@ if status then
   local stored_fingerprint = redis.call('HGET', KEYS[1], 'fingerprint')
   if stored_fingerprint ~= ARGV[1] then return {'CONFLICT'} end
   if status == 'accepted' then
-    return {'REPLAY_ACCEPTED', redis.call('HGET', KEYS[1], 'message_id') or ''}
+    local remaining = redis.call('HGET', KEYS[1], 'remaining_deliveries')
+    if not remaining then
+      local accepted = tonumber(redis.call('HGET', KEYS[2], 'accepted') or '0')
+      remaining = tostring(math.max(0, tonumber(ARGV[4]) - accepted))
+    end
+    return {'REPLAY_ACCEPTED', redis.call('HGET', KEYS[1], 'message_id') or '', remaining}
   end
   if status == 'pending' then
     local lease = redis.call('ZSCORE', KEYS[3], ARGV[2])
@@ -57,7 +62,7 @@ local status = redis.call('HGET', KEYS[1], 'status')
 local stored_fingerprint = redis.call('HGET', KEYS[1], 'fingerprint')
 if stored_fingerprint ~= ARGV[1] then return {'CONFLICT'} end
 if status == 'accepted' then
-  return {'REPLAY_ACCEPTED', redis.call('HGET', KEYS[1], 'message_id') or ''}
+  return {'REPLAY_ACCEPTED', redis.call('HGET', KEYS[1], 'message_id') or '', redis.call('HGET', KEYS[1], 'remaining_deliveries') or '0'}
 end
 if status ~= 'pending' then return {'INVALID_STATE'} end
 redis.call('ZREM', KEYS[3], ARGV[2])
@@ -66,8 +71,9 @@ if accepted > tonumber(ARGV[4]) then
   redis.call('HINCRBY', KEYS[2], 'accepted', -1)
   return {'QUOTA_CONFLICT'}
 end
-redis.call('HSET', KEYS[1], 'status', 'accepted', 'message_id', ARGV[3])
-return {'ACCEPTED', tostring(accepted)}
+local remaining = math.max(0, tonumber(ARGV[4]) - accepted)
+redis.call('HSET', KEYS[1], 'status', 'accepted', 'message_id', ARGV[3], 'remaining_deliveries', tostring(remaining))
+return {'ACCEPTED', tostring(accepted), tostring(remaining)}
 """
 
 FINALIZE_FAILED_SCRIPT = """
@@ -96,6 +102,7 @@ class Claim:
     kind: ClaimKind
     provider_message_id: str | None = None
     failure_code: str | None = None
+    remaining_deliveries: int | None = None
 
 
 @dataclass(frozen=True)
@@ -204,7 +211,11 @@ async def claim_once(identity: DeliveryIdentity) -> Claim:
         "CONFLICT": ClaimKind.CONFLICT,
     }
     if code == "REPLAY_ACCEPTED":
-        return Claim(ClaimKind.REPLAY_ACCEPTED, provider_message_id=result[1] if len(result) > 1 else None)
+        return Claim(
+            ClaimKind.REPLAY_ACCEPTED,
+            provider_message_id=result[1] if len(result) > 1 else None,
+            remaining_deliveries=int(result[2]) if len(result) > 2 else 0,
+        )
     if code == "REPLAY_FAILED":
         return Claim(ClaimKind.REPLAY_FAILED, failure_code=result[1] if len(result) > 1 else None)
     if code not in mapping:
@@ -212,7 +223,7 @@ async def claim_once(identity: DeliveryIdentity) -> Claim:
     return Claim(mapping[code])
 
 
-async def finalize_accepted(identity: DeliveryIdentity, message_id: str) -> None:
+async def finalize_accepted(identity: DeliveryIdentity, message_id: str) -> int:
     now_seconds = int(time.time())
     keys = _keys(identity, now_seconds)
     client = _redis_client()
@@ -232,6 +243,11 @@ async def finalize_accepted(identity: DeliveryIdentity, message_id: str) -> None
         await client.close()
     if result[0] not in {"ACCEPTED", "REPLAY_ACCEPTED"}:
         raise RuntimeError("delivery_state_conflict")
+    if result[0] == "ACCEPTED" and len(result) > 2:
+        return int(result[2])
+    if len(result) > 2:
+        return int(result[2])
+    return 0
 
 
 async def finalize_failed(identity: DeliveryIdentity, failure_code: str) -> None:
