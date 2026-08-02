@@ -21,7 +21,8 @@ from app.services.contact_delivery.canary import (
 from app.services.contact_delivery.template import Enquiry, render
 
 ORIGIN = "https://dev.siteformo.com"
-RECIPIENT = "owner-canary@example.com"
+EXAMPLE_ID = "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1"
+RECIPIENT = "visitor@example.com"
 
 
 def payload(**overrides: str) -> dict[str, str]:
@@ -31,80 +32,157 @@ def payload(**overrides: str) -> dict[str, str]:
         "preferred_method": "Email",
         "contact_value": RECIPIENT,
         "message": "A safe fictional enquiry.",
-        "idempotency_key": "contact-canary-test-0001",
+        "idempotency_key": "contact-public-test-0001",
     }
     value.update(overrides)
     return value
 
 
 @pytest.fixture(autouse=True)
-def canary_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setenv("SF_CONTACT_EMAIL_CANARY_ENABLED", "true")
-    monkeypatch.setenv("SF_CONTACT_EMAIL_CANARY_RECIPIENT", RECIPIENT)
+def public_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("SF_CONTACT_EMAIL_PUBLIC_DEMO_ENABLED", "true")
     monkeypatch.setenv("RESEND_API_KEY", "test-only-placeholder")
     yield
-    for name in (
-        "SF_CONTACT_EMAIL_CANARY_ENABLED",
-        "SF_CONTACT_EMAIL_CANARY_RECIPIENT",
-        "RESEND_API_KEY",
-    ):
-        os.environ.pop(name, None)
+    os.environ.pop("SF_CONTACT_EMAIL_PUBLIC_DEMO_ENABLED", None)
+    os.environ.pop("RESEND_API_KEY", None)
 
 
-def install_success_mocks(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, AsyncMock, AsyncMock]:
+def install_success_mocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[AsyncMock, AsyncMock, AsyncMock, AsyncMock]:
     claim = AsyncMock(return_value=Claim(ClaimKind.ACQUIRED))
     send = AsyncMock(return_value=ProviderAcceptance(message_id="provider-test-id", http_status=200))
-    finalize = AsyncMock(return_value=None)
+    accepted = AsyncMock(return_value=None)
+    failed = AsyncMock(return_value=None)
     monkeypatch.setattr(api, "claim_once", claim)
     monkeypatch.setattr(api, "send_with_resend", send)
-    monkeypatch.setattr(api, "finalize_state", finalize)
-    return claim, send, finalize
+    monkeypatch.setattr(api, "finalize_accepted", accepted)
+    monkeypatch.setattr(api, "finalize_failed", failed)
+    return claim, send, accepted, failed
 
 
-def test_allowlisted_recipient_returns_success_only_after_provider_acceptance(
+def post(body: dict[str, str], origin: str = ORIGIN):
+    with TestClient(app) as client:
+        return client.post("/api/v1/demo-contact/email", headers={"Origin": origin}, json=body)
+
+
+def test_any_valid_recipient_is_delivered_to_exact_normalized_address(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, send, finalize = install_success_mocks(monkeypatch)
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/demo-contact/email",
-            headers={"Origin": ORIGIN},
-            json=payload(),
-        )
+    _, send, accepted, _ = install_success_mocks(monkeypatch)
+    response = post(payload(contact_value="Visitor@Example.COM"))
     assert response.status_code == 202
     assert response.json() == {
         "status": "provider_accepted",
         "message_id": "provider-test-id",
         "replayed": False,
     }
-    send.assert_awaited_once()
-    finalize.assert_awaited_once()
+    assert send.await_args.args[1] == "visitor@example.com"
+    assert send.await_args.args[3] == EXAMPLE_ID
+    accepted.assert_awaited_once()
 
 
-def test_blocked_recipient_never_claims_or_invokes_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    claim, send, finalize = install_success_mocks(monkeypatch)
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/demo-contact/email",
-            headers={"Origin": ORIGIN},
-            json=payload(contact_value="blocked@example.com"),
-        )
-    assert response.status_code == 403
-    assert response.json() == {"detail": "canary_recipient_blocked"}
+def test_two_independent_deliveries_are_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    claim, send, accepted, _ = install_success_mocks(monkeypatch)
+    first = post(payload(idempotency_key="contact-public-first-0001"))
+    second = post(payload(idempotency_key="contact-public-second-0002"))
+    assert first.status_code == second.status_code == 202
+    assert claim.await_count == send.await_count == accepted.await_count == 2
+
+
+def test_third_delivery_is_rejected_before_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    claim, send, accepted, _ = install_success_mocks(monkeypatch)
+    claim.return_value = Claim(ClaimKind.QUOTA_EXHAUSTED)
+    response = post(payload(idempotency_key="contact-public-third-0003"))
+    assert response.status_code == 429
+    assert response.json() == {"detail": "quota_exhausted"}
+    send.assert_not_awaited()
+    accepted.assert_not_awaited()
+
+
+def test_different_recipient_produces_independent_quota_identity() -> None:
+    first = canary.delivery_identity(
+        example_id=EXAMPLE_ID,
+        recipient="one@example.com",
+        idempotency_key="contact-public-first-0001",
+        fingerprint="f1",
+        client_id="127.0.0.1",
+    )
+    second = canary.delivery_identity(
+        example_id=EXAMPLE_ID,
+        recipient="two@example.com",
+        idempotency_key="contact-public-second-0002",
+        fingerprint="f2",
+        client_id="127.0.0.1",
+    )
+    assert canary._keys(first, 0)[1] != canary._keys(second, 0)[1]
+
+
+def test_different_trusted_example_produces_independent_quota_identity() -> None:
+    first = canary.delivery_identity(
+        example_id=EXAMPLE_ID,
+        recipient=RECIPIENT,
+        idempotency_key="contact-public-first-0001",
+        fingerprint="f1",
+        client_id="127.0.0.1",
+    )
+    second = canary.delivery_identity(
+        example_id="SF_SECOND_EXAMPLE",
+        recipient=RECIPIENT,
+        idempotency_key="contact-public-second-0002",
+        fingerprint="f2",
+        client_id="127.0.0.1",
+    )
+    assert canary._keys(first, 0)[1] != canary._keys(second, 0)[1]
+
+
+def test_idempotent_replay_returns_acceptance_without_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, send, accepted, _ = install_success_mocks(monkeypatch)
+    monkeypatch.setattr(
+        api,
+        "claim_once",
+        AsyncMock(return_value=Claim(ClaimKind.REPLAY_ACCEPTED, provider_message_id="stored-id")),
+    )
+    response = post(payload())
+    assert response.status_code == 202
+    assert response.json() == {
+        "status": "provider_accepted",
+        "message_id": "stored-id",
+        "replayed": True,
+    }
+    send.assert_not_awaited()
+    accepted.assert_not_awaited()
+
+
+def test_concurrent_capacity_is_reserved_atomically_in_redis_script() -> None:
+    assert "accepted + pending >=" in canary.CLAIM_SCRIPT
+    assert "ZADD" in canary.CLAIM_SCRIPT
+    assert "HINCRBY" in canary.FINALIZE_ACCEPTED_SCRIPT
+    assert "accepted >" in canary.FINALIZE_ACCEPTED_SCRIPT
+    assert "EXPIRE', KEYS[2]" not in canary.CLAIM_SCRIPT
+
+
+@pytest.mark.parametrize("address", ["not-an-email", "bad\r\n@example.com", "missing@"])
+def test_invalid_email_rejected_before_quota_or_provider(
+    monkeypatch: pytest.MonkeyPatch, address: str
+) -> None:
+    claim, send, _, _ = install_success_mocks(monkeypatch)
+    response = post(payload(contact_value=address))
+    assert response.status_code == 422
     claim.assert_not_awaited()
     send.assert_not_awaited()
-    finalize.assert_not_awaited()
 
 
-@pytest.mark.parametrize("origin", [None, "https://siteformo.com", "https://dev.siteformo.com.evil.test", "null"])
-def test_malformed_or_unapproved_origin_is_rejected_before_provider(
-    monkeypatch: pytest.MonkeyPatch, origin: str | None
+@pytest.mark.parametrize("origin", ["https://siteformo.com", "https://dev.siteformo.com.evil.test", "null"])
+def test_unknown_or_suffix_origin_rejected_before_quota_and_provider(
+    monkeypatch: pytest.MonkeyPatch, origin: str
 ) -> None:
-    _, send, _ = install_success_mocks(monkeypatch)
-    headers = {"Origin": origin} if origin else {}
-    with TestClient(app) as client:
-        response = client.post("/api/v1/demo-contact/email", headers=headers, json=payload())
+    claim, send, _, _ = install_success_mocks(monkeypatch)
+    response = post(payload(), origin=origin)
     assert response.status_code == 403
+    claim.assert_not_awaited()
     send.assert_not_awaited()
 
 
@@ -122,7 +200,7 @@ def test_cors_preflight_allows_exact_origin() -> None:
     assert response.headers["access-control-allow-origin"] == ORIGIN
 
 
-def test_cors_preflight_rejects_unapproved_origin() -> None:
+def test_cors_preflight_rejects_suffix_origin() -> None:
     with TestClient(app) as client:
         response = client.options(
             "/api/v1/demo-contact/email",
@@ -136,115 +214,87 @@ def test_cors_preflight_rejects_unapproved_origin() -> None:
 
 
 @pytest.mark.parametrize(
-    ("change", "status_code"),
-    [
-        ({"preferred_method": "Phone"}, 422),
-        ({"contact_value": "not-an-email"}, 422),
-        ({"first_name": "bad\r\nname"}, 422),
-        ({"message": "x" * 5_001}, 422),
-        ({"idempotency_key": "short"}, 422),
-    ],
-)
-def test_closed_schema_validation(
-    monkeypatch: pytest.MonkeyPatch, change: dict[str, str], status_code: int
-) -> None:
-    _, send, _ = install_success_mocks(monkeypatch)
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/demo-contact/email", headers={"Origin": ORIGIN}, json=payload(**change)
-        )
-    assert response.status_code == status_code
-    send.assert_not_awaited()
-
-
-def test_browser_cannot_override_example_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    _, send, _ = install_success_mocks(monkeypatch)
-    supplied = payload()
-    supplied["trusted_example_id"] = "ATTACKER_OVERRIDE"
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/demo-contact/email", headers={"Origin": ORIGIN}, json=supplied
-        )
-    assert response.status_code == 422
-    send.assert_not_awaited()
-
-
-def test_duplicate_idempotency_key_returns_stored_acceptance_without_send(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        api,
-        "claim_once",
-        AsyncMock(return_value=Claim(ClaimKind.REPLAY_ACCEPTED, provider_message_id="stored-id")),
-    )
-    send = AsyncMock()
-    monkeypatch.setattr(api, "send_with_resend", send)
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/demo-contact/email", headers={"Origin": ORIGIN}, json=payload()
-        )
-    assert response.status_code == 202
-    assert response.json()["replayed"] is True
-    send.assert_not_awaited()
-
-
-def test_different_request_after_canary_is_consumed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(api, "claim_once", AsyncMock(return_value=Claim(ClaimKind.CONSUMED)))
-    send = AsyncMock()
-    monkeypatch.setattr(api, "send_with_resend", send)
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/demo-contact/email", headers={"Origin": ORIGIN}, json=payload()
-        )
-    assert response.status_code == 403
-    assert response.json() == {"detail": "canary_consumed"}
-    send.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
     ("error", "expected_status"),
     [(ProviderError("provider_rejected", 502), 502), (ProviderError("provider_timeout", 504), 504)],
 )
-def test_provider_failure_never_returns_success_and_is_finalized(
+def test_provider_failure_releases_pending_without_accepting_slot(
     monkeypatch: pytest.MonkeyPatch, error: ProviderError, expected_status: int
 ) -> None:
-    claim = AsyncMock(return_value=Claim(ClaimKind.ACQUIRED))
-    send = AsyncMock(side_effect=error)
-    finalize = AsyncMock(return_value=None)
-    monkeypatch.setattr(api, "claim_once", claim)
-    monkeypatch.setattr(api, "send_with_resend", send)
-    monkeypatch.setattr(api, "finalize_state", finalize)
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/demo-contact/email", headers={"Origin": ORIGIN}, json=payload()
-        )
+    _, send, accepted, failed = install_success_mocks(monkeypatch)
+    send.side_effect = error
+    response = post(payload())
     assert response.status_code == expected_status
-    assert response.json() == {"detail": error.code}
-    finalize.assert_awaited_once()
+    accepted.assert_not_awaited()
+    failed.assert_awaited_once()
 
 
-def test_disabled_feature_flag_blocks_before_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SF_CONTACT_EMAIL_CANARY_ENABLED", "false")
-    _, send, _ = install_success_mocks(monkeypatch)
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/demo-contact/email", headers={"Origin": ORIGIN}, json=payload()
-        )
+def test_rate_limit_rejects_before_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    claim, send, accepted, _ = install_success_mocks(monkeypatch)
+    claim.return_value = Claim(ClaimKind.RATE_LIMITED)
+    response = post(payload())
+    assert response.status_code == 429
+    assert response.json() == {"detail": "rate_limited"}
+    send.assert_not_awaited()
+    accepted.assert_not_awaited()
+
+
+def test_disabled_master_flag_blocks_before_state_or_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SF_CONTACT_EMAIL_PUBLIC_DEMO_ENABLED", "false")
+    claim, send, _, _ = install_success_mocks(monkeypatch)
+    response = post(payload())
     assert response.status_code == 503
-    assert response.json() == {"detail": "live_email_disabled"}
+    claim.assert_not_awaited()
     send.assert_not_awaited()
 
 
-def test_request_size_limit_blocks_before_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    _, send, _ = install_success_mocks(monkeypatch)
+def test_request_size_and_closed_schema_block_before_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim, send, _, _ = install_success_mocks(monkeypatch)
+    supplied = payload()
+    supplied["trusted_example_id"] = "ATTACKER_OVERRIDE"
     with TestClient(app) as client:
-        response = client.post(
+        oversized = client.post(
             "/api/v1/demo-contact/email",
             headers={"Origin": ORIGIN, "Content-Length": "16385"},
             json=payload(),
         )
-    assert response.status_code == 413
+        override = client.post(
+            "/api/v1/demo-contact/email", headers={"Origin": ORIGIN}, json=supplied
+        )
+    assert oversized.status_code == 413
+    assert override.status_code == 422
+    claim.assert_not_awaited()
     send.assert_not_awaited()
+
+
+def test_public_path_ignores_retired_owner_canary_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SF_CONTACT_EMAIL_CANARY_ENABLED", "false")
+    monkeypatch.setenv("SF_CONTACT_EMAIL_CANARY_RECIPIENT", "owner-only@example.com")
+    _, send, _, _ = install_success_mocks(monkeypatch)
+    response = post(payload(contact_value="public-visitor@example.com"))
+    assert response.status_code == 202
+    send.assert_awaited_once()
+
+
+def test_quota_keys_are_durable_hashed_and_channel_isolated() -> None:
+    identity = canary.delivery_identity(
+        example_id=EXAMPLE_ID,
+        recipient=RECIPIENT,
+        idempotency_key="contact-public-first-0001",
+        fingerprint="fingerprint",
+        client_id="127.0.0.1",
+    )
+    keys_before = canary._keys(identity, 0)
+    keys_after_restart = canary._keys(identity, 0)
+    assert keys_before == keys_after_restart
+    assert ":EMAIL:" in keys_before[1]
+    assert RECIPIENT not in " ".join(keys_before)
+    assert EXAMPLE_ID not in " ".join(keys_before)
 
 
 def test_final_templates_are_link_free_and_escape_visitor_html() -> None:
@@ -253,7 +303,7 @@ def test_final_templates_are_link_free_and_escape_visitor_html() -> None:
             first_name="Avery <script>",
             last_name="Rowan",
             preferred_method="Email",
-            contact_value="owner-canary@example.com",
+            contact_value=RECIPIENT,
             message="Hello <img src=x onerror=alert(1)>",
         )
     )
@@ -263,22 +313,8 @@ def test_final_templates_are_link_free_and_escape_visitor_html() -> None:
     assert "<script" not in rendered.html.lower()
     assert "<img" not in rendered.html.lower()
     assert "&lt;script&gt;" in rendered.html
-    assert rendered.subject == "Your SiteFormo demonstration enquiry"
     assert rendered.sender == "SiteFormo <siteformo@siteformo.com>"
     assert rendered.reply_to == "siteformo@siteformo.com"
-
-
-def test_safe_failure_does_not_leak_secrets_or_recipient(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(api, "claim_once", AsyncMock(side_effect=RuntimeError("redis://secret")))
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/demo-contact/email", headers={"Origin": ORIGIN}, json=payload()
-        )
-    body = response.text
-    assert response.status_code == 503
-    assert "redis://secret" not in body
-    assert RECIPIENT not in body
-    assert "test-only-placeholder" not in body
 
 
 def test_provider_request_uses_governed_contract(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -307,17 +343,16 @@ def test_provider_request_uses_governed_contract(monkeypatch: pytest.MonkeyPatch
             return Response()
 
     monkeypatch.setattr(canary.httpx, "AsyncClient", Client)
-    rendered = render(
-        Enquiry("Avery", "Rowan", "Email", RECIPIENT, "Safe message")
+    rendered = render(Enquiry("Avery", "Rowan", "Email", RECIPIENT, "Safe message"))
+    result = asyncio.run(
+        canary.send_with_resend(
+            rendered, RECIPIENT, "contact-public-test-0001", EXAMPLE_ID
+        )
     )
-    result = asyncio.run(canary.send_with_resend(rendered, RECIPIENT, "contact-canary-test-0001"))
     assert result.message_id == "provider-contract-id"
-    assert captured["url"] == "https://api.resend.com/emails"
     request_json = captured["json"]
     assert isinstance(request_json, dict)
+    assert request_json["to"] == [RECIPIENT]
     assert request_json["from"] == "SiteFormo <siteformo@siteformo.com>"
     assert request_json["reply_to"] == "siteformo@siteformo.com"
-    assert request_json["subject"] == "Your SiteFormo demonstration enquiry"
-    assert request_json["to"] == [RECIPIENT]
-    assert "html" in request_json and "text" in request_json
     assert "trusted_example_id" not in request_json

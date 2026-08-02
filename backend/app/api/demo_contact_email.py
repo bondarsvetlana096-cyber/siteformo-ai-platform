@@ -3,18 +3,20 @@ from __future__ import annotations
 import re
 
 from email_validator import EmailNotValidError, validate_email
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.services.contact_delivery.canary import (
     ClaimKind,
     ProviderError,
-    allowlisted_recipient,
     claim_once,
+    delivery_identity,
     enabled,
-    finalize_state,
+    finalize_accepted,
+    finalize_failed,
     request_fingerprint,
     send_with_resend,
+    trusted_example_for_origin,
 )
 from app.services.contact_delivery.template import (
     Enquiry,
@@ -22,7 +24,6 @@ from app.services.contact_delivery.template import (
     render,
 )
 
-ALLOWED_ORIGIN = "https://dev.siteformo.com"
 IDEMPOTENCY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$")
 router = APIRouter(prefix="/api/v1/demo-contact", tags=["demo-contact"])
 
@@ -82,29 +83,36 @@ class ContactEmailResponse(BaseModel):
 )
 async def send_demo_contact_email(
     payload: ContactEmailRequest,
+    request: Request,
     origin: str | None = Header(default=None),
     content_length: int | None = Header(default=None),
 ) -> ContactEmailResponse:
-    if origin != ALLOWED_ORIGIN:
+    example_id = trusted_example_for_origin(origin)
+    if not example_id:
         raise HTTPException(status_code=403, detail="origin_not_allowed")
     if content_length is not None and content_length > 16_384:
         raise HTTPException(status_code=413, detail="request_too_large")
     if not enabled():
         raise HTTPException(status_code=503, detail="live_email_disabled")
-    recipient = allowlisted_recipient()
-    if not recipient:
-        raise HTTPException(status_code=503, detail="canary_not_configured")
-    if payload.contact_value != recipient:
-        raise HTTPException(status_code=403, detail="canary_recipient_blocked")
-
     canonical = payload.model_dump()
     fingerprint = request_fingerprint(canonical)
+    identity = delivery_identity(
+        example_id=example_id,
+        recipient=payload.contact_value,
+        idempotency_key=payload.idempotency_key,
+        fingerprint=fingerprint,
+        client_id=request.client.host if request.client else "unknown",
+    )
     try:
-        claim = await claim_once(payload.idempotency_key, fingerprint)
+        claim = await claim_once(identity)
     except (RuntimeError, TypeError) as exc:
-        raise HTTPException(status_code=503, detail="canary_state_unavailable") from exc
-    if claim.kind is ClaimKind.CONSUMED:
-        raise HTTPException(status_code=403, detail="canary_consumed")
+        raise HTTPException(status_code=503, detail="delivery_state_unavailable") from exc
+    if claim.kind is ClaimKind.QUOTA_EXHAUSTED:
+        raise HTTPException(status_code=429, detail="quota_exhausted")
+    if claim.kind is ClaimKind.RATE_LIMITED:
+        raise HTTPException(status_code=429, detail="rate_limited")
+    if claim.kind is ClaimKind.CONFLICT:
+        raise HTTPException(status_code=409, detail="idempotency_conflict")
     if claim.kind is ClaimKind.IN_PROGRESS:
         raise HTTPException(status_code=409, detail="submission_in_progress")
     if claim.kind is ClaimKind.REPLAY_FAILED:
@@ -126,18 +134,15 @@ async def send_demo_contact_email(
                 message=payload.message,
             )
         )
-        acceptance = await send_with_resend(rendered, recipient, payload.idempotency_key)
+        acceptance = await send_with_resend(
+            rendered, payload.contact_value, payload.idempotency_key, example_id
+        )
     except TemplateValidationError as exc:
-        await finalize_state(payload.idempotency_key, fingerprint, status="failed", failure_code="template_invalid")
+        await finalize_failed(identity, "template_invalid")
         raise HTTPException(status_code=422, detail="template_invalid") from exc
     except ProviderError as exc:
-        await finalize_state(payload.idempotency_key, fingerprint, status="failed", failure_code=exc.code)
+        await finalize_failed(identity, exc.code)
         raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
 
-    await finalize_state(
-        payload.idempotency_key,
-        fingerprint,
-        status="accepted",
-        provider_message_id=acceptance.message_id,
-    )
+    await finalize_accepted(identity, acceptance.message_id)
     return ContactEmailResponse(status="provider_accepted", message_id=acceptance.message_id)
