@@ -6,26 +6,27 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.core.config import settings
-from app.services.db.init_db import init_db
+from app.api.admin_routes import router as admin_routes_router
+from app.api.channel_routes import router as channel_router
+from app.api.create_order import router as create_order_router
+from app.api.demo_contact_email import router as demo_contact_email_router
+from app.api.example_routes import router as example_router
+from app.api.leads import router as leads_router
+from app.api.order_routes import router as order_router
+from app.api.payment_routes import router as payment_router
+from app.api.request_routes import router as request_router
+from app.api.review_routes import router as review_router
 
 # API routers
 from app.api.routes import router as api_router
-from app.api.channel_routes import router as channel_router
-from app.api.leads import router as leads_router
-from app.api.order_routes import router as order_router
-from app.api.request_routes import router as request_router
-from app.api.payment_routes import router as payment_router
 from app.api.stripe_webhook import router as stripe_webhook_router
-from app.api.admin_routes import router as admin_routes_router
-from app.api.create_order import router as create_order_router
-from app.api.review_routes import router as review_router
-from app.api.example_routes import router as example_router
 from app.api.website_analysis import router as website_analysis_router
 
 # Safe channels
 from app.channels.health import router as health_router
 from app.channels.web_chat import router as web_chat_router
+from app.core.config import settings
+from app.services.db.init_db import init_db
 
 
 def env_enabled(name: str, default: str = "false") -> bool:
@@ -48,6 +49,7 @@ app.add_middleware(
         "https://business.siteformo.com",
         "https://reference.siteformo.com",
         "https://advanced.siteformo.com",
+        "https://dev.siteformo.com",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -93,6 +95,7 @@ app.include_router(admin_routes_router)
 app.include_router(review_router)
 app.include_router(example_router)
 app.include_router(website_analysis_router)
+app.include_router(demo_contact_email_router)
 
 
 # Optional legacy/integration channels.
