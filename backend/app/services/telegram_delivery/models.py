@@ -12,6 +12,7 @@ BINDING_NAMESPACE = f"{ROOT_NAMESPACE}:visitor-binding"
 DELIVERY_NAMESPACE = f"{ROOT_NAMESPACE}:visitor-delivery"
 OWNER_NAMESPACE = f"{ROOT_NAMESPACE}:owner-notification"
 UPDATE_NAMESPACE = f"{ROOT_NAMESPACE}:update-dedup"
+AUDIT_NAMESPACE = f"{ROOT_NAMESPACE}:visitor-delivery-audit"
 
 
 class BindingState(StrEnum):

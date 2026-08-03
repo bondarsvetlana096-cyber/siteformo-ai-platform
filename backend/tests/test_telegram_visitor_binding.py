@@ -90,8 +90,40 @@ class FakeTransport:
     async def send(self, message: TelegramMessage) -> TransportResult:
         self.calls.append(message)
         return TransportResult(
-            self.state, "offline-message-1" if self.state is TransportState.ACCEPTED else None
+            self.state, "offline-message-1" if self.state is TransportState.ACCEPTED else None,
+            http_status=200, provider_ok=self.state is TransportState.ACCEPTED,
+            message_id_present=self.state is TransportState.ACCEPTED,
         )
+
+
+class MemoryAudit:
+    def __init__(self) -> None:
+        self.records: dict[str, dict[str, object]] = {}
+        self.fail_create = self.fail_mark = self.fail_finalize = False
+
+    async def create(self, **values: object) -> None:
+        if self.fail_create:
+            raise RuntimeError("audit unavailable")
+        self.records[str(values["binding_id"])] = dict(
+            values, transport_invoked=False, provider_call_count=0,
+        )
+
+    async def mark_transport_invoked(self, *, binding_id: str, now_seconds: int) -> None:
+        if self.fail_mark:
+            raise RuntimeError("audit unavailable")
+        record = self.records[binding_id]
+        record.update(transport_invoked=True, provider_call_count=int(record["provider_call_count"]) + 1)
+
+    async def finalize(self, **values: object) -> None:
+        if self.fail_finalize:
+            raise RuntimeError("audit unavailable")
+        self.records[str(values["binding_id"])].update(values)
+
+
+def webhook_service(store: MemoryStore, transport: FakeTransport, audit: MemoryAudit | None = None):
+    return VisitorBindingWebhookService(
+        store=store, audit=audit or MemoryAudit(), transport=transport, webhook_secret=SECRET,
+    )
 
 
 def update(token: str, *, update_id: int = 1, chat_id: int = 123456, chat_type: str = "private") -> dict:
@@ -115,7 +147,7 @@ class BindingTests(unittest.TestCase):
     def test_valid_private_start_and_exact_message(self) -> None:
         store, transport = MemoryStore(), FakeTransport()
         result, token = asyncio.run(create_session(store))
-        service = VisitorBindingWebhookService(store=store, transport=transport, webhook_secret=SECRET)
+        service = webhook_service(store, transport)
         handled = asyncio.run(service.handle(update(token), SECRET, 1001))
         self.assertEqual(handled.state, BindingState.DELIVERED)
         self.assertEqual(handled.binding_id, result.binding_id)
@@ -146,14 +178,14 @@ class BindingTests(unittest.TestCase):
     def test_expired_replay_duplicate_update_and_other_chat(self) -> None:
         store, transport = MemoryStore(), FakeTransport()
         _, token = asyncio.run(create_session(store))
-        service = VisitorBindingWebhookService(store=store, transport=transport, webhook_secret=SECRET)
+        service = webhook_service(store, transport)
         expired = asyncio.run(service.handle(update(token), SECRET, 1300))
         self.assertEqual(expired.state, BindingState.EXPIRED)
         store2, transport2 = MemoryStore(), FakeTransport()
         _, token2 = asyncio.run(create_session(store2))
-        first = asyncio.run(VisitorBindingWebhookService(store=store2, transport=transport2, webhook_secret=SECRET).handle(update(token2), SECRET, 1001))
-        duplicate = asyncio.run(VisitorBindingWebhookService(store=store2, transport=transport2, webhook_secret=SECRET).handle(update(token2), SECRET, 1001))
-        other_chat = asyncio.run(VisitorBindingWebhookService(store=store2, transport=transport2, webhook_secret=SECRET).handle(update(token2, update_id=2, chat_id=999999), SECRET, 1001))
+        first = asyncio.run(webhook_service(store2, transport2).handle(update(token2), SECRET, 1001))
+        duplicate = asyncio.run(webhook_service(store2, transport2).handle(update(token2), SECRET, 1001))
+        other_chat = asyncio.run(webhook_service(store2, transport2).handle(update(token2, update_id=2, chat_id=999999), SECRET, 1001))
         self.assertEqual(first.state, BindingState.DELIVERED)
         self.assertEqual(duplicate.state, BindingState.REPLAY_BLOCKED)
         self.assertEqual(other_chat.state, BindingState.REPLAY_BLOCKED)
@@ -162,7 +194,7 @@ class BindingTests(unittest.TestCase):
     def test_concurrent_consume_allows_one_initial_delivery(self) -> None:
         store, transport = MemoryStore(), FakeTransport()
         _, token = asyncio.run(create_session(store))
-        service = VisitorBindingWebhookService(store=store, transport=transport, webhook_secret=SECRET)
+        service = webhook_service(store, transport)
 
         async def exercise():
             return await asyncio.gather(*(
@@ -176,7 +208,7 @@ class BindingTests(unittest.TestCase):
     def test_invalid_secret_and_persistence_failure_block_outbound(self) -> None:
         store, transport = MemoryStore(), FakeTransport()
         _, token = asyncio.run(create_session(store))
-        service = VisitorBindingWebhookService(store=store, transport=transport, webhook_secret=SECRET)
+        service = webhook_service(store, transport)
         self.assertEqual(asyncio.run(service.handle(update(token), "wrong", 1001)).state, BindingState.INVALID_UPDATE)
         self.assertEqual(transport.calls, [])
         store.fail_consume = True
@@ -205,7 +237,7 @@ class BindingTests(unittest.TestCase):
     def test_chat_id_and_raw_token_are_absent_from_output(self) -> None:
         store, transport, output = MemoryStore(), FakeTransport(), io.StringIO()
         _, token = asyncio.run(create_session(store))
-        service = VisitorBindingWebhookService(store=store, transport=transport, webhook_secret=SECRET)
+        service = webhook_service(store, transport)
         with patch("sys.stdout", output), patch("sys.stderr", output):
             asyncio.run(service.handle(update(token, chat_id=987654321), SECRET, 1001))
         self.assertNotIn(token, output.getvalue())
@@ -214,7 +246,7 @@ class BindingTests(unittest.TestCase):
     def test_ambiguous_is_quarantined_without_retry(self) -> None:
         store, transport = MemoryStore(), FakeTransport(TransportState.AMBIGUOUS)
         _, token = asyncio.run(create_session(store))
-        service = VisitorBindingWebhookService(store=store, transport=transport, webhook_secret=SECRET)
+        service = webhook_service(store, transport)
         result = asyncio.run(service.handle(update(token), SECRET, 1001))
         replay = asyncio.run(service.handle(update(token, update_id=2), SECRET, 1001))
         self.assertEqual(result.state, BindingState.QUARANTINED)
@@ -280,10 +312,24 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(client.calls[0][1]["json"], {"chat_id": 123, "text": "Server text"})
         self.assertNotIn("parse_mode", client.calls[0][1]["json"])
 
+    def test_provider_response_classification(self) -> None:
+        cases = [
+            ({"ok": True, "result": {"message_id": 42}}, TransportState.ACCEPTED, True),
+            ({"ok": True, "result": {}}, TransportState.AMBIGUOUS, False),
+            ({"ok": False, "description": "offline"}, TransportState.REJECTED, False),
+            ({"unexpected": []}, TransportState.AMBIGUOUS, False),
+        ]
+        for body, expected, message_id_present in cases:
+            result = asyncio.run(self.transport(FakeClient(FakeResponse(200, body))).send(
+                TelegramMessage(123, "Server text", "corr")
+            ))
+            self.assertEqual(result.state, expected)
+            self.assertEqual(result.message_id_present, message_id_present)
+
     def test_timeout_4xx_5xx_and_no_retry(self) -> None:
         request = httpx.Request("POST", "https://api.telegram.org/test")
         cases = [
-            (FakeClient(error=httpx.ReadTimeout("timeout", request=request)), TransportState.AMBIGUOUS),
+            (FakeClient(error=httpx.ReadTimeout("timeout", request=request)), TransportState.TIMEOUT),
             (FakeClient(FakeResponse(400, {})), TransportState.REJECTED),
             (FakeClient(FakeResponse(503, {})), TransportState.TRANSIENT_FAILURE),
         ]

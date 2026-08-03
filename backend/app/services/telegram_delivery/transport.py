@@ -26,6 +26,8 @@ class TransportResult:
     provider_message_id: str | None = None
     transport_invoked: bool = True
     http_status: int | None = None
+    provider_ok: bool | None = None
+    message_id_present: bool = False
 
 
 class TelegramTransport(Protocol):
@@ -59,19 +61,28 @@ class BotApiTelegramTransport:
                 timeout=self.config.timeout_seconds,
             )
         except httpx.TimeoutException:
-            return TransportResult(TransportState.AMBIGUOUS)
+            return TransportResult(TransportState.TIMEOUT)
         except httpx.HTTPError:
             return TransportResult(TransportState.TRANSIENT_FAILURE)
-        if response.status_code == 200:
+        if 200 <= response.status_code < 300:
             try:
                 body = response.json()
-                message_id = body.get("result", {}).get("message_id") if body.get("ok") is True else None
+                provider_ok = body.get("ok") if isinstance(body, dict) else None
+                message_id = body.get("result", {}).get("message_id") if provider_ok is True else None
             except (ValueError, AttributeError):
-                message_id = None
-            return (
-                TransportResult(TransportState.ACCEPTED, str(message_id), http_status=200)
-                if isinstance(message_id, int)
-                else TransportResult(TransportState.AMBIGUOUS, http_status=200)
+                provider_ok, message_id = None, None
+            if provider_ok is False:
+                return TransportResult(
+                    TransportState.REJECTED, http_status=response.status_code, provider_ok=False,
+                )
+            if provider_ok is True and isinstance(message_id, int) and not isinstance(message_id, bool):
+                return TransportResult(
+                    TransportState.ACCEPTED, str(message_id), http_status=response.status_code,
+                    provider_ok=True, message_id_present=True,
+                )
+            return TransportResult(
+                TransportState.AMBIGUOUS, http_status=response.status_code,
+                provider_ok=provider_ok if isinstance(provider_ok, bool) else None,
             )
         if response.status_code in {401, 403}:
             state = TransportState.AUTHENTICATION_ERROR

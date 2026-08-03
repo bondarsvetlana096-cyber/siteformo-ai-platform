@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.channels.telegram import process_telegram_update
 from app.services.telegram_delivery.binding import DeepLinkService, RedisTelegramBindingStore, TrustedExample
+from app.services.telegram_delivery.audit import RedisTelegramDeliveryAuditStore
 from app.services.telegram_delivery.configuration import Readiness, resolve_configuration
 from app.services.telegram_delivery.runtime import (
     RedisBindingQuota, RedisLegacyUpdateDedupe, RuntimeBindingService, UnifiedTelegramIngress,
@@ -53,7 +54,8 @@ def configure_telegram_runtime(environment: dict[str, str] | None = None) -> boo
         TelegramTransportConfig(config.bot_token), _telegram_http_client
     )
     binding_handler = VisitorBindingWebhookService(
-        store=store, transport=transport, webhook_secret=config.webhook_secret
+        store=store, audit=RedisTelegramDeliveryAuditStore(redis_url),
+        transport=transport, webhook_secret=config.webhook_secret
     )
     _binding_runtime = RuntimeBindingService(deep_links, RedisBindingQuota(redis_url))
     _unified_ingress = UnifiedTelegramIngress(

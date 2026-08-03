@@ -13,7 +13,7 @@ from app.services.telegram_delivery.models import BindingState
 from app.services.telegram_delivery.runtime import RedisBindingQuota, RuntimeBindingService, UnifiedTelegramIngress
 from app.services.telegram_delivery.service import VisitorBindingWebhookService
 from app.services.telegram_delivery.transport import TransportState
-from tests.test_telegram_visitor_binding import FakeTransport, MemoryStore, update
+from tests.test_telegram_visitor_binding import FakeTransport, MemoryAudit, MemoryStore, update
 from app.channels.telegram import router as legacy_telegram_router
 
 ORIGIN = "https://dev.siteformo.com"
@@ -66,7 +66,7 @@ class RuntimeRouteTests(unittest.TestCase):
             self.legacy_updates.append(value)
 
         binding_handler = VisitorBindingWebhookService(
-            store=self.store, transport=self.transport, webhook_secret=SECRET
+            store=self.store, audit=MemoryAudit(), transport=self.transport, webhook_secret=SECRET
         )
         api._unified_ingress = UnifiedTelegramIngress(
             binding_handler=binding_handler, webhook_secret=SECRET, legacy_handler=legacy_handler,
