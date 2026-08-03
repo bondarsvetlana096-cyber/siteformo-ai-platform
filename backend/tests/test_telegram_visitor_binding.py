@@ -144,7 +144,7 @@ async def create_session(store: MemoryStore, *, now: int = 1000, name: str | Non
 
 
 class BindingTests(unittest.TestCase):
-    def test_valid_private_start_and_exact_message(self) -> None:
+    def test_valid_private_start_and_named_message(self) -> None:
         store, transport = MemoryStore(), FakeTransport()
         result, token = asyncio.run(create_session(store))
         service = webhook_service(store, transport)
@@ -154,15 +154,43 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(len(transport.calls), 1)
         self.assertEqual(
             transport.calls[0].text,
-            "Welcome to SiteFormo Bot. You can learn how SiteFormo works, ask about website examples, explore packages, pricing and timelines, and understand the first steps of starting a website project.",
+            "Hello, Alex.\n\n"
+            "This is an example of how your future website could communicate with visitors "
+            "through Telegram.\n\n"
+            "Everything you see here can be tailored to your own project.",
         )
         self.assertNotIn("parse_mode", repr(transport.calls[0]))
 
     def test_neutral_message_without_name(self) -> None:
+        store, transport = MemoryStore(), FakeTransport()
+        _, token = asyncio.run(create_session(store, name=None))
+        handled = asyncio.run(webhook_service(store, transport).handle(update(token), SECRET, 1001))
+        self.assertEqual(handled.state, BindingState.DELIVERED)
+        self.assertEqual(len(transport.calls), 1)
         self.assertEqual(
-            render_demo_message(None),
-            "Welcome to SiteFormo Bot. You can learn how SiteFormo works, ask about website examples, explore packages, pricing and timelines, and understand the first steps of starting a website project.",
+            transport.calls[0].text,
+            "Hello.\n\n"
+            "This is an example of how your future website could communicate with visitors "
+            "through Telegram.\n\n"
+            "Everything you see here can be tailored to your own project.",
         )
+
+    def test_named_message_uses_first_name_only(self) -> None:
+        rendered = render_demo_message("Oleh")
+        self.assertTrue(rendered.startswith("Hello, Oleh.\n\n"))
+        self.assertNotIn("Last name", rendered)
+        self.assertNotIn("Visitor message", rendered)
+
+    def test_name_input_is_trimmed_length_limited_and_single_line(self) -> None:
+        store = MemoryStore()
+        result, token = asyncio.run(create_session(store, name="  Oleh  "))
+        record = store.records[token_hash(token)]
+        self.assertEqual(record["validated_name"], "Oleh")
+        self.assertNotIn("Oleh", result.binding_id)
+        with self.assertRaisesRegex(ValueError, "invalid_name"):
+            asyncio.run(create_session(MemoryStore(), name="A" * 101))
+        with self.assertRaisesRegex(ValueError, "invalid_name"):
+            asyncio.run(create_session(MemoryStore(), name="Oleh\nInjected"))
 
     def test_plain_start_malformed_oversized_and_group_are_blocked(self) -> None:
         with self.assertRaisesRegex(ValueError, "invalid_start_payload"):
@@ -190,6 +218,7 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(duplicate.state, BindingState.REPLAY_BLOCKED)
         self.assertEqual(other_chat.state, BindingState.REPLAY_BLOCKED)
         self.assertEqual(len(transport2.calls), 1)
+        self.assertTrue(transport2.calls[0].text.startswith("Hello, Alex."))
 
     def test_concurrent_consume_allows_one_initial_delivery(self) -> None:
         store, transport = MemoryStore(), FakeTransport()

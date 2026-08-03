@@ -56,8 +56,10 @@ class TelegramMessage:
 
 
 def render_demo_message(name: str | None) -> str:
+    greeting = f"Hello, {name}." if name else "Hello."
     return (
-        "Welcome to SiteFormo Bot. "
-        "You can learn how SiteFormo works, ask about website examples, explore packages, "
-        "pricing and timelines, and understand the first steps of starting a website project."
+        f"{greeting}\n\n"
+        "This is an example of how your future website could communicate with visitors "
+        "through Telegram.\n\n"
+        "Everything you see here can be tailored to your own project."
     )
