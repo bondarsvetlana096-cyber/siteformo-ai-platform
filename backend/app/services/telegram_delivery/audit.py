@@ -99,3 +99,12 @@ class RedisTelegramDeliveryAuditStore:
             })
         finally:
             await client.aclose()
+
+    async def read(self, binding_id: str) -> dict[str, str] | None:
+        """Read one exact audit record; no key/list/search input is accepted."""
+        client = self.client()
+        try:
+            record = await client.hgetall(self.key(binding_id))
+        finally:
+            await client.aclose()
+        return record or None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 import time
 import os
 
@@ -27,17 +28,23 @@ router = APIRouter(tags=["demo-telegram"])
 _binding_runtime: RuntimeBindingService | None = None
 _unified_ingress: UnifiedTelegramIngress | None = None
 _telegram_http_client: httpx.AsyncClient | None = None
+_telegram_audit_store: RedisTelegramDeliveryAuditStore | None = None
+_temporary_audit_secret = ""
+AUDIT_BINDING_ID = re.compile(r"^[0-9a-f]{32}$", re.ASCII)
 
 
 def configure_telegram_runtime(environment: dict[str, str] | None = None) -> bool:
     """Configure once from server-owned environment; incomplete config stays fail-closed."""
     global _binding_runtime, _unified_ingress, _telegram_http_client
+    global _telegram_audit_store, _temporary_audit_secret
     values = environment if environment is not None else dict(os.environ)
+    _temporary_audit_secret = values.get("TELEGRAM_TEMP_AUDIT_SECRET", "").strip()
     result = resolve_configuration(values)
     redis_url = values.get("REDIS_URL", "").strip()
     if result.readiness is not Readiness.READY or result.configuration is None or not redis_url:
         _binding_runtime = None
         _unified_ingress = None
+        _telegram_audit_store = None
         return False
     config = result.configuration
     store = RedisTelegramBindingStore(redis_url, config.binding_namespace)
@@ -53,8 +60,9 @@ def configure_telegram_runtime(environment: dict[str, str] | None = None) -> boo
     transport = BotApiTelegramTransport(
         TelegramTransportConfig(config.bot_token), _telegram_http_client
     )
+    _telegram_audit_store = RedisTelegramDeliveryAuditStore(redis_url)
     binding_handler = VisitorBindingWebhookService(
-        store=store, audit=RedisTelegramDeliveryAuditStore(redis_url),
+        store=store, audit=_telegram_audit_store,
         transport=transport, webhook_secret=config.webhook_secret
     )
     _binding_runtime = RuntimeBindingService(deep_links, RedisBindingQuota(redis_url))
@@ -98,6 +106,66 @@ class TelegramBindingResponse(BaseModel):
     url: str
     expires_at: int
     binding_id: str
+
+
+class TemporaryTelegramAuditResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    binding_id: str
+    token_hash: str
+    update_id_hash: str
+    target_chat_id_hash: str
+    transport_invoked: bool
+    provider_call_count: int
+    http_status: int
+    provider_ok: bool
+    message_id_present: bool
+    message_id_hash: str
+    typed_outcome: str
+    final_binding_state: str
+    created_at: int
+    updated_at: int
+    expires_at: int
+
+
+@router.get(
+    "/api/internal/telegram/audit/{binding_id}",
+    response_model=TemporaryTelegramAuditResponse,
+)
+async def read_temporary_telegram_audit(
+    binding_id: str,
+    supplied_secret: str | None = Header(default=None, alias="X-SiteFormo-Telegram-Audit-Secret"),
+) -> TemporaryTelegramAuditResponse:
+    if not _temporary_audit_secret or not secrets.compare_digest(
+        supplied_secret or "", _temporary_audit_secret,
+    ):
+        raise HTTPException(status_code=403, detail="forbidden")
+    if not AUDIT_BINDING_ID.fullmatch(binding_id):
+        raise HTTPException(status_code=400, detail="invalid_binding_id")
+    if _telegram_audit_store is None:
+        raise HTTPException(status_code=503, detail="audit_unavailable")
+    try:
+        record = await _telegram_audit_store.read(binding_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="audit_unavailable") from exc
+    if not record or record.get("binding_id") != binding_id:
+        raise HTTPException(status_code=404, detail="audit_not_found")
+    try:
+        return TemporaryTelegramAuditResponse(
+            binding_id=record["binding_id"], token_hash=record["token_hash"],
+            update_id_hash=record["update_id_hash"],
+            target_chat_id_hash=record["target_chat_id_hash"],
+            transport_invoked=record["transport_invoked"] == "true",
+            provider_call_count=int(record["provider_call_count"]),
+            http_status=int(record["http_status"]), provider_ok=record["provider_ok"] == "true",
+            message_id_present=record["message_id_present"] == "true",
+            message_id_hash=record["message_id_hash"],
+            typed_outcome=record["typed_transport_outcome"],
+            final_binding_state=record["final_binding_state"],
+            created_at=int(record["created_at"]), updated_at=int(record["updated_at"]),
+            expires_at=int(record["expires_at"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="audit_unavailable") from exc
 
 
 @router.post(
