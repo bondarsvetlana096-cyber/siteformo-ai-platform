@@ -11,10 +11,16 @@ router = APIRouter()
 @router.post("/channels/telegram/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
+    await process_telegram_update(data)
+    return {"ok": True}
+
+
+async def process_telegram_update(data: dict) -> None:
+    """Preserved AI-bot processing callable for the authenticated unified ingress."""
 
     message = data.get("message") or data.get("edited_message")
     if not message:
-        return {"ok": True}
+        return
 
     chat = message.get("chat") or {}
     sender = message.get("from") or {}
@@ -23,7 +29,7 @@ async def telegram_webhook(request: Request):
     text = message.get("text") or message.get("caption") or ""
 
     if not chat_id or not text:
-        return {"ok": True}
+        return
 
     ai_reply = await generate_ai_reply(
         user_text=text,
@@ -37,5 +43,3 @@ async def telegram_webhook(request: Request):
                 f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
                 json={"chat_id": chat_id, "text": ai_reply},
             )
-
-    return {"ok": True}

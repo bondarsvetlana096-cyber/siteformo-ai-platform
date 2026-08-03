@@ -10,6 +10,7 @@ from app.api.admin_routes import router as admin_routes_router
 from app.api.channel_routes import router as channel_router
 from app.api.create_order import router as create_order_router
 from app.api.demo_contact_email import router as demo_contact_email_router
+from app.api.demo_telegram import close_telegram_runtime, configure_telegram_runtime, router as demo_telegram_router
 from app.api.example_routes import router as example_router
 from app.api.leads import router as leads_router
 from app.api.order_routes import router as order_router
@@ -96,6 +97,7 @@ app.include_router(review_router)
 app.include_router(example_router)
 app.include_router(website_analysis_router)
 app.include_router(demo_contact_email_router)
+app.include_router(demo_telegram_router)
 
 
 # Optional legacy/integration channels.
@@ -115,8 +117,14 @@ if env_enabled("ENABLE_WHATSAPP_CHANNEL"):
 @app.on_event("startup")
 async def startup_event():
     init_db()
+    configure_telegram_runtime()
 
     if settings.enable_guided_followups:
         from app.services.lead_nurturing import followup_worker
 
         asyncio.create_task(followup_worker())
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_telegram_runtime()
