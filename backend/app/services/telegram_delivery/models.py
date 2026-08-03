@@ -56,15 +56,8 @@ class TelegramMessage:
 
 
 def render_demo_message(name: str | None) -> str:
-    validated = (name or "").strip()
-    if validated:
-        return (
-            f"Hi {validated} — your Telegram connection is working. "
-            "This is how your future website can send a helpful confirmation directly to a customer. "
-            "SiteFormo"
-        )
     return (
-        "Your Telegram connection is working. "
-        "This is how your future website can send a helpful confirmation directly to a customer. "
-        "SiteFormo"
+        "Welcome to SiteFormo Bot. "
+        "You can learn how SiteFormo works, ask about website examples, explore packages, "
+        "pricing and timelines, and understand the first steps of starting a website project."
     )

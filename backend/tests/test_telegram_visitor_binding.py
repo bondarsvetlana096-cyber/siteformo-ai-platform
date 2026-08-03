@@ -154,14 +154,14 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(len(transport.calls), 1)
         self.assertEqual(
             transport.calls[0].text,
-            "Hi Alex — your Telegram connection is working. This is how your future website can send a helpful confirmation directly to a customer. SiteFormo",
+            "Welcome to SiteFormo Bot. You can learn how SiteFormo works, ask about website examples, explore packages, pricing and timelines, and understand the first steps of starting a website project.",
         )
         self.assertNotIn("parse_mode", repr(transport.calls[0]))
 
     def test_neutral_message_without_name(self) -> None:
         self.assertEqual(
             render_demo_message(None),
-            "Your Telegram connection is working. This is how your future website can send a helpful confirmation directly to a customer. SiteFormo",
+            "Welcome to SiteFormo Bot. You can learn how SiteFormo works, ask about website examples, explore packages, pricing and timelines, and understand the first steps of starting a website project.",
         )
 
     def test_plain_start_malformed_oversized_and_group_are_blocked(self) -> None:
