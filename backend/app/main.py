@@ -10,6 +10,11 @@ from app.api.admin_routes import router as admin_routes_router
 from app.api.channel_routes import router as channel_router
 from app.api.create_order import router as create_order_router
 from app.api.demo_contact_email import router as demo_contact_email_router
+from app.api.demo_contact_whatsapp import (
+    close_whatsapp_runtime,
+    configure_whatsapp_runtime,
+    router as demo_contact_whatsapp_router,
+)
 from app.api.demo_sms import close_sms_runtime, configure_sms_runtime, router as demo_sms_router
 from app.api.demo_telegram import close_telegram_runtime, configure_telegram_runtime, router as demo_telegram_router
 from app.api.example_routes import router as example_router
@@ -98,6 +103,7 @@ app.include_router(review_router)
 app.include_router(example_router)
 app.include_router(website_analysis_router)
 app.include_router(demo_contact_email_router)
+app.include_router(demo_contact_whatsapp_router)
 app.include_router(demo_telegram_router)
 app.include_router(demo_sms_router)
 
@@ -121,6 +127,7 @@ async def startup_event():
     init_db()
     configure_telegram_runtime()
     configure_sms_runtime()
+    configure_whatsapp_runtime()
 
     if settings.enable_guided_followups:
         from app.services.lead_nurturing import followup_worker
@@ -132,3 +139,4 @@ async def startup_event():
 async def shutdown_event():
     await close_telegram_runtime()
     await close_sms_runtime()
+    await close_whatsapp_runtime()
