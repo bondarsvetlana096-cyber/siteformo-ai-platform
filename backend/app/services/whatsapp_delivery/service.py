@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 from app.services.delivery.contracts import ClaimKind, DeliveryIdentity, DeliveryState
 from app.services.whatsapp_delivery.models import (
+    DEFAULT_TEMPLATE_FIRST_NAME,
     MESSAGE_CONTRACT_ID,
     MESSAGE_CONTRACT_VERSION,
     WhatsAppMessage,
@@ -67,8 +68,7 @@ class WhatsAppDeliveryService:
         *,
         example_id: str,
         phone: str,
-        name: str,
-        message: str,
+        first_name: str | None,
         idempotency_key: str,
         client_id: str,
     ) -> tuple[str, str, bool, int]:
@@ -77,11 +77,8 @@ class WhatsAppDeliveryService:
             raise DeliveryError("whatsapp_public_delivery_not_ready", 503)
         self.readiness_check()
         normalized_phone = normalize_e164(phone)
-        payload = {
-            "name": name,
-            "phone": normalized_phone,
-            "message": message,
-        }
+        template_first_name = first_name or DEFAULT_TEMPLATE_FIRST_NAME
+        payload = {"first_name": template_first_name}
         identity = self.identity(
             example_id=example_id,
             phone=normalized_phone,
@@ -103,7 +100,7 @@ class WhatsAppDeliveryService:
         if claim.kind is ClaimKind.REPLAY_ACCEPTED and claim.provider_message_id:
             return "provider_accepted", self.public_reference(claim.provider_message_id), True, claim.remaining_deliveries or 0
 
-        rendered = render_demo_message(name, identity.idempotency_hash[:16])
+        rendered = render_demo_message(template_first_name, identity.idempotency_hash[:16])
         provider_message: WhatsAppMessage = replace(rendered, destination_e164=normalized_phone)
         result = await self.transport.send(provider_message, identity.idempotency_hash)
         if result.state is TransportState.ACCEPTED and result.provider_message_id:

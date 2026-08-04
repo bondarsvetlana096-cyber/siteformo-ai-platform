@@ -30,25 +30,28 @@ _whatsapp_http_client: httpx.AsyncClient | None = None
 class ContactWhatsAppRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: str = Field(min_length=1, max_length=100)
+    first_name: str | None = Field(default=None, max_length=100)
     phone: str = Field(min_length=3, max_length=16)
-    message: str = Field(min_length=1, max_length=5_000)
     idempotency_key: str = Field(min_length=16, max_length=128)
 
-    @field_validator("name", "phone", "idempotency_key")
+    @field_validator("first_name", mode="before")
     @classmethod
-    def reject_controls(cls, value: str) -> str:
+    def normalize_optional_first_name(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
+    @field_validator("first_name", "phone", "idempotency_key")
+    @classmethod
+    def reject_controls(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if "\r" in value or "\n" in value or any(ord(char) < 32 or ord(char) == 127 for char in value):
             raise ValueError("unsafe control character")
         return value
-
-    @field_validator("message")
-    @classmethod
-    def normalize_message(cls, value: str) -> str:
-        normalized = value.replace("\r\n", "\n").replace("\r", "\n")
-        if any((ord(char) < 32 and char not in {"\n", "\t"}) or ord(char) == 127 for char in normalized):
-            raise ValueError("unsafe control character")
-        return normalized
 
     @model_validator(mode="after")
     def validate_contract(self) -> ContactWhatsAppRequest:
@@ -152,8 +155,7 @@ async def send_demo_contact_whatsapp(
         result = await service.send(
             example_id=example.example_id,
             phone=payload.phone,
-            name=payload.name,
-            message=payload.message,
+            first_name=payload.first_name,
             idempotency_key=payload.idempotency_key,
             client_id=request.client.host if request.client else "unknown",
         )

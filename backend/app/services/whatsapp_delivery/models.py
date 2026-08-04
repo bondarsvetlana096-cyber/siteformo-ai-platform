@@ -8,6 +8,7 @@ from typing import Mapping
 E164 = re.compile(r"^\+[1-9][0-9]{1,14}$", re.ASCII)
 MESSAGE_CONTRACT_ID = "SITEFORMO_WHATSAPP_DEMONSTRATION_TEMPLATE_V1"
 MESSAGE_CONTRACT_VERSION = "v1"
+DEFAULT_TEMPLATE_FIRST_NAME = "there"
 TEMPLATE_BODY = (
     "Hi {{1}},\n\n"
     "Your SiteFormo WhatsApp demonstration worked.\n\n"
