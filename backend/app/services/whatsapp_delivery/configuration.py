@@ -99,7 +99,7 @@ def resolve_railway_twilio_configuration(environment: Mapping[str, str]) -> Rail
     public_flag = flag_status(environment, "SF_CONTACT_WHATSAPP_PUBLIC_DEMO_ENABLED")
 
     sender_ready = sender.value is not None or messaging_service.value is not None
-    all_ready = all((account.value, token.value, sender_ready, content.value))
+    all_ready = all((account.value, token.value, sender_ready))
     if provider_status == "MISMATCH":
         readiness = Readiness.PROVIDER_MISMATCH
     elif provider_status == "ABSENT" and not any((account.value, token.value, sender_ready, content.value)):
@@ -119,7 +119,7 @@ def resolve_railway_twilio_configuration(environment: Mapping[str, str]) -> Rail
         content_sid=content,
         public_demo_flag=public_flag,
         sender_mode="messaging_service" if messaging_service.value else ("direct_sender" if sender.value else "UNDETERMINED"),
-        message_mode="BUSINESS_INITIATED_APPROVED_CONTENT" if content.value else "BUSINESS_INITIATED_CONTENT_NOT_CONFIGURED",
+        message_mode="CUSTOMER_INITIATED_SESSION_FREEFORM",
         masked_sender=mask_phone(sender.value) if sender.value else None,
     )
 

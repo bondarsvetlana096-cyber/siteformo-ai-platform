@@ -13,6 +13,7 @@ from app.api.demo_contact_email import router as demo_contact_email_router
 from app.api.demo_contact_whatsapp import (
     close_whatsapp_runtime,
     configure_whatsapp_runtime,
+    inbound_router as whatsapp_inbound_router,
     router as demo_contact_whatsapp_router,
 )
 from app.api.demo_sms import close_sms_runtime, configure_sms_runtime, router as demo_sms_router
@@ -104,6 +105,7 @@ app.include_router(example_router)
 app.include_router(website_analysis_router)
 app.include_router(demo_contact_email_router)
 app.include_router(demo_contact_whatsapp_router)
+app.include_router(whatsapp_inbound_router)
 app.include_router(demo_telegram_router)
 app.include_router(demo_sms_router)
 
