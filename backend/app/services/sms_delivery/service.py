@@ -13,12 +13,14 @@ from app.services.sms_delivery.models import (
     SMSDeliveryMode,
     SMSDeliveryRole,
     SmsMessage,
+    analyze_sms_segments,
     normalize_first_name,
     normalize_message,
     render_owner_alert,
     render_visitor_notification,
     validate_destination,
     validate_idempotency_key,
+    validate_user_message,
 )
 from app.services.sms_delivery.transport import SmsTransport, SmsTransportOutcome
 
@@ -105,6 +107,7 @@ class SmsDeliveryService:
             raise SmsDeliveryError(code, status)
         now = int(time.time())
         delivery_id = identity.idempotency_hash[:24]
+        segment_info = analyze_sms_segments(body)
         initial = {
             "idempotency_hash": identity.idempotency_hash,
             "recipient_hash": identity.recipient_hash,
@@ -114,6 +117,8 @@ class SmsDeliveryService:
             "delivery_role": role.value,
             "message_length": str(len(body)),
             "message_hash": _hash(body),
+            "message_encoding": segment_info.encoding,
+            "message_segment_count": str(segment_info.segment_count),
             "transport_invoked": "false", "provider_call_count": "0", "http_status": "",
             "message_sid_present": "false", "message_sid_hash": "", "typed_outcome": "",
             "final_state": "PENDING", "created_at": str(now), "updated_at": str(now),
@@ -157,7 +162,7 @@ class SmsDeliveryService:
             self.config.require_ready()
             key = validate_idempotency_key(idempotency_key)
             name = normalize_first_name(first_name)
-            enquiry = normalize_message(message, required=True)
+            enquiry = validate_user_message(message)
             visitor = validate_destination(phone or "", self.config.allowed_countries) if self.config.delivery_mode in {
                 SMSDeliveryMode.VISITOR_NOTIFICATION, SMSDeliveryMode.BOTH,
             } or self.config.owner_requires_visitor_contact else None
@@ -167,12 +172,19 @@ class SmsDeliveryService:
             raise SmsDeliveryError(code, status) from exc
 
         specs: list[tuple[SMSDeliveryRole, str, str]] = []
-        if self.config.delivery_mode in {SMSDeliveryMode.VISITOR_NOTIFICATION, SMSDeliveryMode.BOTH}:
-            specs.append((SMSDeliveryRole.VISITOR, visitor or "", render_visitor_notification(name, enquiry)))
+        try:
+            if self.config.delivery_mode in {SMSDeliveryMode.VISITOR_NOTIFICATION, SMSDeliveryMode.BOTH}:
+                specs.append((SMSDeliveryRole.VISITOR, visitor or "", render_visitor_notification(name, enquiry)))
+        except ValueError as exc:
+            raise SmsDeliveryError(str(exc), 422) from exc
         if self.config.delivery_mode in {SMSDeliveryMode.OWNER_ALERT, SMSDeliveryMode.BOTH}:
             specs.append((
                 SMSDeliveryRole.OWNER, self.config.owner_to_e164 or "",
-                render_owner_alert(name, visitor if self.config.owner_requires_visitor_contact else None, enquiry),
+                render_owner_alert(
+                    name,
+                    visitor if self.config.owner_requires_visitor_contact else None,
+                    normalize_message(enquiry, required=True),
+                ),
             ))
 
         legs: list[SmsLegResult] = []

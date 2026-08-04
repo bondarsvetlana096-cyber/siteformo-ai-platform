@@ -11,7 +11,12 @@ import pytest
 from app.services.delivery.contracts import Claim, ClaimKind, DeliveryIdentity
 from app.services.sms_delivery.configuration import SmsConfiguration, resolve_sms_configuration
 from app.services.sms_delivery.contract import SmsDemoRequest
-from app.services.sms_delivery.models import render_balanced_message, validate_destination
+from app.services.sms_delivery.models import (
+    analyze_sms_segments,
+    render_visitor_notification,
+    validate_destination,
+    validate_user_message,
+)
 from app.services.sms_delivery.service import SmsDeliveryError, SmsDeliveryService
 from app.services.sms_delivery.transport import SmsTransportOutcome, SmsTransportResult, TwilioSmsTransport
 
@@ -117,20 +122,39 @@ def test_valid_and_invalid_e164_and_country_allowlist() -> None:
         validate_destination("+19005550123", frozenset({"US"}))
 
 
-def test_message_candidates_balanced_named_and_neutral() -> None:
-    assert render_balanced_message("Oleh") == (
-        "Hello, Oleh.\n\n"
-        "This is an example of a short SMS notification your future website could send "
-        "to your customers.\n\n"
-        "SiteFormo"
-    )
-    assert render_balanced_message("") == (
-        "Hello.\n\n"
-        "This is an example of a short SMS notification your future website could send "
-        "to your customers.\n\n"
-        "SiteFormo"
-    )
-    assert len(render_balanced_message("Oleh")) <= 160
+def test_user_authored_message_named_neutral_and_trimmed() -> None:
+    assert render_visitor_notification("Oleh", "  Keep My CASE  ") == "Oleh: Keep My CASE"
+    assert render_visitor_notification(None, "  Keep My CASE  ") == "Keep My CASE"
+    assert render_visitor_notification(None, "<b>literal</b>") == "<b>literal</b>"
+
+
+@pytest.mark.parametrize("message", [None, "", "   "])
+def test_user_message_is_required(message) -> None:
+    with pytest.raises(ValueError, match="sms_message_required"):
+        validate_user_message(message)
+
+
+@pytest.mark.parametrize("message", ["line one\nline two", "line one\rline two", "bad\x00value", "bad\tvalue"])
+def test_user_message_rejects_line_breaks_and_controls(message: str) -> None:
+    with pytest.raises(ValueError, match="invalid_sms_message"):
+        validate_user_message(message)
+
+
+def test_single_segment_policy_gsm7_and_ucs2() -> None:
+    gsm = render_visitor_notification(None, "A" * 160)
+    assert analyze_sms_segments(gsm).encoding == "GSM-7"
+    assert analyze_sms_segments(gsm).segment_count == 1
+    with pytest.raises(ValueError, match="sms_message_too_long"):
+        render_visitor_notification(None, "A" * 161)
+    ucs2 = render_visitor_notification(None, "Ж" * 70)
+    assert analyze_sms_segments(ucs2).encoding == "UCS-2"
+    assert analyze_sms_segments(ucs2).segment_count == 1
+    with pytest.raises(ValueError, match="sms_message_too_long"):
+        render_visitor_notification(None, "Ж" * 71)
+    assert analyze_sms_segments("^" * 80).units == 160
+    assert analyze_sms_segments("^" * 81).segment_count == 2
+    assert analyze_sms_segments("🙂" * 35).units == 70
+    assert analyze_sms_segments("🙂" * 36).segment_count == 2
 
 
 def test_configuration_is_sms_only_missing_and_disabled() -> None:

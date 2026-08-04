@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.services.sms_delivery.models import normalize_first_name, validate_idempotency_key
+from app.services.sms_delivery.models import (
+    normalize_first_name,
+    validate_idempotency_key,
+    validate_user_message,
+)
 
 
 class SmsDemoRequest(BaseModel):
@@ -11,7 +15,7 @@ class SmsDemoRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     first_name: str | None = Field(default=None, max_length=80)
     phone: str | None = Field(default=None, min_length=9, max_length=16)
-    message: str | None = Field(default=None, max_length=240)
+    message: str = Field(min_length=1, max_length=240)
     idempotency_key: str = Field(min_length=16, max_length=128)
 
     @field_validator("first_name")
@@ -24,6 +28,11 @@ class SmsDemoRequest(BaseModel):
     @classmethod
     def validate_key(cls, value: str) -> str:
         return validate_idempotency_key(value)
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        return validate_user_message(value)
 
 
 class SmsDemoResponse(BaseModel):
@@ -48,6 +57,7 @@ FAIL_CLOSED_ERRORS = {
     "sms_provider_rejected": 502,
     "sms_message_required": 422,
     "invalid_sms_message": 422,
+    "sms_message_too_long": 422,
     "sms_owner_recipient_not_configured": 503,
     "sms_visitor_notifications_disabled": 503,
 }

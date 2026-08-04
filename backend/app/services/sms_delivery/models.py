@@ -4,6 +4,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
+from math import ceil
 
 E164 = re.compile(r"^\+[1-9][0-9]{7,14}$", re.ASCII)
 IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$", re.ASCII)
@@ -12,6 +13,12 @@ PREMIUM_PREFIXES = {"US": ("+1900",), "GB": ("+449",), "IE": ("+35315",)}
 
 MESSAGE_CONTRACT_ID = "SITEFORMO_SMS_DEMO_NOTIFICATION_V1"
 MESSAGE_CONTRACT_VERSION = "v1"
+
+GSM7_BASIC = frozenset(
+    "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
+    "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
+)
+GSM7_EXTENSION = frozenset("^{}\\[~]|€")
 
 
 class SMSDeliveryMode(StrEnum):
@@ -61,6 +68,35 @@ def normalize_message(value: str | None, *, required: bool) -> str:
     return candidate
 
 
+@dataclass(frozen=True, slots=True)
+class SmsSegmentInfo:
+    encoding: str
+    units: int
+    segment_count: int
+    single_segment_limit: int
+
+
+def analyze_sms_segments(body: str) -> SmsSegmentInfo:
+    if all(char in GSM7_BASIC or char in GSM7_EXTENSION for char in body):
+        units = sum(2 if char in GSM7_EXTENSION else 1 for char in body)
+        return SmsSegmentInfo("GSM-7", units, 1 if units <= 160 else ceil(units / 153), 160)
+    units = len(body.encode("utf-16-be")) // 2
+    return SmsSegmentInfo("UCS-2", units, 1 if units <= 70 else ceil(units / 67), 70)
+
+
+def validate_user_message(value: str | None) -> str:
+    if value is None:
+        raise ValueError("sms_message_required")
+    candidate = value.strip()
+    if not candidate:
+        raise ValueError("sms_message_required")
+    if "\r" in candidate or "\n" in candidate:
+        raise ValueError("invalid_sms_message")
+    if any(unicodedata.category(char).startswith("C") for char in candidate):
+        raise ValueError("invalid_sms_message")
+    return candidate
+
+
 def validate_idempotency_key(value: str) -> str:
     if not IDEMPOTENCY_KEY.fullmatch(value):
         raise ValueError("invalid_idempotency_key")
@@ -75,21 +111,14 @@ class SmsMessage:
     contract_version: str = MESSAGE_CONTRACT_VERSION
 
 
-def render_balanced_message(first_name: str | None) -> str:
-    name = normalize_first_name(first_name)
-    greeting = f"Hello, {name}." if name else "Hello."
-    return (
-        f"{greeting}\n\n"
-        "This is an example of a short SMS notification your future website "
-        "could send to your customers.\n\n"
-        "SiteFormo"
-    )
-
-
 def render_visitor_notification(first_name: str | None, enquiry: str) -> str:
-    """Server-owned visitor copy; user text is validated but never echoed."""
-    del enquiry
-    return render_balanced_message(first_name)
+    """Build the provider body from validated input under a one-segment policy."""
+    name = normalize_first_name(first_name)
+    message = validate_user_message(enquiry)
+    body = f"{name}: {message}" if name else message
+    if analyze_sms_segments(body).segment_count != 1:
+        raise ValueError("sms_message_too_long")
+    return body
 
 
 def render_owner_alert(first_name: str | None, visitor_contact: str | None, enquiry: str) -> str:

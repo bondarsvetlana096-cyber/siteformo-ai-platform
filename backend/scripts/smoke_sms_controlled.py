@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from dataclasses import dataclass
@@ -10,7 +11,12 @@ from typing import Callable, Mapping, Protocol
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.services.sms_delivery.configuration import SmsConfiguration, resolve_sms_configuration
-from app.services.sms_delivery.models import render_balanced_message, validate_destination, validate_idempotency_key
+from app.services.sms_delivery.models import (
+    analyze_sms_segments,
+    render_visitor_notification,
+    validate_destination,
+    validate_idempotency_key,
+)
 
 
 class HttpResponse(Protocol):
@@ -42,13 +48,17 @@ def mask_phone(phone: str) -> str:
 def safe_plan(request: SmokeRequest, config: SmsConfiguration) -> dict[str, object]:
     recipient = validate_destination(request.recipient, config.allowed_countries)
     validate_idempotency_key(request.idempotency_key)
+    body = render_visitor_notification(request.first_name, request.message)
+    segment_info = analyze_sms_segments(body)
     return {
         "endpoint": request.endpoint,
         "origin": request.origin,
         "recipient": mask_phone(recipient),
         "sender": mask_phone(config.sender_e164 or ""),
-        "body": render_balanced_message(request.first_name),
-        "message_present": bool(request.message.strip()),
+        "message_length": len(body),
+        "message_hash": hashlib.sha256(body.encode()).hexdigest(),
+        "message_encoding": segment_info.encoding,
+        "message_segment_count": segment_info.segment_count,
         "execute": request.execute,
         "owner_authorized": request.owner_authorized,
         "typed_outcome": "DRY_RUN" if not request.execute else "PENDING_SINGLE_CALL",
@@ -112,7 +122,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="One-call SMS production smoke candidate; dry-run by default.")
     parser.add_argument("--endpoint", default="https://siteformo-ai-platform-production.up.railway.app/api/demo/sms/start")
     parser.add_argument("--origin", default="https://dev.siteformo.com")
-    parser.add_argument("--recipient", required=True)
+    parser.add_argument(
+        "--recipient",
+        help="Recipient E.164; omit to read SITEFORMO_SMS_SMOKE_RECIPIENT from the process environment.",
+    )
     parser.add_argument("--first-name")
     parser.add_argument("--message", required=True)
     parser.add_argument("--idempotency-key", required=True)
@@ -120,8 +133,9 @@ def main() -> int:
     parser.add_argument("--owner-authorized", action="store_true")
     args = parser.parse_args()
     import os
+    recipient = args.recipient or os.environ.get("SITEFORMO_SMS_SMOKE_RECIPIENT", "")
     code, result = run_smoke(
-        SmokeRequest(args.endpoint, args.origin, args.recipient, args.first_name, args.message, args.idempotency_key, args.execute, args.owner_authorized),
+        SmokeRequest(args.endpoint, args.origin, recipient, args.first_name, args.message, args.idempotency_key, args.execute, args.owner_authorized),
         os.environ,
     )
     print(json.dumps(result, indent=2))

@@ -103,6 +103,7 @@ def test_visitor_notification_targets_only_visitor_and_replays_once() -> None:
     result, state, audit, transport = exercise(SMSDeliveryMode.VISITOR_NOTIFICATION, [SmsTransportOutcome.ACCEPTED])
     assert result.outcome is SmsTransportOutcome.ACCEPTED
     assert len(transport.calls) == 1 and transport.calls[0].destination_e164 == "+12025550124"
+    assert transport.calls[0].body == "Oleh: Please call me tomorrow."
     assert next(iter(audit.records.values()))["delivery_role"] == SMSDeliveryRole.VISITOR.value
 
 
@@ -127,6 +128,7 @@ def test_owner_alert_uses_only_server_owner_recipient() -> None:
     result, _, audit, transport = exercise(SMSDeliveryMode.OWNER_ALERT, [SmsTransportOutcome.ACCEPTED])
     assert result.outcome is SmsTransportOutcome.ACCEPTED
     assert len(transport.calls) == 1 and transport.calls[0].destination_e164 == "+12025550125"
+    assert transport.calls[0].body == "New website enquiry.\nName: Oleh\nMessage: Please call me tomorrow."
     record = next(iter(audit.records.values()))
     assert record["delivery_role"] == SMSDeliveryRole.OWNER.value
 
@@ -151,6 +153,10 @@ def test_both_has_two_independent_legs_and_partial_aggregate() -> None:
     )
     assert result.outcome is SmsAggregateOutcome.VISITOR_ACCEPTED_OWNER_FAILED
     assert len(transport.calls) == 2
+    assert [message.body for message in transport.calls] == [
+        "Oleh: Please call me tomorrow.",
+        "New website enquiry.\nName: Oleh\nMessage: Please call me tomorrow.",
+    ]
     assert {record["delivery_role"] for record in audit.records.values()} == {"VISITOR", "OWNER"}
     assert [record["provider_call_count"] for record in audit.records.values()] == ["1", "1"]
 
@@ -188,7 +194,10 @@ def test_audit_is_hash_only_for_numbers_and_user_message() -> None:
     serialized = json.dumps(audit.records)
     for raw in ("+12025550124", "+12025550125", "Please call me tomorrow."):
         assert raw not in serialized
-    assert all({"delivery_mode", "delivery_role", "message_length", "message_hash", "recipient_hash"} <= set(record) for record in audit.records.values())
+    assert all({
+        "delivery_mode", "delivery_role", "message_length", "message_hash",
+        "message_encoding", "message_segment_count", "recipient_hash",
+    } <= set(record) for record in audit.records.values())
 
 
 def test_both_dry_run_has_two_hash_only_audit_candidates_and_zero_calls() -> None:
@@ -200,6 +209,7 @@ def test_both_dry_run_has_two_hash_only_audit_candidates_and_zero_calls() -> Non
     assert [leg["role"] for leg in result["legs"]] == ["VISITOR", "OWNER"]
     assert len(result["audit_candidates"]) == 2
     assert all(item["provider_call_count"] == 0 and item["transport_invoked"] is False for item in result["audit_candidates"])
+    assert all(item["message_segment_count"] == 1 for item in result["audit_candidates"])
     serialized = json.dumps(result["audit_candidates"])
     assert "+12025550124" not in serialized and "+12025550125" not in serialized
     assert "Please call me tomorrow." not in serialized

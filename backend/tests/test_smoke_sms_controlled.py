@@ -51,6 +51,9 @@ def test_dry_run_never_constructs_client_and_masks_numbers() -> None:
     assert code == 0 and result["typed_outcome"] == "DRY_RUN"
     assert result["provider_call_count"] == 0 and created == []
     assert "+12025550124" not in str(result) and "+12025550123" not in str(result)
+    assert "Please confirm my enquiry." not in str(result)
+    assert result["message_encoding"] == "GSM-7"
+    assert result["message_segment_count"] == 1
 
 
 def test_execute_requires_owner_authorization_before_client() -> None:

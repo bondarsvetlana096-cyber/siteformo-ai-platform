@@ -137,6 +137,7 @@ def test_exact_origin_and_no_store(monkeypatch: pytest.MonkeyPatch) -> None:
     assert accepted.status_code == 201 and accepted.headers["cache-control"] == "no-store"
     assert accepted.json()["status"] == "accepted"
     assert len(transport.calls) == 1
+    assert transport.calls[0][0].body == "Oleh: Please confirm my enquiry."
 
 
 @pytest.mark.parametrize(("phone", "detail"), [("2025550124", "invalid_e164_phone"), ("+447700900123", "sms_country_not_allowed")])
@@ -184,4 +185,6 @@ def test_dry_run_is_privacy_safe_and_has_no_transport() -> None:
     assert result["audit_candidate"]["provider_call_count"] == 0
     assert result["audit_candidate"]["transport_invoked"] is False
     assert "+12025550124" not in str(result)
-    assert "Hello, Oleh." in result["sms_body"]
+    assert "Please confirm my enquiry." not in str(result)
+    assert result["legs"][0]["message_encoding"] == "GSM-7"
+    assert result["legs"][0]["message_segment_count"] == 1

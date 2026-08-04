@@ -9,7 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.services.sms_delivery.models import (
-    SMSDeliveryMode, normalize_message, render_owner_alert, render_visitor_notification, validate_destination,
+    SMSDeliveryMode, analyze_sms_segments, normalize_message, render_owner_alert,
+    render_visitor_notification, validate_destination, validate_user_message,
 )
 
 
@@ -18,7 +19,7 @@ def masked_phone(phone: str) -> str:
 
 
 def build_dry_run(*, first_name: str | None, phone: str | None, message: str, idempotency_key: str, countries: frozenset[str], mode: SMSDeliveryMode = SMSDeliveryMode.VISITOR_NOTIFICATION, owner_to: str | None = None) -> dict[str, object]:
-    enquiry = normalize_message(message, required=True)
+    enquiry = validate_user_message(message)
     idempotency_hash = hashlib.sha256(idempotency_key.encode()).hexdigest()
     visitor = validate_destination(phone or "", countries) if mode in {SMSDeliveryMode.VISITOR_NOTIFICATION, SMSDeliveryMode.BOTH} else None
     owner = validate_destination(owner_to or "", countries) if mode in {SMSDeliveryMode.OWNER_ALERT, SMSDeliveryMode.BOTH} else None
@@ -35,6 +36,8 @@ def build_dry_run(*, first_name: str | None, phone: str | None, message: str, id
         "recipient_hash": hashlib.sha256(recipient.encode()).hexdigest(),
         "delivery_mode": mode.value, "delivery_role": role,
         "message_length": len(body), "message_hash": hashlib.sha256(body.encode()).hexdigest(),
+        "message_encoding": analyze_sms_segments(body).encoding,
+        "message_segment_count": analyze_sms_segments(body).segment_count,
         "transport_invoked": False, "provider_call_count": 0, "http_status": None,
         "message_sid_present": False, "message_sid_hash": "", "typed_outcome": "DRY_RUN",
         "final_state": "NOT_DISPATCHED",
@@ -43,8 +46,14 @@ def build_dry_run(*, first_name: str | None, phone: str | None, message: str, id
         "request": {"first_name_present": bool(first_name), "visitor_phone": masked_phone(visitor) if visitor else None, "message_length": len(enquiry), "idempotency_key_hash": idempotency_hash},
         "normalized_phone": masked_phone(visitor) if visitor else None,
         "delivery_mode": mode.value,
-        "sms_body": legs[0][2],
-        "legs": [{"role": role, "recipient": masked_phone(recipient), "body": body} for role, recipient, body in legs],
+        "legs": [{
+            "role": role,
+            "recipient": masked_phone(recipient),
+            "message_length": len(body),
+            "message_hash": hashlib.sha256(body.encode()).hexdigest(),
+            "message_encoding": analyze_sms_segments(body).encoding,
+            "message_segment_count": analyze_sms_segments(body).segment_count,
+        } for role, recipient, body in legs],
         "typed_outcome": "DRY_RUN",
         "audit_candidate": audits[0],
         "audit_candidates": audits,
