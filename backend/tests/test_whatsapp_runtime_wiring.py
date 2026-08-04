@@ -168,7 +168,7 @@ def test_business_template_form_has_content_fields_and_no_body() -> None:
     message = replace(render_demo_message("Alex", "corr"), destination_e164="+353800000002")
     form = TwilioWhatsAppTransport(config, FakeClient()).form(message)
     assert form["ContentSid"] == "HX" + "2" * 32
-    assert form["ContentVariables"] == '{"1":"Alex"}'
+    assert form["ContentVariables"] == '{"first_name":"Alex"}'
     assert "Body" not in form and form["From"] == "whatsapp:+353800000001"
 
 
@@ -278,7 +278,7 @@ def test_service_uses_server_fallback_and_hash_only_identity() -> None:
         )
     )
     assert result[0] == "provider_accepted"
-    assert transport.calls[0][0].content_variables == {"1": "there"}
+    assert transport.calls[0][0].content_variables == {"first_name": "there"}
     assert transport.calls[0][0].destination_e164 == "+353871234567"
     identity = state.identities[0]
     assert getattr(identity, "recipient_hash") != "+353871234567"

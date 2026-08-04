@@ -44,5 +44,5 @@ def render_demo_message(name: str, correlation_id: str) -> WhatsAppMessage:
     body = TEMPLATE_BODY.replace("{{1}}", name)
     return WhatsAppMessage(
         "", body, MESSAGE_CONTRACT_ID, MESSAGE_CONTRACT_VERSION, "en", correlation_id,
-        MappingProxyType({"1": name}),
+        MappingProxyType({"first_name": name}),
     )
