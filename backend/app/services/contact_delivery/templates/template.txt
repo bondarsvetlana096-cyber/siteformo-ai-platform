@@ -1,39 +1,9 @@
-Hello {{first_name}},
+Hi {{first_name}},
 
-Thank you for testing the contact form on the SiteFormo demonstration website.
+Your message:
 
-The enquiry below shows how a message from a customer could be delivered from your future website.
+"{{message}}"
 
-NEW CUSTOMER ENQUIRY
+This is an example of how your customers can begin an email conversation from your future website.
 
-Name
-{{first_name}} {{last_name}}
-
-Preferred reply method
-{{preferred_method}}
-
-Contact details
-{{contact_value}}
-
-Message
-{{message}}
-
-HOW THIS COULD WORK ON YOUR WEBSITE
-
-A visitor chooses the most convenient way to be contacted, enters their details and sends a message.
-
-You receive a clear, organised enquiry containing the information you need to continue the conversation. How you respond and which communication channel you use remain entirely your choice.
-
-Your own website can use the same simple process, adapted to your business, your customers and the way you prefer to work.
-
-ABOUT YOUR INFORMATION
-
-The information submitted through this demonstration is used only to prepare and send this demonstration email.
-
-It is not used for marketing, not added to a mailing list and not shared with third parties for advertising purposes.
-
-No further emails will be sent unless you submit another demonstration enquiry.
-
-Thank you for exploring SiteFormo.
-
-The SiteFormo Team
+SiteFormo

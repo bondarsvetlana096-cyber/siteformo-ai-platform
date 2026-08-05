@@ -330,6 +330,33 @@ def test_final_templates_are_link_free_and_escape_visitor_html() -> None:
     assert rendered.reply_to == "siteformo@siteformo.com"
 
 
+def test_final_templates_put_the_exact_visitor_message_before_the_explanation() -> None:
+    rendered = render(
+        Enquiry(
+            first_name="Oleh",
+            last_name="Owner",
+            preferred_method="Email",
+            contact_value=RECIPIENT,
+            message="I'd like to book a meeting",
+        )
+    )
+    assert rendered.text == (
+        "Hi Oleh,\n\n"
+        "Your message:\n\n"
+        '"I\'d like to book a meeting"\n\n'
+        "This is an example of how your customers can begin an email conversation "
+        "from your future website.\n\n"
+        "SiteFormo\n"
+    )
+    assert rendered.html.index("Your message:") < rendered.html.index(
+        "I&#x27;d like to book a meeting"
+    ) < rendered.html.index("This is an example of how your customers can begin")
+    assert "&quot;I&#x27;d like to book a meeting&quot;" in rendered.html
+    assert "Thank you for testing" not in rendered.text
+    assert "HOW THIS COULD WORK" not in rendered.text
+    assert "ABOUT YOUR INFORMATION" not in rendered.text
+
+
 def test_provider_request_uses_governed_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
