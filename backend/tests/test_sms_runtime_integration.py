@@ -79,7 +79,7 @@ def runtime_service(outcome=SmsTransportOutcome.ACCEPTED):
 
 
 def payload(key="sms-runtime-key-0001", phone="+12025550124"):
-    return {"first_name": "Oleh", "phone": phone, "message": "Please confirm my enquiry.", "idempotency_key": key}
+    return {"first_name": "Oleh", "phone": phone, "customer_message": "Hi SiteFormo", "idempotency_key": key}
 
 
 @pytest.fixture(autouse=True)
@@ -137,7 +137,10 @@ def test_exact_origin_and_no_store(monkeypatch: pytest.MonkeyPatch) -> None:
     assert accepted.status_code == 201 and accepted.headers["cache-control"] == "no-store"
     assert accepted.json()["status"] == "accepted"
     assert len(transport.calls) == 1
-    assert transport.calls[0][0].body == "Oleh: Please confirm my enquiry."
+    assert transport.calls[0][0].body == (
+        'Hi Oleh.\n\nWe received your message:\n\n"Hi SiteFormo"\n\nThis is an example of how your '
+        "customers can start an SMS conversation from your future website.\n\nSiteFormo"
+    )
 
 
 @pytest.mark.parametrize(("phone", "detail"), [("2025550124", "invalid_e164_phone"), ("+447700900123", "sms_country_not_allowed")])
@@ -180,7 +183,7 @@ def test_runtime_typed_provider_failures_are_single_call(monkeypatch: pytest.Mon
 
 
 def test_dry_run_is_privacy_safe_and_has_no_transport() -> None:
-    result = build_dry_run(first_name="Oleh", phone="+12025550124", message="Please confirm my enquiry.", idempotency_key="sms-runtime-key-0001", countries=frozenset({"US"}))
+    result = build_dry_run(first_name="Oleh", phone="+12025550124", message="Hi SiteFormo", idempotency_key="sms-runtime-key-0001", countries=frozenset({"US"}))
     assert result["typed_outcome"] == "DRY_RUN"
     assert result["audit_candidate"]["provider_call_count"] == 0
     assert result["audit_candidate"]["transport_invoked"] is False

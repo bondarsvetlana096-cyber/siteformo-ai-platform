@@ -13,6 +13,7 @@ PREMIUM_PREFIXES = {"US": ("+1900",), "GB": ("+449",), "IE": ("+35315",)}
 
 MESSAGE_CONTRACT_ID = "SITEFORMO_SMS_DEMO_NOTIFICATION_V1"
 MESSAGE_CONTRACT_VERSION = "v1"
+SMS_EXAMPLE_CUSTOMER_MESSAGE_MAX_LENGTH = 30
 
 GSM7_BASIC = frozenset(
     "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
@@ -97,6 +98,26 @@ def validate_user_message(value: str | None) -> str:
     return candidate
 
 
+def validate_sms_example_customer_message(value: str | None) -> str:
+    """Validate visitor-authored copy without rewriting it."""
+    if value is None:
+        raise ValueError("sms_message_required")
+    candidate = value.strip()
+    if not candidate:
+        raise ValueError("sms_message_required")
+    if len(candidate) > SMS_EXAMPLE_CUSTOMER_MESSAGE_MAX_LENGTH:
+        raise ValueError("sms_message_too_long")
+    if "\r" in candidate or "\n" in candidate:
+        raise ValueError("invalid_sms_message")
+    if any(unicodedata.category(char).startswith("C") for char in candidate):
+        raise ValueError("invalid_sms_message")
+    if re.search(r"(?i)\b(?:https?://|www\.)", candidate):
+        raise ValueError("sms_message_url_not_allowed")
+    if any(char not in GSM7_BASIC and char not in GSM7_EXTENSION for char in candidate):
+        raise ValueError("sms_message_unsupported_characters")
+    return candidate
+
+
 def validate_idempotency_key(value: str) -> str:
     if not IDEMPOTENCY_KEY.fullmatch(value):
         raise ValueError("invalid_idempotency_key")
@@ -111,11 +132,20 @@ class SmsMessage:
     contract_version: str = MESSAGE_CONTRACT_VERSION
 
 
-def render_visitor_notification(first_name: str | None, enquiry: str) -> str:
-    """Build the provider body from validated input under a one-segment policy."""
+def render_visitor_notification(first_name: str | None, customer_message: str | None) -> str:
+    """Build the customer-initiated SMS Example body under a one-segment policy."""
     name = normalize_first_name(first_name)
-    message = validate_user_message(enquiry)
-    body = f"{name}: {message}" if name else message
+    if not name:
+        raise ValueError("invalid_first_name")
+    message = validate_sms_example_customer_message(customer_message)
+    body = (
+        f"Hi {name}.\n\n"
+        "We received your message:\n\n"
+        f'"{message}"\n\n'
+        "This is an example of how your customers can start an SMS conversation "
+        "from your future website.\n\n"
+        "SiteFormo"
+    )
     if analyze_sms_segments(body).segment_count != 1:
         raise ValueError("sms_message_too_long")
     return body

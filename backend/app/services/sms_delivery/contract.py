@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.services.sms_delivery.models import (
     normalize_first_name,
     validate_idempotency_key,
-    validate_user_message,
+    validate_sms_example_customer_message,
 )
 
 
@@ -13,27 +13,28 @@ class SmsDemoRequest(BaseModel):
     """Future endpoint body. Trusted Example identity is intentionally absent."""
 
     model_config = ConfigDict(extra="forbid")
-    first_name: str | None = Field(default=None, max_length=80)
-    phone: str | None = Field(default=None, min_length=9, max_length=16)
-    message: str = Field(min_length=1, max_length=240)
+    first_name: str = Field(min_length=1, max_length=40)
+    phone: str = Field(min_length=9, max_length=16)
+    customer_message: str = Field(min_length=1, max_length=30)
     idempotency_key: str = Field(min_length=16, max_length=128)
 
     @field_validator("first_name")
     @classmethod
-    def validate_first_name(cls, value: str | None) -> str | None:
+    def validate_first_name(cls, value: str | None) -> str:
         normalized = normalize_first_name(value)
-        return normalized or None
+        if not normalized:
+            raise ValueError("invalid_first_name")
+        return normalized
 
     @field_validator("idempotency_key")
     @classmethod
     def validate_key(cls, value: str) -> str:
         return validate_idempotency_key(value)
 
-    @field_validator("message")
+    @field_validator("customer_message")
     @classmethod
     def validate_message(cls, value: str) -> str:
-        return validate_user_message(value)
-
+        return validate_sms_example_customer_message(value)
 
 class SmsDemoResponse(BaseModel):
     status: str

@@ -20,6 +20,7 @@ from app.services.sms_delivery.models import (
     render_visitor_notification,
     validate_destination,
     validate_idempotency_key,
+    validate_sms_example_customer_message,
     validate_user_message,
 )
 from app.services.sms_delivery.transport import SmsTransport, SmsTransportOutcome
@@ -162,7 +163,9 @@ class SmsDeliveryService:
             self.config.require_ready()
             key = validate_idempotency_key(idempotency_key)
             name = normalize_first_name(first_name)
-            enquiry = validate_user_message(message)
+            enquiry = validate_user_message(message) if self.config.delivery_mode in {
+                SMSDeliveryMode.OWNER_ALERT, SMSDeliveryMode.BOTH,
+            } else validate_sms_example_customer_message(message)
             visitor = validate_destination(phone or "", self.config.allowed_countries) if self.config.delivery_mode in {
                 SMSDeliveryMode.VISITOR_NOTIFICATION, SMSDeliveryMode.BOTH,
             } or self.config.owner_requires_visitor_contact else None

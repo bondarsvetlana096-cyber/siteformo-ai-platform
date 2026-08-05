@@ -15,6 +15,7 @@ from app.services.sms_delivery.models import (
     analyze_sms_segments,
     render_visitor_notification,
     validate_destination,
+    validate_sms_example_customer_message,
     validate_user_message,
 )
 from app.services.sms_delivery.service import SmsDeliveryError, SmsDeliveryService
@@ -92,7 +93,7 @@ def make_service(*, outcome: SmsTransportOutcome = SmsTransportOutcome.ACCEPTED,
 
 
 async def send(service: SmsDeliveryService, key: str = "sms-idempotency-0001", **changes):
-    values = {"example_id": "TRUSTED_EXAMPLE", "phone": "+12025550124", "message": "Please confirm my enquiry.", "first_name": "Oleh", "idempotency_key": key, "client_id": "privacy-safe-client"}
+    values = {"example_id": "TRUSTED_EXAMPLE", "phone": "+12025550124", "message": "Hi SiteFormo", "first_name": "Oleh", "idempotency_key": key, "client_id": "privacy-safe-client"}
     values.update(changes)
     return await service.send(**values)
 
@@ -106,7 +107,7 @@ def deny_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 def test_contract_excludes_server_authority_and_provider_fields() -> None:
-    assert set(SmsDemoRequest.model_fields) == {"first_name", "phone", "message", "idempotency_key"}
+    assert set(SmsDemoRequest.model_fields) == {"first_name", "phone", "customer_message", "idempotency_key"}
     with pytest.raises(Exception):
         SmsDemoRequest(first_name="Oleh", phone="+12025550124", idempotency_key="sms-idempotency-0001", example_context="attacker")
 
@@ -122,10 +123,24 @@ def test_valid_and_invalid_e164_and_country_allowlist() -> None:
         validate_destination("+19005550123", frozenset({"US"}))
 
 
-def test_user_authored_message_named_neutral_and_trimmed() -> None:
-    assert render_visitor_notification("Oleh", "  Keep My CASE  ") == "Oleh: Keep My CASE"
-    assert render_visitor_notification(None, "  Keep My CASE  ") == "Keep My CASE"
-    assert render_visitor_notification(None, "<b>literal</b>") == "<b>literal</b>"
+def test_server_owned_sms_example_message() -> None:
+    assert render_visitor_notification("  Oleh  ", "Hi SiteFormo") == (
+        'Hi Oleh.\n\nWe received your message:\n\n"Hi SiteFormo"\n\n'
+        "This is an example of how your customers can start an SMS conversation "
+        "from your future website.\n\nSiteFormo"
+    )
+    with pytest.raises(ValueError, match="invalid_first_name"):
+        render_visitor_notification(None, "Hi SiteFormo")
+
+
+@pytest.mark.parametrize("message", ["line one\nline two", "bad\x00value", "🙂", "https://x.co"])
+def test_sms_example_message_rejects_unsafe_input(message: str) -> None:
+    with pytest.raises(ValueError):
+        validate_sms_example_customer_message(message)
+
+
+def test_sms_example_message_is_trimmed_not_rewritten() -> None:
+    assert validate_sms_example_customer_message("  I'd like to book a meeting  ") == "I'd like to book a meeting"
 
 
 @pytest.mark.parametrize("message", [None, "", "   "])
@@ -141,16 +156,11 @@ def test_user_message_rejects_line_breaks_and_controls(message: str) -> None:
 
 
 def test_single_segment_policy_gsm7_and_ucs2() -> None:
-    gsm = render_visitor_notification(None, "A" * 160)
+    gsm = render_visitor_notification("Oleh", "Hi SiteFormo")
     assert analyze_sms_segments(gsm).encoding == "GSM-7"
     assert analyze_sms_segments(gsm).segment_count == 1
     with pytest.raises(ValueError, match="sms_message_too_long"):
-        render_visitor_notification(None, "A" * 161)
-    ucs2 = render_visitor_notification(None, "Ж" * 70)
-    assert analyze_sms_segments(ucs2).encoding == "UCS-2"
-    assert analyze_sms_segments(ucs2).segment_count == 1
-    with pytest.raises(ValueError, match="sms_message_too_long"):
-        render_visitor_notification(None, "Ж" * 71)
+        render_visitor_notification("Oleh", "Hi SiteFormo!")
     assert analyze_sms_segments("^" * 80).units == 160
     assert analyze_sms_segments("^" * 81).segment_count == 2
     assert analyze_sms_segments("🙂" * 35).units == 70
@@ -192,6 +202,7 @@ def test_exactly_one_provider_call_idempotent_replay_and_hash_only_audit() -> No
     assert len(transport.calls) == 1
     serialized = json.dumps(audit.records)
     assert "+12025550124" not in serialized
+    assert "Hi SiteFormo" not in serialized
     assert "sms-idempotency-0001" not in serialized
     assert "SM" + "0" * 32 not in serialized
     assert "not-a-real-secret" not in serialized

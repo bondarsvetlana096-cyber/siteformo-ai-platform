@@ -18,7 +18,7 @@ def masked_phone(phone: str) -> str:
     return phone[:3] + "*" * max(3, len(phone) - 6) + phone[-3:]
 
 
-def build_dry_run(*, first_name: str | None, phone: str | None, message: str, idempotency_key: str, countries: frozenset[str], mode: SMSDeliveryMode = SMSDeliveryMode.VISITOR_NOTIFICATION, owner_to: str | None = None) -> dict[str, object]:
+def build_dry_run(*, first_name: str | None, phone: str | None, message: str | None = None, idempotency_key: str, countries: frozenset[str], mode: SMSDeliveryMode = SMSDeliveryMode.VISITOR_NOTIFICATION, owner_to: str | None = None) -> dict[str, object]:
     enquiry = validate_user_message(message)
     idempotency_hash = hashlib.sha256(idempotency_key.encode()).hexdigest()
     visitor = validate_destination(phone or "", countries) if mode in {SMSDeliveryMode.VISITOR_NOTIFICATION, SMSDeliveryMode.BOTH} else None
@@ -65,7 +65,7 @@ def main() -> int:
     parser.add_argument("--phone")
     parser.add_argument("--owner-to")
     parser.add_argument("--mode", choices=tuple(mode.value for mode in SMSDeliveryMode), default=SMSDeliveryMode.VISITOR_NOTIFICATION.value)
-    parser.add_argument("--first-name")
+    parser.add_argument("--first-name", required=True)
     parser.add_argument("--message", required=True)
     parser.add_argument("--idempotency-key", required=True)
     parser.add_argument("--allowed-country", action="append", required=True, choices=("US", "GB", "IE"))

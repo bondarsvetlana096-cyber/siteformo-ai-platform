@@ -34,7 +34,7 @@ class SmokeRequest:
     endpoint: str
     origin: str
     recipient: str
-    first_name: str | None
+    first_name: str
     message: str
     idempotency_key: str
     execute: bool
@@ -94,7 +94,7 @@ def run_smoke(
             json={
                 "first_name": request.first_name,
                 "phone": request.recipient,
-                "message": request.message,
+                "customer_message": request.message,
                 "idempotency_key": request.idempotency_key,
             },
         )
@@ -126,7 +126,7 @@ def main() -> int:
         "--recipient",
         help="Recipient E.164; omit to read SITEFORMO_SMS_SMOKE_RECIPIENT from the process environment.",
     )
-    parser.add_argument("--first-name")
+    parser.add_argument("--first-name", required=True)
     parser.add_argument("--message", required=True)
     parser.add_argument("--idempotency-key", required=True)
     parser.add_argument("--execute", action="store_true")

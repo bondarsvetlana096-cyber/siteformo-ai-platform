@@ -22,7 +22,7 @@ def request(*, execute: bool = False, authorized: bool = False, recipient: str =
         "https://dev.siteformo.com",
         recipient,
         "Oleh",
-        "Please confirm my enquiry.",
+        "Hi SiteFormo",
         "sms-controlled-key-0001",
         execute,
         authorized,
@@ -78,7 +78,7 @@ def test_execute_calls_endpoint_exactly_once_after_all_gates() -> None:
     assert result["provider_call_count"] == 1 and len(calls) == 1
     assert calls[0][1]["json"]["phone"] == "+12025550124"
     assert "body" not in calls[0][1]["json"]
-    assert calls[0][1]["json"]["message"] == "Please confirm my enquiry."
+    assert calls[0][1]["json"]["customer_message"] == "Hi SiteFormo"
 
 
 def test_invalid_or_disallowed_recipient_never_constructs_client() -> None:

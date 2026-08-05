@@ -125,7 +125,7 @@ async def start_sms_demo(
         result = await _sms_service.send(
             example_id=example_id,
             phone=payload.phone,
-            message=payload.message,
+            message=payload.customer_message,
             first_name=payload.first_name,
             idempotency_key=payload.idempotency_key,
             client_id=request.client.host if request.client else "unknown",
