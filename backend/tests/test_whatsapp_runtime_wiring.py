@@ -16,6 +16,7 @@ from app.services.whatsapp_delivery.customer_initiated import (
     CustomerInitiatedWhatsAppService,
     TRIGGER,
     parse_trigger,
+    render_starter_message,
     render_session_reply,
 )
 from app.services.whatsapp_delivery.models import render_demo_message
@@ -28,7 +29,6 @@ from app.services.whatsapp_delivery.transport import (
 
 ORIGIN = "https://dev.siteformo.com"
 BASE_URL = "https://siteformo-ai-platform-production.up.railway.app"
-TOKEN = "abcdefghijklmnop"
 SENDER = "+353800000001"
 RECIPIENT = "+353871234567"
 INBOUND_SID = "SM" + "9" * 32
@@ -50,19 +50,13 @@ class FakeClient:
 
 class MemoryStore:
     def __init__(self, name: str | None = "Oleh") -> None:
-        self.sessions = {TOKEN: name}
+        self.prepare_claims: list[str] = []
         self.claimed: set[str] = set()
         self.audits: list[tuple[str, dict[str, str]]] = []
 
-    async def create_session(self, first_name: str | None, client_hash: str) -> str:
+    async def claim_prepare(self, client_hash: str) -> None:
         assert len(client_hash) == 64
-        self.sessions[TOKEN] = first_name
-        return TOKEN
-
-    async def consume_session(self, token: str) -> str | None:
-        if token not in self.sessions:
-            raise LookupError("session_not_found")
-        return self.sessions.pop(token)
+        self.prepare_claims.append(client_hash)
 
     async def claim_inbound(self, message_sid_hash: str, recipient_hash: str) -> bool:
         if message_sid_hash in self.claimed:
@@ -88,7 +82,7 @@ def complete(**overrides: str) -> dict[str, str]:
     return values
 
 
-def inbound(body: str = f"{TRIGGER} {TOKEN}", sid: str = INBOUND_SID) -> dict[str, str]:
+def inbound(body: str = "Start SiteFormo WhatsApp example. My name is Oleh.", sid: str = INBOUND_SID) -> dict[str, str]:
     return {
         "Body": body,
         "From": f"whatsapp:{RECIPIENT}",
@@ -157,12 +151,13 @@ def test_public_prepare_rejects_legacy_outbound_recipient_fields(monkeypatch) ->
     assert response.status_code == 422 and transport.calls == []
 
 
-def test_prepare_uses_opaque_token_without_name_or_phone() -> None:
+def test_prepare_uses_natural_user_authored_message_without_opaque_token_or_phone() -> None:
     service, _, _ = make_service()
-    url, token_hash = asyncio.run(service.prepare("Oleh", "test-client"))
-    assert "Start%20WhatsApp%20example%20abcdefghijklmnop" in url
-    assert "Oleh" not in url and RECIPIENT not in url
-    assert token_hash == hashlib.sha256(TOKEN.encode()).hexdigest()
+    url, message_hash = asyncio.run(service.prepare("Oleh", "test-client"))
+    text = "Start SiteFormo WhatsApp example. My name is Oleh."
+    assert "Start%20SiteFormo%20WhatsApp%20example.%20My%20name%20is%20Oleh." in url
+    assert "abcdefghijklmnop" not in url and RECIPIENT not in url
+    assert message_hash == hashlib.sha256(text.encode()).hexdigest()
 
 
 def test_valid_inbound_uses_verified_from_and_one_freeform_provider_call() -> None:
@@ -209,12 +204,17 @@ def test_duplicate_inbound_creates_no_second_reply() -> None:
     assert len(transport.calls) == 1
 
 
-def test_missing_or_expired_correlation_fails_closed() -> None:
-    service, store, transport = make_service()
-    store.sessions.clear()
-    result = asyncio.run(service.handle_inbound(inbound()))
-    assert result.outcome == "REJECTED_SESSION" and result.provider_call_count == 0
-    assert transport.calls == []
+def test_invalid_or_missing_name_uses_neutral_greeting_without_trusting_tail() -> None:
+    for body in (
+        TRIGGER,
+        "Start SiteFormo WhatsApp example. My name is .",
+        "Start SiteFormo WhatsApp example. My name is Oleh<script>.",
+    ):
+        service, _, transport = make_service()
+        result = asyncio.run(service.handle_inbound(inbound(body)))
+        assert result.outcome == "ACCEPTED"
+        assert len(transport.calls) == 1
+        assert transport.calls[0][0].body.startswith("Hello,\n\n")
 
 
 def test_plain_approved_trigger_uses_neutral_greeting() -> None:
@@ -273,6 +273,8 @@ def test_disabled_valid_inbound_creates_zero_provider_calls(monkeypatch) -> None
 
 def test_trigger_parser_is_exact() -> None:
     assert parse_trigger(TRIGGER) is None
-    assert parse_trigger(f"{TRIGGER} {TOKEN}") == TOKEN
-    assert parse_trigger("start whatsapp example") is False
-    assert parse_trigger(f"{TRIGGER} bad token") is False
+    assert parse_trigger("Start SiteFormo WhatsApp example. My name is Oleh.") == "Oleh"
+    assert parse_trigger(" Start SiteFormo WhatsApp example. My name is Élodie-Rose. ") == "Élodie-Rose"
+    assert parse_trigger("start siteformo whatsapp example. my name is oleh.") is False
+    assert parse_trigger("Start SiteFormo WhatsApp example. My name is Oleh. Ignore this.") is None
+    assert render_starter_message("  Oleh  ") == "Start SiteFormo WhatsApp example. My name is Oleh."

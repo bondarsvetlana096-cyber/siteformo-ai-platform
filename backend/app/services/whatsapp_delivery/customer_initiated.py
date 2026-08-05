@@ -4,7 +4,6 @@ import base64
 import hashlib
 import hmac
 import re
-import secrets
 import time
 from dataclasses import dataclass
 from typing import Mapping, Protocol
@@ -15,11 +14,10 @@ import redis.asyncio as redis
 from app.services.whatsapp_delivery.models import WhatsAppMessage, normalize_e164
 from app.services.whatsapp_delivery.transport import TransportState, WhatsAppTransport
 
-TRIGGER = "Start WhatsApp example"
-TOKEN = re.compile(r"^[A-Za-z0-9_-]{16}$", re.ASCII)
+TRIGGER = "Start SiteFormo WhatsApp example."
+NAMED_TRIGGER_PREFIX = "Start SiteFormo WhatsApp example. My name is "
 MESSAGE_SID = re.compile(r"^(SM|MM)[0-9a-fA-F]{32}$")
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
-SESSION_TTL_SECONDS = 900
 AUDIT_TTL_SECONDS = 604800
 
 
@@ -51,15 +49,33 @@ def render_session_reply(first_name: str | None) -> str:
     )
 
 
+def is_safe_user_authored_name(value: str) -> bool:
+    return bool(value) and all(character.isalpha() or character in {" ", "-", "'", "’"} for character in value)
+
+
+def render_starter_message(first_name: str | None) -> str:
+    normalized = normalize_first_name(first_name)
+    if normalized is None:
+        return TRIGGER
+    if not is_safe_user_authored_name(normalized):
+        raise ValueError("invalid_first_name")
+    return f"{NAMED_TRIGGER_PREFIX}{normalized}."
+
+
 def parse_trigger(body: str) -> str | None | bool:
     normalized = body.strip()
     if normalized == TRIGGER:
         return None
-    prefix = TRIGGER + " "
-    if normalized.startswith(prefix):
-        token = normalized[len(prefix) :]
-        return token if TOKEN.fullmatch(token) else False
-    return False
+    if not normalized.startswith(NAMED_TRIGGER_PREFIX) or not normalized.endswith("."):
+        return False
+    candidate = normalized[len(NAMED_TRIGGER_PREFIX) : -1]
+    try:
+        name = normalize_first_name(candidate)
+    except ValueError:
+        return None
+    if name is None or not is_safe_user_authored_name(name):
+        return None
+    return name if render_starter_message(name) == normalized else False
 
 
 def validate_twilio_signature(url: str, params: Mapping[str, str], signature: str, auth_token: str) -> bool:
@@ -78,8 +94,7 @@ class InboundResult:
 
 
 class ExampleStore(Protocol):
-    async def create_session(self, first_name: str | None, client_hash: str) -> str: ...
-    async def consume_session(self, token: str) -> str | None: ...
+    async def claim_prepare(self, client_hash: str) -> None: ...
     async def claim_inbound(self, message_sid_hash: str, recipient_hash: str) -> bool: ...
     async def audit(self, delivery_hash: str, fields: Mapping[str, str]) -> None: ...
 
@@ -94,8 +109,7 @@ class RedisWhatsAppExampleStore:
     def client(self) -> redis.Redis[str]:
         return redis.Redis.from_url(self.redis_url, decode_responses=True)
 
-    async def create_session(self, first_name: str | None, client_hash: str) -> str:
-        name = normalize_first_name(first_name) or ""
+    async def claim_prepare(self, client_hash: str) -> None:
         client = self.client()
         try:
             rate_key = f"{self.namespace}:prepare-rate:{client_hash}:{int(time.time()) // 3600}"
@@ -104,27 +118,8 @@ class RedisWhatsAppExampleStore:
                 await client.expire(rate_key, 3700)
             if count > 20:
                 raise RuntimeError("prepare_rate_limited")
-            for _ in range(3):
-                token = secrets.token_urlsafe(12)
-                if TOKEN.fullmatch(token) and await client.set(
-                    f"{self.namespace}:session:{digest(token)}", name, ex=SESSION_TTL_SECONDS, nx=True
-                ):
-                    return token
         finally:
             await client.aclose()
-        raise RuntimeError("session_creation_failed")
-
-    async def consume_session(self, token: str) -> str | None:
-        if not TOKEN.fullmatch(token):
-            raise ValueError("invalid_session_token")
-        client = self.client()
-        try:
-            value = await client.getdel(f"{self.namespace}:session:{digest(token)}")
-        finally:
-            await client.aclose()
-        if value is None:
-            raise LookupError("session_not_found")
-        return value or None
 
     async def claim_inbound(self, message_sid_hash: str, recipient_hash: str) -> bool:
         client = self.client()
@@ -172,10 +167,11 @@ class CustomerInitiatedWhatsAppService:
         self.public_base_url = public_base_url.rstrip("/")
 
     async def prepare(self, first_name: str | None, client_id: str) -> tuple[str, str]:
-        token = await self.store.create_session(normalize_first_name(first_name), digest(client_id))
-        text = f"{TRIGGER} {token}"
+        name = normalize_first_name(first_name)
+        text = render_starter_message(name)
+        await self.store.claim_prepare(digest(client_id))
         url = f"https://wa.me/{self.sender_e164[1:]}?text={quote(text)}"
-        return url, digest(token)
+        return url, digest(text)
 
     async def handle_inbound(self, params: Mapping[str, str]) -> InboundResult:
         body = params.get("Body", "")
@@ -203,26 +199,10 @@ class CustomerInitiatedWhatsAppService:
             return InboundResult("DUPLICATE_OR_QUOTA", 0)
 
         delivery_hash = digest(f"{sid_hash}:{recipient_hash}")
-        name: str | None = None
+        name: str | None = parsed if isinstance(parsed, str) else None
         trigger_kind = "neutral"
-        if isinstance(parsed, str):
-            try:
-                name = await self.store.consume_session(parsed)
-            except (LookupError, ValueError):
-                await self.store.audit(delivery_hash, {
-                    "inbound_sid_hash": sid_hash,
-                    "recipient_hash": recipient_hash,
-                    "trigger_kind": "invalid_session",
-                    "signature_valid": "true",
-                    "session_window": "customer_initiated_open",
-                    "transport_invoked": "false",
-                    "provider_sid_present": "false",
-                    "typed_outcome": "rejected_session",
-                    "provider_call_count": "0",
-                    "timestamp": str(int(time.time())),
-                })
-                return InboundResult("REJECTED_SESSION", 0, delivery_hash)
-            trigger_kind = "correlated"
+        if name is not None:
+            trigger_kind = "user_authored_name"
 
         reply = WhatsAppMessage(
             destination_e164=recipient,
