@@ -125,7 +125,7 @@ def test_valid_and_invalid_e164_and_country_allowlist() -> None:
 
 def test_server_owned_sms_example_message() -> None:
     assert render_visitor_notification("  Oleh  ", "Hi SiteFormo") == (
-        'Hi Oleh.\n\nWe received your message:\n\n"Hi SiteFormo"\n\n'
+        'Hi Oleh.\n\nYour message:\n\n"Hi SiteFormo"\n\n'
         "This is an example of how your customers can start an SMS conversation "
         "from your future website.\n\nSiteFormo"
     )
@@ -160,7 +160,7 @@ def test_single_segment_policy_gsm7_and_ucs2() -> None:
     assert analyze_sms_segments(gsm).encoding == "GSM-7"
     assert analyze_sms_segments(gsm).segment_count == 1
     with pytest.raises(ValueError, match="sms_message_too_long"):
-        render_visitor_notification("Oleh", "Hi SiteFormo!")
+        render_visitor_notification("Oleh", "1234567890123456789012345")
     assert analyze_sms_segments("^" * 80).units == 160
     assert analyze_sms_segments("^" * 81).segment_count == 2
     assert analyze_sms_segments("🙂" * 35).units == 70

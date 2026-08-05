@@ -138,7 +138,7 @@ def test_exact_origin_and_no_store(monkeypatch: pytest.MonkeyPatch) -> None:
     assert accepted.json()["status"] == "accepted"
     assert len(transport.calls) == 1
     assert transport.calls[0][0].body == (
-        'Hi Oleh.\n\nWe received your message:\n\n"Hi SiteFormo"\n\nThis is an example of how your '
+        'Hi Oleh.\n\nYour message:\n\n"Hi SiteFormo"\n\nThis is an example of how your '
         "customers can start an SMS conversation from your future website.\n\nSiteFormo"
     )
 

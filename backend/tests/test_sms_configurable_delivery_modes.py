@@ -104,7 +104,7 @@ def test_visitor_notification_targets_only_visitor_and_replays_once() -> None:
     assert result.outcome is SmsTransportOutcome.ACCEPTED
     assert len(transport.calls) == 1 and transport.calls[0].destination_e164 == "+12025550124"
     assert transport.calls[0].body == (
-        'Hi Oleh.\n\nWe received your message:\n\n"Call me back"\n\nThis is an example of how your '
+        'Hi Oleh.\n\nYour message:\n\n"Call me back"\n\nThis is an example of how your '
         "customers can start an SMS conversation from your future website.\n\nSiteFormo"
     )
     assert next(iter(audit.records.values()))["delivery_role"] == SMSDeliveryRole.VISITOR.value
@@ -157,7 +157,7 @@ def test_both_has_two_independent_legs_and_partial_aggregate() -> None:
     assert result.outcome is SmsAggregateOutcome.VISITOR_ACCEPTED_OWNER_FAILED
     assert len(transport.calls) == 2
     assert [message.body for message in transport.calls] == [
-        'Hi Oleh.\n\nWe received your message:\n\n"Call me back"\n\nThis is an example of how your customers can start an SMS conversation from your future website.\n\nSiteFormo',
+        'Hi Oleh.\n\nYour message:\n\n"Call me back"\n\nThis is an example of how your customers can start an SMS conversation from your future website.\n\nSiteFormo',
         "New website enquiry.\nName: Oleh\nMessage: Call me back",
     ]
     assert {record["delivery_role"] for record in audit.records.values()} == {"VISITOR", "OWNER"}

@@ -140,7 +140,7 @@ def render_visitor_notification(first_name: str | None, customer_message: str | 
     message = validate_sms_example_customer_message(customer_message)
     body = (
         f"Hi {name}.\n\n"
-        "We received your message:\n\n"
+        "Your message:\n\n"
         f'"{message}"\n\n'
         "This is an example of how your customers can start an SMS conversation "
         "from your future website.\n\n"
