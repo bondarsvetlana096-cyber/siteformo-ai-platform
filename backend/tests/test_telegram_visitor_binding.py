@@ -160,12 +160,12 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(len(transport.calls), 1)
         self.assertEqual(
             transport.calls[0].text,
-            "Hello, Alex.\n\n"
+            "Hi Alex.\n\n"
             "Your message:\n\n"
             '"I\'d like to book a meeting"\n\n'
             "This is an example of how your customers can begin a Telegram conversation "
             "from your future website.\n\n"
-            "From this point the conversation can continue directly in Telegram.\n\n"
+            "From this point, the conversation can continue directly in Telegram.\n\n"
             "SiteFormo",
         )
         self.assertNotIn("parse_mode", repr(transport.calls[0]))
@@ -183,15 +183,27 @@ class BindingTests(unittest.TestCase):
             '"I\'d like to book a meeting"\n\n'
             "This is an example of how your customers can begin a Telegram conversation "
             "from your future website.\n\n"
-            "From this point the conversation can continue directly in Telegram.\n\n"
+            "From this point, the conversation can continue directly in Telegram.\n\n"
             "SiteFormo",
         )
 
     def test_named_message_uses_first_name_only(self) -> None:
         rendered = render_demo_message("Oleh", "Call me back")
-        self.assertTrue(rendered.startswith("Hello, Oleh.\n\n"))
+        self.assertTrue(rendered.startswith("Hi Oleh.\n\n"))
         self.assertNotIn("Last name", rendered)
         self.assertIn('Your message:\n\n"Call me back"', rendered)
+
+    def test_final_owner_approved_reply_contract_is_exact(self) -> None:
+        self.assertEqual(
+            render_demo_message("Oleh", "Hi SiteFormo"),
+            "Hi Oleh.\n\n"
+            "Your message:\n\n"
+            '"Hi SiteFormo"\n\n'
+            "This is an example of how your customers can begin a Telegram conversation "
+            "from your future website.\n\n"
+            "From this point, the conversation can continue directly in Telegram.\n\n"
+            "SiteFormo",
+        )
 
     def test_message_is_trimmed_preserved_and_strictly_validated(self) -> None:
         store = MemoryStore()
@@ -238,7 +250,7 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(duplicate.state, BindingState.REPLAY_BLOCKED)
         self.assertEqual(other_chat.state, BindingState.REPLAY_BLOCKED)
         self.assertEqual(len(transport2.calls), 1)
-        self.assertTrue(transport2.calls[0].text.startswith("Hello, Alex."))
+        self.assertTrue(transport2.calls[0].text.startswith("Hi Alex."))
 
     def test_concurrent_consume_allows_one_initial_delivery(self) -> None:
         store, transport = MemoryStore(), FakeTransport()

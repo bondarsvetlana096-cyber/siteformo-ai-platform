@@ -57,13 +57,13 @@ class TelegramMessage:
 
 
 def render_demo_message(name: str | None, visitor_message: str) -> str:
-    greeting = f"Hello, {name}." if name else "Hello."
+    greeting = f"Hi {name}." if name else "Hello."
     return (
         f"{greeting}\n\n"
         "Your message:\n\n"
         f'"{visitor_message}"\n\n'
         "This is an example of how your customers can begin a Telegram conversation "
         "from your future website.\n\n"
-        "From this point the conversation can continue directly in Telegram.\n\n"
+        "From this point, the conversation can continue directly in Telegram.\n\n"
         "SiteFormo"
     )
