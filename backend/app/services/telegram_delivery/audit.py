@@ -52,6 +52,8 @@ class RedisTelegramDeliveryAuditStore:
                 "token_hash": values["token_hash"],
                 "update_id_hash": values["update_id_hash"],
                 "target_chat_id_hash": values["target_chat_id_hash"],
+                "message_length": str(values["message_length"]),
+                "message_hash": values["message_hash"],
                 "transport_invoked": "false",
                 "provider_call_count": "0",
                 "http_status": "",

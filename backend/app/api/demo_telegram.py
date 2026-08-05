@@ -8,12 +8,11 @@ import httpx
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.channels.telegram import process_telegram_update
 from app.services.telegram_delivery.binding import DeepLinkService, RedisTelegramBindingStore, TrustedExample
 from app.services.telegram_delivery.audit import RedisTelegramDeliveryAuditStore
 from app.services.telegram_delivery.configuration import Readiness, resolve_configuration
 from app.services.telegram_delivery.runtime import (
-    RedisBindingQuota, RedisLegacyUpdateDedupe, RuntimeBindingService, UnifiedTelegramIngress,
+    RedisBindingQuota, RuntimeBindingService, UnifiedTelegramIngress,
 )
 from app.services.telegram_delivery.service import VisitorBindingWebhookService
 from app.services.telegram_delivery.transport import BotApiTelegramTransport, TelegramTransportConfig
@@ -60,8 +59,6 @@ def configure_telegram_runtime(environment: dict[str, str] | None = None) -> boo
     _binding_runtime = RuntimeBindingService(deep_links, RedisBindingQuota(redis_url))
     _unified_ingress = UnifiedTelegramIngress(
         binding_handler=binding_handler, webhook_secret=config.webhook_secret,
-        legacy_handler=process_telegram_update,
-        legacy_dedupe=RedisLegacyUpdateDedupe(redis_url),
     )
     return True
 
@@ -76,12 +73,13 @@ async def close_telegram_runtime() -> None:
 class TelegramBindingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str | None = Field(default=None, max_length=100)
+    message: str = Field(min_length=1, max_length=240)
     idempotency_key: str = Field(min_length=16, max_length=128)
 
-    @field_validator("name", "idempotency_key")
+    @field_validator("name", "message", "idempotency_key")
     @classmethod
     def reject_controls(cls, value: str | None) -> str | None:
-        if value is not None and ("\r" in value or "\n" in value or any(ord(c) < 32 for c in value)):
+        if value is not None and ("\r" in value or "\n" in value or any(ord(c) < 32 or ord(c) == 127 for c in value)):
             raise ValueError("unsafe_control_character")
         return value
 
@@ -121,6 +119,7 @@ async def create_telegram_binding(
             origin=origin,
             trusted_example_id=trusted_example_id,
             validated_name=payload.name,
+            validated_message=payload.message,
             idempotency_key=payload.idempotency_key,
             client_id=request.client.host if request.client else "unknown",
         )

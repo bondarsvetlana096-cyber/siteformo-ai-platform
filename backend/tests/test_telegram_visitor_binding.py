@@ -72,6 +72,7 @@ class MemoryStore:
             return ConsumeResult(
                 BindingState.CONSUMED, str(record["binding_id"]),
                 str(record["validated_name"]) or None,
+                str(record["validated_message"]) or None,
             )
 
     async def finalize(self, **values: object) -> None:
@@ -133,12 +134,17 @@ def update(token: str, *, update_id: int = 1, chat_id: int = 123456, chat_type: 
     }
 
 
-async def create_session(store: MemoryStore, *, now: int = 1000, name: str | None = "Alex"):
+async def create_session(
+    store: MemoryStore, *, now: int = 1000, name: str | None = "Alex",
+    message: str = "I'd like to book a meeting",
+):
     links = DeepLinkService(
         store=store, bot_username="SiteFormoBot", ttl_seconds=300,
         trusted_origins={ORIGIN: TrustedExample(EXAMPLE, ORIGIN)}, clock=lambda: now,
     )
-    result = await links.create(origin=ORIGIN, validated_name=name)
+    result = await links.create(
+        origin=ORIGIN, validated_name=name, validated_message=message,
+    )
     token = result.url.split("start=", 1)[1]
     return result, token
 
@@ -155,9 +161,12 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(
             transport.calls[0].text,
             "Hello, Alex.\n\n"
-            "This is an example of how your future website could communicate with visitors "
-            "through Telegram.\n\n"
-            "Everything you see here can be tailored to your own project.",
+            "Your message:\n\n"
+            '"I\'d like to book a meeting"\n\n'
+            "This is an example of how your customers can begin a Telegram conversation "
+            "from your future website.\n\n"
+            "From this point the conversation can continue directly in Telegram.\n\n"
+            "SiteFormo",
         )
         self.assertNotIn("parse_mode", repr(transport.calls[0]))
 
@@ -170,16 +179,27 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(
             transport.calls[0].text,
             "Hello.\n\n"
-            "This is an example of how your future website could communicate with visitors "
-            "through Telegram.\n\n"
-            "Everything you see here can be tailored to your own project.",
+            "Your message:\n\n"
+            '"I\'d like to book a meeting"\n\n'
+            "This is an example of how your customers can begin a Telegram conversation "
+            "from your future website.\n\n"
+            "From this point the conversation can continue directly in Telegram.\n\n"
+            "SiteFormo",
         )
 
     def test_named_message_uses_first_name_only(self) -> None:
-        rendered = render_demo_message("Oleh")
+        rendered = render_demo_message("Oleh", "Call me back")
         self.assertTrue(rendered.startswith("Hello, Oleh.\n\n"))
         self.assertNotIn("Last name", rendered)
-        self.assertNotIn("Visitor message", rendered)
+        self.assertIn('Your message:\n\n"Call me back"', rendered)
+
+    def test_message_is_trimmed_preserved_and_strictly_validated(self) -> None:
+        store = MemoryStore()
+        _, token = asyncio.run(create_session(store, message="  Keep My CASE!  "))
+        self.assertEqual(store.records[token_hash(token)]["validated_message"], "Keep My CASE!")
+        for unsafe in ("", "   ", "line one\nline two", "bad\x00value", "x" * 241):
+            with self.assertRaisesRegex(ValueError, "invalid_message"):
+                asyncio.run(create_session(MemoryStore(), message=unsafe))
 
     def test_name_input_is_trimmed_length_limited_and_single_line(self) -> None:
         store = MemoryStore()
@@ -252,7 +272,10 @@ class BindingTests(unittest.TestCase):
             trusted_origins={ORIGIN: TrustedExample(EXAMPLE, ORIGIN)}, clock=lambda: 1000,
         )
         with self.assertRaisesRegex(PermissionError, "ORIGIN_MISMATCH"):
-            asyncio.run(links.create(origin="https://dev.siteformo.com.evil.test", validated_name="Alex"))
+            asyncio.run(links.create(
+                origin="https://dev.siteformo.com.evil.test", validated_name="Alex",
+                validated_message="Hello",
+            ))
         with self.assertRaisesRegex(ValueError, "invalid_telegram_bot_username"):
             DeepLinkService(store=store, bot_username="bad-name", ttl_seconds=300, trusted_origins={})
         result, token = asyncio.run(create_session(store))

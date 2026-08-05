@@ -111,13 +111,7 @@ app.include_router(demo_sms_router)
 
 
 # Optional legacy/integration channels.
-# Disabled by default so Telegram/OpenAI cannot block payment/review/example backend startup.
-if env_enabled("ENABLE_TELEGRAM_CHANNEL"):
-    from app.channels.telegram import router as telegram_router
-
-    app.include_router(telegram_router)
-
-
+# Telegram uses only the authenticated canonical Example ingress above.
 if env_enabled("ENABLE_WHATSAPP_CHANNEL"):
     from app.channels.whatsapp import router as whatsapp_router
 

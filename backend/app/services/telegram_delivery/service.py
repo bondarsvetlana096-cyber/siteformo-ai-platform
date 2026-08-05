@@ -54,13 +54,17 @@ class VisitorBindingWebhookService:
             await self.audit.create(
                 binding_id=binding_id, token_hash=digest,
                 update_id_hash=private_id_hash(update.update_id), target_chat_id_hash=chat_digest,
+                message_length=len(consumed.validated_message or ""),
+                message_hash=hashlib.sha256((consumed.validated_message or "").encode("utf-8")).hexdigest(),
                 now_seconds=now_seconds,
             )
             await self.audit.mark_transport_invoked(binding_id=binding_id, now_seconds=now_seconds)
         except Exception as exc:
             raise RuntimeError("telegram_delivery_audit_unavailable") from exc
         message = TelegramMessage(
-            update.chat_id, render_demo_message(consumed.validated_name), binding_id
+            update.chat_id,
+            render_demo_message(consumed.validated_name, consumed.validated_message or ""),
+            binding_id,
         )
         result = await self.transport.send(message)
         message_id_hash = (

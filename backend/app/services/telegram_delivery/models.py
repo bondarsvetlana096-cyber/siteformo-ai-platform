@@ -46,6 +46,7 @@ class ConsumeResult:
     state: BindingState
     binding_id: str | None = None
     validated_name: str | None = None
+    validated_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,11 +56,14 @@ class TelegramMessage:
     correlation_id: str
 
 
-def render_demo_message(name: str | None) -> str:
+def render_demo_message(name: str | None, visitor_message: str) -> str:
     greeting = f"Hello, {name}." if name else "Hello."
     return (
         f"{greeting}\n\n"
-        "This is an example of how your future website could communicate with visitors "
-        "through Telegram.\n\n"
-        "Everything you see here can be tailored to your own project."
+        "Your message:\n\n"
+        f'"{visitor_message}"\n\n'
+        "This is an example of how your customers can begin a Telegram conversation "
+        "from your future website.\n\n"
+        "From this point the conversation can continue directly in Telegram.\n\n"
+        "SiteFormo"
     )

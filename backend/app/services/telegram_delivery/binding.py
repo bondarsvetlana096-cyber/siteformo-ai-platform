@@ -23,8 +23,8 @@ CREATE_SCRIPT = """
 if redis.call('EXISTS', KEYS[1]) == 1 then return {'COLLISION'} end
 redis.call('HSET', KEYS[1],
   'status', 'CREATED', 'binding_id', ARGV[1], 'example_hash', ARGV[2],
-  'origin_hash', ARGV[3], 'name', ARGV[4], 'expires_at', ARGV[5])
-redis.call('EXPIRE', KEYS[1], ARGV[6])
+  'origin_hash', ARGV[3], 'name', ARGV[4], 'message', ARGV[5], 'expires_at', ARGV[6])
+redis.call('EXPIRE', KEYS[1], ARGV[7])
 return {'CREATED'}
 """
 
@@ -45,7 +45,7 @@ if status ~= 'CREATED' then
 end
 redis.call('HSET', KEYS[1], 'status', 'CONSUMING')
 redis.call('HSET', KEYS[1], 'chat_hash', ARGV[2], 'status', 'CONSUMED')
-return {'CONSUMED', redis.call('HGET', KEYS[1], 'binding_id') or '', redis.call('HGET', KEYS[1], 'name') or ''}
+return {'CONSUMED', redis.call('HGET', KEYS[1], 'binding_id') or '', redis.call('HGET', KEYS[1], 'name') or '', redis.call('HGET', KEYS[1], 'message') or ''}
 """
 
 FINALIZE_SCRIPT = """
@@ -59,7 +59,7 @@ return {ARGV[1]}
 class BindingStore(Protocol):
     async def create(
         self, *, token_digest: str, binding_id: str, example_hash: str, origin_hash: str,
-        validated_name: str, expires_at: int, ttl_seconds: int
+        validated_name: str, validated_message: str, expires_at: int, ttl_seconds: int
     ) -> None: ...
 
     async def consume(
@@ -93,7 +93,8 @@ class RedisTelegramBindingStore:
             raw = await client.eval(
                 CREATE_SCRIPT, 1, self.binding_key(str(values["token_digest"])),
                 values["binding_id"], values["example_hash"], values["origin_hash"],
-                values["validated_name"], values["expires_at"], values["ttl_seconds"],
+                values["validated_name"], values["validated_message"], values["expires_at"],
+                values["ttl_seconds"],
             )
         finally:
             await client.aclose()
@@ -112,7 +113,9 @@ class RedisTelegramBindingStore:
             await client.aclose()
         code = str(raw[0])
         if code == "CONSUMED":
-            return ConsumeResult(BindingState.CONSUMED, str(raw[1]), str(raw[2]) or None)
+            return ConsumeResult(
+                BindingState.CONSUMED, str(raw[1]), str(raw[2]) or None, str(raw[3]) or None
+            )
         if code == "EXPIRED":
             return ConsumeResult(BindingState.EXPIRED)
         return ConsumeResult(BindingState.REPLAY_BLOCKED)
@@ -149,20 +152,30 @@ class DeepLinkService:
         self.store, self.bot_username, self.ttl_seconds = store, username, ttl_seconds
         self.trusted_origins, self.clock = dict(trusted_origins), clock
 
-    async def create(self, *, origin: str | None, validated_name: str | None) -> DeepLinkResult:
+    async def create(
+        self, *, origin: str | None, validated_name: str | None,
+        validated_message: str,
+    ) -> DeepLinkResult:
         trusted = self.trusted_origins.get(origin or "")
         if trusted is None or trusted.exact_origin != origin:
             raise PermissionError(BindingState.ORIGIN_MISMATCH.value)
         name = (validated_name or "").strip()
         if len(name) > 100 or "\r" in name or "\n" in name:
             raise ValueError("invalid_name")
+        message = validated_message.strip()
+        if (
+            not message or len(message) > 240 or "\r" in message or "\n" in message
+            or any(ord(char) < 32 or ord(char) == 127 for char in message)
+        ):
+            raise ValueError("invalid_message")
         raw_token = secrets.token_urlsafe(32)
         binding_id = uuid.uuid4().hex
         expires_at = int(self.clock()) + self.ttl_seconds
         await self.store.create(
             token_digest=token_hash(raw_token), binding_id=binding_id,
             example_hash=private_id_hash(trusted.example_id), origin_hash=private_id_hash(origin),
-            validated_name=name, expires_at=expires_at, ttl_seconds=self.ttl_seconds,
+            validated_name=name, validated_message=message,
+            expires_at=expires_at, ttl_seconds=self.ttl_seconds,
         )
         return DeepLinkResult(
             f"https://t.me/{self.bot_username}?start={raw_token}", expires_at, binding_id

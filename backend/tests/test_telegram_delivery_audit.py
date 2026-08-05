@@ -25,6 +25,8 @@ class TelegramDeliveryAuditTests(unittest.TestCase):
         self.assertEqual(record["token_hash"], token_hash(token))
         self.assertEqual(record["update_id_hash"], private_id_hash(update_id))
         self.assertEqual(record["target_chat_id_hash"], private_id_hash(chat_id))
+        self.assertEqual(record["message_length"], len("I'd like to book a meeting"))
+        self.assertTrue(record["message_hash"])
         self.assertEqual(record["provider_call_count"], 1)
         self.assertEqual(record["outcome"], AuditOutcome.ACCEPTED)
         self.assertEqual(record["final_state"], BindingState.DELIVERED)
@@ -32,6 +34,7 @@ class TelegramDeliveryAuditTests(unittest.TestCase):
         self.assertNotIn(token, serialized)
         self.assertNotIn(str(chat_id), serialized)
         self.assertNotIn("offline-message-1", serialized)
+        self.assertNotIn("I'd like to book a meeting", serialized)
 
     def test_pre_call_audit_failure_blocks_provider(self) -> None:
         for failure in ("fail_create", "fail_mark"):

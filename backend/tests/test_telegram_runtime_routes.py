@@ -14,7 +14,6 @@ from app.services.telegram_delivery.runtime import RedisBindingQuota, RuntimeBin
 from app.services.telegram_delivery.service import VisitorBindingWebhookService
 from app.services.telegram_delivery.transport import TransportState
 from tests.test_telegram_visitor_binding import FakeTransport, MemoryAudit, MemoryStore, update
-from app.channels.telegram import router as legacy_telegram_router
 
 ORIGIN = "https://dev.siteformo.com"
 EXAMPLE = "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1"
@@ -35,19 +34,11 @@ class MemoryQuota:
         return True
 
 
-class MemoryDedupe:
-    def __init__(self) -> None:
-        self.seen: set[int] = set()
-
-    async def claim(self, update_id: int) -> bool:
-        if update_id in self.seen:
-            return False
-        self.seen.add(update_id)
-        return True
-
-
 def payload(key: str = "telegram-runtime-000001") -> dict[str, str]:
-    return {"name": "Alex", "idempotency_key": key}
+    return {
+        "name": "Alex", "message": "I'd like to book a meeting",
+        "idempotency_key": key,
+    }
 
 
 class RuntimeRouteTests(unittest.TestCase):
@@ -60,17 +51,11 @@ class RuntimeRouteTests(unittest.TestCase):
             trusted_origins={ORIGIN: TrustedExample(EXAMPLE, ORIGIN)}, clock=time.time,
         )
         api._binding_runtime = RuntimeBindingService(links, self.quota)
-        self.legacy_updates: list[dict] = []
-
-        async def legacy_handler(value: dict) -> None:
-            self.legacy_updates.append(value)
-
         binding_handler = VisitorBindingWebhookService(
             store=self.store, audit=MemoryAudit(), transport=self.transport, webhook_secret=SECRET
         )
         api._unified_ingress = UnifiedTelegramIngress(
-            binding_handler=binding_handler, webhook_secret=SECRET, legacy_handler=legacy_handler,
-            legacy_dedupe=MemoryDedupe(),
+            binding_handler=binding_handler, webhook_secret=SECRET,
         )
         app = FastAPI()
         app.include_router(api.router)
@@ -135,9 +120,9 @@ class RuntimeRouteTests(unittest.TestCase):
         self.assertEqual((first.status_code, duplicate.status_code), (200, 200))
         self.assertEqual(first.json(), {"ok": True})
         self.assertEqual(len(self.transport.calls), 1)
-        self.assertEqual(self.legacy_updates, [])
+        self.assertIn('Your message:\n\n"I\'d like to book a meeting"', self.transport.calls[0].text)
 
-    def test_non_binding_message_routes_to_legacy_handler(self) -> None:
+    def test_non_binding_message_fails_closed_without_provider_call(self) -> None:
         telegram_update = {
             "update_id": 200,
             "message": {"chat": {"id": 123, "type": "private"}, "text": "Hello SiteFormo"},
@@ -147,7 +132,6 @@ class RuntimeRouteTests(unittest.TestCase):
             headers={"X-Telegram-Bot-Api-Secret-Token": SECRET}, json=telegram_update,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.legacy_updates, [telegram_update])
         self.assertEqual(self.transport.calls, [])
 
         duplicate = self.client.post(
@@ -155,7 +139,7 @@ class RuntimeRouteTests(unittest.TestCase):
             headers={"X-Telegram-Bot-Api-Secret-Token": SECRET}, json=telegram_update,
         )
         self.assertEqual(duplicate.status_code, 200)
-        self.assertEqual(self.legacy_updates, [telegram_update])
+        self.assertEqual(self.transport.calls, [])
 
     def test_provider_timeout_is_quarantined_and_hidden(self) -> None:
         self.transport.state = TransportState.AMBIGUOUS
@@ -171,31 +155,15 @@ class RuntimeRouteTests(unittest.TestCase):
         self.assertEqual(len(self.transport.calls), 1)
 
 
-class LegacyAiRouteRegressionTests(unittest.TestCase):
-    def test_existing_non_binding_message_still_reaches_ai_handler(self) -> None:
-        app = FastAPI()
-        app.include_router(legacy_telegram_router)
-        with patch("app.channels.telegram.generate_ai_reply", new=AsyncMock(return_value="Safe reply")) as reply:
-            with TestClient(app) as client:
-                response = client.post(
-                    "/channels/telegram/webhook",
-                    json={
-                        "update_id": 900,
-                        "message": {
-                            "chat": {"id": 123, "type": "private"},
-                            "from": {"id": 456},
-                            "text": "Hello SiteFormo",
-                        },
-                    },
-                )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"ok": True})
-        reply.assert_awaited_once_with(
-            user_text="Hello SiteFormo", user_id="telegram:456", channel="telegram"
-        )
-
-
 class ProductionWiringTests(unittest.IsolatedAsyncioTestCase):
+    async def test_only_canonical_telegram_webhook_is_mounted(self) -> None:
+        from app.main import app as production_app
+
+        paths = {route.path for route in production_app.routes}
+        self.assertIn("/api/channels/telegram/webhook", paths)
+        self.assertNotIn("/telegram/webhook", paths)
+        self.assertNotIn("/channels/telegram/webhook", paths)
+
     async def test_redis_quota_uses_hashed_channel_isolated_keys(self) -> None:
         quota = RedisBindingQuota("redis://runtime.invalid")
         connection = AsyncMock()
