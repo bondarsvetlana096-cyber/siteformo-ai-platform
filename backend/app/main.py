@@ -17,6 +17,10 @@ from app.api.demo_contact_whatsapp import (
     router as demo_contact_whatsapp_router,
 )
 from app.api.demo_sms import close_sms_runtime, configure_sms_runtime, router as demo_sms_router
+from app.api.demo_voice import router as demo_voice_router
+from app.services.voice_delivery.runtime import (
+    close_voice_runtime, configure_voice_runtime, start_voice_dispatcher,
+)
 from app.api.demo_telegram import close_telegram_runtime, configure_telegram_runtime, router as demo_telegram_router
 from app.api.example_routes import router as example_router
 from app.api.leads import router as leads_router
@@ -108,6 +112,7 @@ app.include_router(demo_contact_whatsapp_router)
 app.include_router(whatsapp_inbound_router)
 app.include_router(demo_telegram_router)
 app.include_router(demo_sms_router)
+app.include_router(demo_voice_router)
 
 
 # Optional legacy/integration channels.
@@ -124,6 +129,8 @@ async def startup_event():
     configure_telegram_runtime()
     configure_sms_runtime()
     configure_whatsapp_runtime()
+    if configure_voice_runtime():
+        start_voice_dispatcher()
 
     if settings.enable_guided_followups:
         from app.services.lead_nurturing import followup_worker
@@ -136,3 +143,4 @@ async def shutdown_event():
     await close_telegram_runtime()
     await close_sms_runtime()
     await close_whatsapp_runtime()
+    await close_voice_runtime()
