@@ -22,6 +22,7 @@ RATE_LIMIT_PER_HOUR = 20
 STATE_PREFIX = "sf:demo-email:v1"
 ORIGIN_EXAMPLE_REGISTRY = {
     "https://dev.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
+    "https://business1.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
 }
 
 CLAIM_SCRIPT = """

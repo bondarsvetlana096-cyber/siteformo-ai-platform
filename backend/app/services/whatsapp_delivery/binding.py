@@ -15,7 +15,12 @@ TRUSTED_EXAMPLES = {
         example_id="SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
         display_name="SiteFormo Consulting Example",
         contact_route="/contact/",
-    )
+    ),
+    "https://business1.siteformo.com": TrustedExample(
+        example_id="SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
+        display_name="SiteFormo Consulting Example",
+        contact_route="/contact/",
+    ),
 }
 
 

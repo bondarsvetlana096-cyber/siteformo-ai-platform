@@ -12,7 +12,10 @@ from app.services.voice_delivery.models import VoiceState, normalize_name, valid
 from app.services.voice_delivery.security import validate_twilio_signature
 from app.services.voice_delivery.service import CALLBACK_STATES
 
-TRUSTED_ORIGINS = {"https://dev.siteformo.com"}
+TRUSTED_ORIGINS = {
+    "https://dev.siteformo.com",
+    "https://business1.siteformo.com",
+}
 router = APIRouter(tags=["demo-voice"])
 
 

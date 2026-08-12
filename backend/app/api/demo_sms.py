@@ -19,6 +19,7 @@ from app.services.sms_delivery.transport import TwilioSmsTransport
 
 TRUSTED_SMS_EXAMPLE_BY_ORIGIN = {
     "https://dev.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
+    "https://business1.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
 }
 SMS_STATE_NAMESPACE = "sf:demo-sms:v1"
 

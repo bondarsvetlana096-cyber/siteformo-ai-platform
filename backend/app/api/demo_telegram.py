@@ -19,7 +19,8 @@ from app.services.telegram_delivery.transport import BotApiTelegramTransport, Te
 
 IDEMPOTENCY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$")
 TRUSTED_EXAMPLE_BY_ORIGIN = {
-    "https://dev.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1"
+    "https://dev.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
+    "https://business1.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
 }
 
 router = APIRouter(tags=["demo-telegram"])
