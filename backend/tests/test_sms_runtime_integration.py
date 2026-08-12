@@ -18,7 +18,7 @@ ORIGIN = "https://dev.siteformo.com"
 
 
 class RuntimeState:
-    def __init__(self, limit: int = 1) -> None:
+    def __init__(self, limit: int = 2) -> None:
         self.limit = limit
         self.records: dict[str, tuple[DeliveryIdentity, str, str | None]] = {}
         self.lock = asyncio.Lock()
@@ -152,6 +152,11 @@ def test_phone_fail_closed_before_transport(monkeypatch: pytest.MonkeyPatch, pho
         response = client.post("/api/demo/sms/start", headers={"Origin": ORIGIN}, json=payload(phone=phone))
     assert response.status_code == 422 and response.json() == {"detail": detail}
     assert audit.records == {} and transport.calls == []
+    with TestClient(app) as client:
+        api._sms_service = service
+        accepted = client.post("/api/demo/sms/start", headers={"Origin": ORIGIN}, json=payload())
+    assert accepted.status_code == 201
+    assert len(transport.calls) == 1
 
 
 def test_replay_and_quota_through_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,12 +168,14 @@ def test_replay_and_quota_through_runtime(monkeypatch: pytest.MonkeyPatch) -> No
         api._sms_service = service
         replay = client.post("/api/demo/sms/start", headers={"Origin": ORIGIN}, json=payload())
         api._sms_service = service
-        quota = client.post("/api/demo/sms/start", headers={"Origin": ORIGIN}, json=payload("sms-runtime-key-0002"))
-    assert first.status_code == replay.status_code == 201
+        second = client.post("/api/demo/sms/start", headers={"Origin": ORIGIN}, json=payload("sms-runtime-key-0002"))
+        api._sms_service = service
+        quota = client.post("/api/demo/sms/start", headers={"Origin": ORIGIN}, json=payload("sms-runtime-key-0003"))
+    assert first.status_code == replay.status_code == second.status_code == 201
     assert replay.json()["replayed"] is True
     assert quota.status_code == 429 and quota.json() == {"detail": "sms_quota_exhausted"}
-    assert len(transport.calls) == 1
-    assert next(iter(audit.records.values()))["provider_call_count"] == "1"
+    assert len(transport.calls) == 2
+    assert all(record["provider_call_count"] == "1" for record in audit.records.values())
 
 
 @pytest.mark.parametrize("outcome", [SmsTransportOutcome.REJECTED, SmsTransportOutcome.AMBIGUOUS, SmsTransportOutcome.QUARANTINED])
@@ -180,6 +187,17 @@ def test_runtime_typed_provider_failures_are_single_call(monkeypatch: pytest.Mon
         response = client.post("/api/demo/sms/start", headers={"Origin": ORIGIN}, json=payload())
     assert response.status_code == 502 and len(transport.calls) == 1
     assert next(iter(audit.records.values()))["typed_outcome"] == outcome.value
+    if outcome is SmsTransportOutcome.REJECTED:
+        transport.outcome = SmsTransportOutcome.ACCEPTED
+        with TestClient(app) as client:
+            api._sms_service = service
+            accepted = client.post(
+                "/api/demo/sms/start",
+                headers={"Origin": ORIGIN},
+                json=payload("sms-runtime-key-0002"),
+            )
+        assert accepted.status_code == 201
+        assert len(transport.calls) == 2
 
 
 def test_dry_run_is_privacy_safe_and_has_no_transport() -> None:

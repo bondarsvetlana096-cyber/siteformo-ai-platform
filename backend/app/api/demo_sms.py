@@ -90,7 +90,7 @@ def configure_sms_runtime(
     _sms_http_client = client
     _sms_service = SmsDeliveryService(
         config=config,
-        state=RedisDeliveryState(redis_url, SMS_STATE_NAMESPACE, limit=1),
+        state=RedisDeliveryState(redis_url, SMS_STATE_NAMESPACE, limit=2),
         audit=RedisSmsAuditStore(redis_url),
         transport=transport,
     )
