@@ -11,16 +11,14 @@ from app.services.voice_delivery import runtime
 from app.services.voice_delivery.models import VoiceState, normalize_name, validate_idempotency
 from app.services.voice_delivery.security import validate_twilio_signature
 from app.services.voice_delivery.service import CALLBACK_STATES
+from app.services.contact_delivery.example_scope import ExampleScopeError, resolve_trusted_example
 
-TRUSTED_ORIGINS = {
-    "https://dev.siteformo.com",
-    "https://business1.siteformo.com",
-}
 router = APIRouter(tags=["demo-voice"])
 
 
 class VoiceDemoRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    example_id: str | None = Field(default=None, min_length=1, max_length=128)
     first_name: str = Field(min_length=1, max_length=40)
     phone: str = Field(min_length=9, max_length=16)
     idempotency_key: str = Field(min_length=16, max_length=128)
@@ -48,15 +46,17 @@ async def request_voice_demo(
     payload: VoiceDemoRequest, request: Request, response: Response,
     origin: str | None = Header(default=None),
 ) -> VoiceDemoResponse:
-    if origin not in TRUSTED_ORIGINS:
-        raise HTTPException(status_code=403, detail="origin_not_allowed", headers={"Cache-Control": "no-store"})
+    try:
+        example_id = resolve_trusted_example(origin, payload.example_id).example_id
+    except ExampleScopeError as exc:
+        raise HTTPException(status_code=403, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
     if runtime.configuration is None or not runtime.configuration.enabled:
         raise HTTPException(status_code=503, detail="voice_demo_disabled", headers={"Cache-Control": "no-store"})
     if runtime.service is None:
         raise HTTPException(status_code=503, detail="voice_runtime_unavailable", headers={"Cache-Control": "no-store"})
     try:
         result = await runtime.service.request_call(
-            first_name=payload.first_name, phone=payload.phone,
+            example_id=example_id, first_name=payload.first_name, phone=payload.phone,
             idempotency_key=payload.idempotency_key,
             client_id=request.client.host if request.client else "unknown",
         )

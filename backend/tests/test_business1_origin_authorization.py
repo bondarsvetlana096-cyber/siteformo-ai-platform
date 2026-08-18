@@ -1,10 +1,12 @@
 from fastapi.testclient import TestClient
 
-from app.api.demo_sms import TRUSTED_SMS_EXAMPLE_BY_ORIGIN
 from app.api.demo_telegram import TRUSTED_EXAMPLE_BY_ORIGIN
-from app.api.demo_voice import TRUSTED_ORIGINS
 from app.main import app
-from app.services.contact_delivery.canary import ORIGIN_EXAMPLE_REGISTRY
+from app.services.contact_delivery.example_scope import (
+    EXAMPLES_BY_ORIGIN,
+    ExampleScopeError,
+    resolve_trusted_example,
+)
 from app.services.whatsapp_delivery.binding import trusted_example_for_origin
 
 
@@ -47,21 +49,21 @@ def test_business1_is_bound_to_the_existing_business01_identity() -> None:
     whatsapp = trusted_example_for_origin(BUSINESS1)
     assert whatsapp is not None
     assert whatsapp.example_id == EXAMPLE
-    assert ORIGIN_EXAMPLE_REGISTRY[BUSINESS1] == EXAMPLE
-    assert TRUSTED_SMS_EXAMPLE_BY_ORIGIN[BUSINESS1] == EXAMPLE
+    assert resolve_trusted_example(BUSINESS1, EXAMPLE).example_id == EXAMPLE
     assert TRUSTED_EXAMPLE_BY_ORIGIN[BUSINESS1] == EXAMPLE
-    assert BUSINESS1 in TRUSTED_ORIGINS
 
 
 def test_dev_bindings_remain_and_unknown_bindings_are_rejected() -> None:
     assert trusted_example_for_origin(DEV) is not None
-    assert ORIGIN_EXAMPLE_REGISTRY[DEV] == EXAMPLE
-    assert TRUSTED_SMS_EXAMPLE_BY_ORIGIN[DEV] == EXAMPLE
+    assert resolve_trusted_example(DEV, EXAMPLE).example_id == EXAMPLE
     assert TRUSTED_EXAMPLE_BY_ORIGIN[DEV] == EXAMPLE
-    assert DEV in TRUSTED_ORIGINS
 
     assert trusted_example_for_origin(UNKNOWN) is None
-    assert UNKNOWN not in ORIGIN_EXAMPLE_REGISTRY
-    assert UNKNOWN not in TRUSTED_SMS_EXAMPLE_BY_ORIGIN
+    assert UNKNOWN not in EXAMPLES_BY_ORIGIN
     assert UNKNOWN not in TRUSTED_EXAMPLE_BY_ORIGIN
-    assert UNKNOWN not in TRUSTED_ORIGINS
+    try:
+        resolve_trusted_example(UNKNOWN, EXAMPLE)
+    except ExampleScopeError as exc:
+        assert str(exc) == "origin_not_allowed"
+    else:
+        raise AssertionError("unknown origin accepted")

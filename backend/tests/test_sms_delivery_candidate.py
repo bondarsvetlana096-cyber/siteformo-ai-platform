@@ -107,7 +107,7 @@ def deny_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 def test_contract_excludes_server_authority_and_provider_fields() -> None:
-    assert set(SmsDemoRequest.model_fields) == {"first_name", "phone", "customer_message", "idempotency_key"}
+    assert set(SmsDemoRequest.model_fields) == {"example_id", "first_name", "phone", "customer_message", "idempotency_key"}
     with pytest.raises(Exception):
         SmsDemoRequest(first_name="Oleh", phone="+12025550124", idempotency_key="sms-idempotency-0001", example_context="attacker")
 

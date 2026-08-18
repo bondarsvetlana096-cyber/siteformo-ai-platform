@@ -10,9 +10,10 @@ from app.services.sms_delivery.models import (
 
 
 class SmsDemoRequest(BaseModel):
-    """Future endpoint body. Trusted Example identity is intentionally absent."""
+    """Public fields; example_id is validated against the exact request Origin."""
 
     model_config = ConfigDict(extra="forbid")
+    example_id: str | None = Field(default=None, min_length=1, max_length=128)
     first_name: str = Field(min_length=1, max_length=40)
     phone: str = Field(min_length=9, max_length=16)
     customer_message: str = Field(min_length=1, max_length=30)

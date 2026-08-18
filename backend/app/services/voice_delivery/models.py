@@ -61,6 +61,7 @@ def digest(value: str) -> str:
 @dataclass(frozen=True, slots=True)
 class VoiceRequest:
     request_id: str
+    example_hash: str
     first_name: str
     phone_e164: str
     recipient_hash: str

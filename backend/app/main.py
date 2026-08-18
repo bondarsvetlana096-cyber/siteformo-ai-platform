@@ -63,6 +63,8 @@ app.add_middleware(
         "https://advanced.siteformo.com",
         "https://dev.siteformo.com",
         "https://business1.siteformo.com",
+        "https://business2.siteformo.com",
+        "https://business3.siteformo.com",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],

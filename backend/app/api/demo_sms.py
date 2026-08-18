@@ -11,16 +11,13 @@ from fastapi.routing import APIRoute
 from starlette.responses import JSONResponse
 
 from app.services.delivery.redis_state import RedisDeliveryState
+from app.services.contact_delivery.example_scope import ExampleScopeError, resolve_trusted_example
 from app.services.sms_delivery.audit import RedisSmsAuditStore
 from app.services.sms_delivery.configuration import resolve_sms_configuration
 from app.services.sms_delivery.contract import SmsDemoRequest, SmsDemoResponse
 from app.services.sms_delivery.service import SmsDeliveryError, SmsDeliveryService
 from app.services.sms_delivery.transport import TwilioSmsTransport
 
-TRUSTED_SMS_EXAMPLE_BY_ORIGIN = {
-    "https://dev.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
-    "https://business1.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
-}
 SMS_STATE_NAMESPACE = "sf:demo-sms:v1"
 
 class SmsNoStoreRoute(APIRoute):
@@ -115,9 +112,10 @@ async def start_sms_demo(
     request: Request,
     origin: str | None = Header(default=None),
 ) -> SmsDemoResponse:
-    example_id = TRUSTED_SMS_EXAMPLE_BY_ORIGIN.get(origin or "")
-    if example_id is None:
-        raise HTTPException(status_code=403, detail="origin_not_allowed")
+    try:
+        example_id = resolve_trusted_example(origin, payload.example_id).example_id
+    except ExampleScopeError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not sms_enabled():
         raise HTTPException(status_code=503, detail="sms_demo_disabled")
     if _sms_service is None:

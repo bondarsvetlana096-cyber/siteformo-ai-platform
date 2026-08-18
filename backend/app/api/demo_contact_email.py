@@ -16,8 +16,8 @@ from app.services.contact_delivery.canary import (
     finalize_failed,
     request_fingerprint,
     send_with_resend,
-    trusted_example_for_origin,
 )
+from app.services.contact_delivery.example_scope import ExampleScopeError, resolve_trusted_example
 from app.services.contact_delivery.template import (
     Enquiry,
     TemplateValidationError,
@@ -37,6 +37,7 @@ class ContactEmailRequest(BaseModel):
     contact_value: str = Field(min_length=3, max_length=320)
     message: str = Field(min_length=1, max_length=5_000)
     idempotency_key: str = Field(min_length=16, max_length=128)
+    example_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     @field_validator("first_name", "last_name", "preferred_method", "contact_value", "idempotency_key")
     @classmethod
@@ -88,14 +89,15 @@ async def send_demo_contact_email(
     origin: str | None = Header(default=None),
     content_length: int | None = Header(default=None),
 ) -> ContactEmailResponse:
-    example_id = trusted_example_for_origin(origin)
-    if not example_id:
-        raise HTTPException(status_code=403, detail="origin_not_allowed")
+    try:
+        example_id = resolve_trusted_example(origin, payload.example_id).example_id
+    except ExampleScopeError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     if content_length is not None and content_length > 16_384:
         raise HTTPException(status_code=413, detail="request_too_large")
     if not enabled():
         raise HTTPException(status_code=503, detail="live_email_disabled")
-    canonical = payload.model_dump()
+    canonical = payload.model_dump(exclude={"example_id"})
     fingerprint = request_fingerprint(canonical)
     identity = delivery_identity(
         example_id=example_id,

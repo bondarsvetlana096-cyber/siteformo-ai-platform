@@ -29,7 +29,7 @@ class VoiceConfiguration:
     voice: str = "Polly.Amy-Neural"
     language: str = "en-GB"
     delay_seconds: int = 7
-    recipient_limit: int = 1
+    recipient_limit: int = 2
     global_limit: int = 5
 
     def require_ready(self) -> None:
@@ -45,7 +45,7 @@ class VoiceConfiguration:
             raise ValueError("voice_callback_not_configured")
         if not 5 <= self.delay_seconds <= 10:
             raise ValueError("voice_delay_not_safe")
-        if self.recipient_limit != 1 or not 1 <= self.global_limit <= 10:
+        if self.recipient_limit != 2 or not 1 <= self.global_limit <= 10:
             raise ValueError("voice_quota_not_safe")
 
 

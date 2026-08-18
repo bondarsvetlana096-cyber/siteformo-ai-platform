@@ -72,7 +72,7 @@ class SmsDeliveryService:
         *, example_id: str, recipient: str, parent_idempotency_key: str,
         role: SMSDeliveryRole, body: str, client_id: str,
     ) -> DeliveryIdentity:
-        child_key = f"{parent_idempotency_key}:{role.value.lower()}"
+        child_key = f"{example_id}:{parent_idempotency_key}:{role.value.lower()}"
         canonical = {
             "channel": "SMS", "trusted_example_id": example_id, "recipient": recipient,
             "role": role.value, "message_hash": _hash(body), "contract": "SITEFORMO_SMS_DELIVERY_V1",

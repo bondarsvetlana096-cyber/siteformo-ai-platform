@@ -18,7 +18,7 @@ class VoiceDemoService:
         self.config, self.store = config, store
 
     async def request_call(
-        self, *, first_name: str, phone: str, idempotency_key: str,
+        self, *, example_id: str, first_name: str, phone: str, idempotency_key: str,
         client_id: str, now_seconds: int | None = None,
     ) -> ScheduleResult:
         name = normalize_name(first_name)
@@ -26,11 +26,12 @@ class VoiceDemoService:
         key = validate_idempotency(idempotency_key)
         now = int(time.time()) if now_seconds is None else now_seconds
         request = VoiceRequest(
-            request_id=uuid.uuid4().hex, first_name=name, phone_e164=destination,
-            recipient_hash=digest(destination), idempotency_hash=digest(key),
+            request_id=uuid.uuid4().hex, example_hash=digest(example_id)[:32],
+            first_name=name, phone_e164=destination,
+            recipient_hash=digest(destination), idempotency_hash=digest(f"{example_id}:{key}"),
             client_hash=digest(client_id), scheduled_at=now + self.config.delay_seconds,
         )
-        fingerprint = digest(f"{name}:{destination}")
+        fingerprint = digest(f"{example_id}:{name}:{destination}")
         return await self.store.schedule(request, fingerprint=fingerprint)
 
 

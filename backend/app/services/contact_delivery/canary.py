@@ -20,10 +20,6 @@ DELIVERY_LIMIT = 2
 PENDING_LEASE_MS = 60_000
 RATE_LIMIT_PER_HOUR = 20
 STATE_PREFIX = "sf:demo-email:v1"
-ORIGIN_EXAMPLE_REGISTRY = {
-    "https://dev.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
-    "https://business1.siteformo.com": "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
-}
 
 CLAIM_SCRIPT = """
 local rate = redis.call('INCR', KEYS[4])
@@ -137,10 +133,6 @@ def enabled() -> bool:
     }
 
 
-def trusted_example_for_origin(origin: str | None) -> str | None:
-    return ORIGIN_EXAMPLE_REGISTRY.get(origin or "")
-
-
 def request_fingerprint(payload: dict[str, str]) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -152,7 +144,9 @@ def delivery_identity(
     return DeliveryIdentity(
         example_id=example_id,
         recipient_hash=hashlib.sha256(recipient.encode("utf-8")).hexdigest(),
-        idempotency_hash=hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest(),
+        idempotency_hash=hashlib.sha256(
+            f"{example_id}:{idempotency_key}".encode("utf-8")
+        ).hexdigest(),
         fingerprint=fingerprint,
         client_hash=hashlib.sha256(client_id.encode("utf-8")).hexdigest(),
     )

@@ -83,7 +83,7 @@ def exercise(mode, outcomes, **changes):
 
 
 def test_public_contract_exposes_no_routing_authority() -> None:
-    assert set(SmsDemoRequest.model_fields) == {"first_name", "phone", "customer_message", "idempotency_key"}
+    assert set(SmsDemoRequest.model_fields) == {"example_id", "first_name", "phone", "customer_message", "idempotency_key"}
     with pytest.raises(Exception):
         SmsDemoRequest(
             first_name="Oleh", phone="+12025550124", customer_message="Hello",

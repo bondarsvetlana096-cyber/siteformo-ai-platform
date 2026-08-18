@@ -23,6 +23,7 @@ from app.services.voice_delivery.twiml import render_twiml, spoken_script
 ACCOUNT = "AC" + "1" * 32
 CALL_SID = "CA" + "2" * 32
 ORIGIN = "https://dev.siteformo.com"
+EXAMPLE = "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1"
 
 
 def ready_config(**changes: object) -> VoiceConfiguration:
@@ -127,11 +128,11 @@ def test_input_and_atomic_store_safety_contracts() -> None:
 def test_request_is_delayed_deduplicated_and_conflicts_fail_closed() -> None:
     store = MemoryStore()
     service = VoiceDemoService(ready_config(), store)
-    first = asyncio.run(service.request_call(first_name="Oleh", phone="+353871234567", idempotency_key="voice-key-0000001", client_id="client", now_seconds=100))
-    replay = asyncio.run(service.request_call(first_name="Oleh", phone="+353871234567", idempotency_key="voice-key-0000001", client_id="client", now_seconds=101))
+    first = asyncio.run(service.request_call(example_id=EXAMPLE, first_name="Oleh", phone="+353871234567", idempotency_key="voice-key-0000001", client_id="client", now_seconds=100))
+    replay = asyncio.run(service.request_call(example_id=EXAMPLE, first_name="Oleh", phone="+353871234567", idempotency_key="voice-key-0000001", client_id="client", now_seconds=101))
     assert first.scheduled_at == 107 and replay.replayed and len(store.due) == 1
     try:
-        asyncio.run(service.request_call(first_name="Other", phone="+353871234567", idempotency_key="voice-key-0000001", client_id="client", now_seconds=101))
+        asyncio.run(service.request_call(example_id=EXAMPLE, first_name="Other", phone="+353871234567", idempotency_key="voice-key-0000001", client_id="client", now_seconds=101))
     except ValueError as exc:
         assert str(exc) == "voice_idempotency_conflict"
     else:
@@ -141,7 +142,7 @@ def test_request_is_delayed_deduplicated_and_conflicts_fail_closed() -> None:
 def test_dispatcher_submits_at_most_once_and_timeout_is_not_retried() -> None:
     store, transport = MemoryStore(), FakeTransport(ProviderResult(VoiceState.TIMEOUT_QUARANTINED))
     service = VoiceDemoService(ready_config(), store)
-    asyncio.run(service.request_call(first_name="Oleh", phone="+353871234567", idempotency_key="voice-key-0000002", client_id="client", now_seconds=100))
+    asyncio.run(service.request_call(example_id=EXAMPLE, first_name="Oleh", phone="+353871234567", idempotency_key="voice-key-0000002", client_id="client", now_seconds=100))
     dispatcher = VoiceDispatcher(store, transport)  # type: ignore[arg-type]
     assert asyncio.run(dispatcher.run_once(107)) is True
     assert asyncio.run(dispatcher.run_once(108)) is False
@@ -155,7 +156,7 @@ def test_transport_posts_one_server_owned_call_without_retry_features() -> None:
         return httpx.Response(201, json={"sid": CALL_SID})
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     config = TwilioVoiceTransportConfig(ACCOUNT, "token", "+17000000457", "https://example.invalid/api/demo/voice/status", "Polly.Amy-Neural", "en-GB")
-    request = VoiceRequest("r", "Oleh", "+353871234567", "a" * 64, "b" * 64, "c" * 64, 107)
+    request = VoiceRequest("r", "e" * 32, "Oleh", "+353871234567", "a" * 64, "b" * 64, "c" * 64, 107)
     result = asyncio.run(TwilioVoiceTransport(config, client).submit(request))
     asyncio.run(client.aclose())
     body = captured[0].content.decode()

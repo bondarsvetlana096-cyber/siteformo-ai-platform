@@ -61,7 +61,7 @@ class VoiceStore(Protocol):
 
 
 class RedisVoiceStore:
-    def __init__(self, redis_url: str, *, recipient_limit: int = 1, global_limit: int = 5) -> None:
+    def __init__(self, redis_url: str, *, recipient_limit: int = 2, global_limit: int = 5) -> None:
         if not redis_url:
             raise ValueError("voice_store_not_configured")
         self.redis_url = redis_url
@@ -75,7 +75,7 @@ class RedisVoiceStore:
         hour = request.scheduled_at // 3600
         keys = [
             idem,
-            f"{NAMESPACE}:quota:recipient:{request.recipient_hash}",
+            f"{NAMESPACE}:quota:CALL:{request.example_hash}:{request.recipient_hash}",
             f"{NAMESPACE}:quota:global:{hour}",
             f"{NAMESPACE}:rate:{request.client_hash}:{hour}",
             f"{NAMESPACE}:delayed",
@@ -98,7 +98,11 @@ class RedisVoiceStore:
             return ScheduleResult(VoiceState.DUPLICATE_SUPPRESSED, str(raw[1]), int(raw[2]), True)
         if code == "CONFLICT":
             raise ValueError("voice_idempotency_conflict")
-        raise PermissionError("voice_quota_blocked")
+        if code in {"RECIPIENT_QUOTA", "GLOBAL_QUOTA"}:
+            raise PermissionError("voice_quota_exhausted")
+        if code == "RATE_LIMITED":
+            raise PermissionError("voice_rate_limited")
+        raise RuntimeError("voice_state_unavailable")
 
     async def claim_due(self, now_seconds: int) -> VoiceRequest | None:
         connection = self.client()
@@ -112,7 +116,7 @@ class RedisVoiceStore:
         if not raw:
             return None
         request_id, idem_hash, name, phone, recipient_hash, scheduled_at = map(str, raw)
-        return VoiceRequest(request_id, name, phone, recipient_hash, idem_hash, "", int(scheduled_at))
+        return VoiceRequest(request_id, "", name, phone, recipient_hash, idem_hash, "", int(scheduled_at))
 
     async def finalize_submission(self, request: VoiceRequest, state: VoiceState, call_sid_hash: str) -> None:
         key = f"{NAMESPACE}:idem:{request.idempotency_hash}"
