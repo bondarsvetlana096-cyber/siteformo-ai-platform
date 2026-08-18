@@ -123,6 +123,8 @@ def test_input_and_atomic_store_safety_contracts() -> None:
     assert "RATE_LIMITED" in SCHEDULE_SCRIPT
     assert "TIMEOUT_QUARANTINED" in CLAIM_DUE_SCRIPT
     assert "HDEL', record, 'first_name', 'phone'" in CLAIM_DUE_SCRIPT
+    assert "SET', KEYS[2], tostring(recipient_used + 1))" in SCHEDULE_SCRIPT
+    assert "SET', KEYS[2], tostring(recipient_used + 1), 'EX'" not in SCHEDULE_SCRIPT
 
 
 def test_request_is_delayed_deduplicated_and_conflicts_fail_closed() -> None:

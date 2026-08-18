@@ -45,3 +45,25 @@ and use the generic key contract. Provider-specific Example mappings are not per
 HTTP 429 retains canonical machine-readable details. Frontends render quota exhaustion as a
 contact-method limit and rate limiting as a temporary retry message; Redis and provider
 details are not exposed.
+
+## Persistent per-Example per-Channel Quota
+
+The permanent allowance is a maximum of two accepted actions for each combination of
+trusted Example, active channel, and protected normalized contact identity. Page reloads,
+navigation, tab or browser closure, and later return visits do not create a new allowance.
+Quota counters are durable Redis records with no automatic expiry; their expected TTL is
+`-1`. Existing records are not renamed, reset, or deleted.
+
+Examples are isolated: exhausting Email on Business 03 does not consume Email allowance on
+Business 01 or Business 02. Channels are also isolated: exhausting Call does not consume
+SMS or Email allowance in the same Example. Temporary client rate-limit keys retain their
+short expiry and can reset without altering persistent quota counters.
+
+Every current and future channel must use the generic contract:
+
+`channel namespace + trusted_example_id_hash + protected_contact_identity_hash`
+
+Email identities are normalized lowercase addresses before hashing. Telephone channels use
+normalized E.164 identities before hashing. Raw contact values must never appear in quota
+key names. WhatsApp, Telegram, Viber, Messenger, and future channels extend this contract by
+using their own channel namespace; they do not introduce a shared or session-scoped quota.

@@ -26,7 +26,7 @@ redis.call('HSET', idem,
   'scheduled_at', ARGV[3], 'first_name', ARGV[4], 'phone', ARGV[5],
   'recipient_hash', ARGV[6], 'provider_call_count', '0')
 redis.call('EXPIRE', idem, ARGV[7])
-redis.call('SET', KEYS[2], tostring(recipient_used + 1), 'EX', ARGV[7])
+redis.call('SET', KEYS[2], tostring(recipient_used + 1))
 redis.call('SET', KEYS[3], tostring(global_used + 1), 'EX', '3600')
 redis.call('SET', KEYS[4], tostring(client_used + 1), 'EX', '3600')
 redis.call('ZADD', KEYS[5], ARGV[3], ARGV[2])

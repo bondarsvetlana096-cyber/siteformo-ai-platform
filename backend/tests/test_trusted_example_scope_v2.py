@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from app.api.demo_contact_email import ContactEmailRequest
 from app.api.demo_voice import VoiceDemoRequest
+from app.services.contact_delivery.canary import CLAIM_SCRIPT as EMAIL_CLAIM_SCRIPT
 from app.services.contact_delivery.canary import _keys as email_keys
 from app.services.contact_delivery.canary import delivery_identity
 from app.services.contact_delivery.example_scope import (
@@ -17,9 +18,30 @@ from app.services.contact_delivery.example_scope import (
     resolve_trusted_example,
 )
 from app.services.delivery.contracts import DeliveryIdentity
+from app.services.delivery.redis_state import CLAIM_SCRIPT as SMS_CLAIM_SCRIPT
 from app.services.delivery.redis_state import RedisDeliveryState
 from app.services.sms_delivery.contract import SmsDemoRequest
 from app.services.voice_delivery.models import VoiceRequest, digest
+from app.services.voice_delivery.store import SCHEDULE_SCRIPT
+
+
+class PersistentQuotaModel:
+    """Request/session-independent model of the permanent product contract."""
+
+    def __init__(self, limit: int = 2) -> None:
+        self.limit = limit
+        self.accepted: dict[tuple[str, str, str], int] = {}
+        self.rate: dict[tuple[str, str], int] = {}
+
+    def request(self, example_id: str, channel: str, contact_hash: str) -> str:
+        key = (example_id, channel, contact_hash)
+        if self.accepted.get(key, 0) >= self.limit:
+            return "quota_exhausted"
+        self.accepted[key] = self.accepted.get(key, 0) + 1
+        return "accepted"
+
+    def reset_temporary_rate_limit(self) -> None:
+        self.rate.clear()
 
 
 def test_dev_origin_accepts_all_canonical_examples_and_rejects_arbitrary_scope() -> None:
@@ -108,3 +130,50 @@ def test_channel_namespaces_are_independent_within_one_example() -> None:
         f"sf:demo-voice:v1:quota:CALL:{example_hash}:{recipient}",
     }
     assert len(quota_keys) == 3
+
+
+def test_persistent_quota_matrix_survives_return_and_rate_reset() -> None:
+    identity = digest("same-normalized-contact")
+    quota = PersistentQuotaModel()
+
+    for example_id in (BUSINESS_1_EXAMPLE_ID, BUSINESS_2_EXAMPLE_ID, BUSINESS_3_EXAMPLE_ID):
+        assert quota.request(example_id, "EMAIL", identity) == "accepted"
+        assert quota.request(example_id, "EMAIL", identity) == "accepted"
+        assert quota.request(example_id, "EMAIL", identity) == "quota_exhausted"
+
+    # A new page/browser session creates no new quota state; durable storage is reused.
+    returned_session = quota
+    assert returned_session.request(BUSINESS_3_EXAMPLE_ID, "EMAIL", identity) == "quota_exhausted"
+
+    # Temporary anti-abuse state may reset without affecting the permanent quota.
+    returned_session.reset_temporary_rate_limit()
+    assert returned_session.request(BUSINESS_3_EXAMPLE_ID, "EMAIL", identity) == "quota_exhausted"
+
+    for channel in ("SMS", "CALL"):
+        assert returned_session.request(BUSINESS_3_EXAMPLE_ID, channel, identity) == "accepted"
+        assert returned_session.request(BUSINESS_3_EXAMPLE_ID, channel, identity) == "accepted"
+        assert returned_session.request(BUSINESS_3_EXAMPLE_ID, channel, identity) == "quota_exhausted"
+
+
+def test_all_channel_quota_counters_are_persistent_and_contact_keys_are_protected() -> None:
+    raw_email = "same@example.com"
+    email_identity = delivery_identity(
+        example_id=BUSINESS_3_EXAMPLE_ID,
+        recipient=raw_email,
+        idempotency_key="persistent-email-0001",
+        fingerprint="fingerprint",
+        client_id="client",
+    )
+    email_quota = email_keys(email_identity, 0)[1]
+    sms_state = RedisDeliveryState("redis://example.invalid", "sf:demo-sms:v1", limit=2)
+    sms_identity = DeliveryIdentity(
+        "SMS:VISITOR", digest(BUSINESS_3_EXAMPLE_ID)[:32], digest("+12025550124"),
+        digest("persistent-sms-0001"), "fingerprint", "client",
+    )
+    sms_quota = sms_state.keys(sms_identity, 0)[1]
+
+    assert "EXPIRE', KEYS[2]" not in EMAIL_CLAIM_SCRIPT
+    assert "EXPIRE', KEYS[2]" not in SMS_CLAIM_SCRIPT
+    assert "SET', KEYS[2], tostring(recipient_used + 1), 'EX'" not in SCHEDULE_SCRIPT
+    assert raw_email not in email_quota
+    assert "+12025550124" not in sms_quota
