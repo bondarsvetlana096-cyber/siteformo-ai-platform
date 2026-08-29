@@ -11,6 +11,7 @@ def environment(**changes: str) -> dict[str, str]:
         "SMS_DEMO_ENABLED": "true",
         "SMS_DEMO_ALLOWED_COUNTRIES": "US",
         "SMS_DEMO_AUDIT_TTL_SECONDS": "604800",
+        "PUBLIC_BASE_URL": "https://example.invalid",
     }
     values.update(changes)
     return values

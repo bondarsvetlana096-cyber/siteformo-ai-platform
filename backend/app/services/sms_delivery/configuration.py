@@ -22,6 +22,7 @@ class SmsConfiguration:
     owner_to_e164: str | None = field(default=None, repr=False)
     visitor_notifications_enabled: bool = True
     owner_requires_visitor_contact: bool = False
+    public_base_url: str | None = None
 
     def require_ready(self) -> None:
         if not self.enabled:
@@ -33,6 +34,8 @@ class SmsConfiguration:
         normalize_e164(self.sender_e164)
         if not self.allowed_countries or self.audit_ttl_seconds < 86400:
             raise ValueError("sms_provider_not_configured")
+        if not self.public_base_url or not self.public_base_url.startswith("https://"):
+            raise ValueError("sms_callback_not_configured")
         if self.delivery_mode in {SMSDeliveryMode.OWNER_ALERT, SMSDeliveryMode.BOTH}:
             if not self.owner_to_e164:
                 raise ValueError("sms_owner_recipient_not_configured")
@@ -75,4 +78,5 @@ def resolve_sms_configuration(environment: Mapping[str, str]) -> SmsConfiguratio
         owner_to_e164=environment.get("SMS_OWNER_TO", "").strip() or None,
         visitor_notifications_enabled=_flag(environment.get("SMS_VISITOR_NOTIFICATIONS_ENABLED", "true")),
         owner_requires_visitor_contact=_flag(environment.get("SMS_OWNER_REQUIRES_VISITOR_CONTACT", "false")),
+        public_base_url=environment.get("PUBLIC_BASE_URL", "").strip().rstrip("/") or None,
     )

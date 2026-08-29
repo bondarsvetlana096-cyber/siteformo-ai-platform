@@ -26,6 +26,7 @@ class SmsTransportResult:
     provider_message_sid: str | None = field(default=None, repr=False)
     http_status: int | None = None
     transport_invoked: bool = True
+    provider_status: str | None = None
 
 
 class SmsTransport(Protocol):
@@ -35,10 +36,14 @@ class SmsTransport(Protocol):
 class TwilioSmsTransport:
     API_ORIGIN = "https://api.twilio.com"
 
-    def __init__(self, *, account_sid: str, auth_token: str, sender_e164: str, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self, *, account_sid: str, auth_token: str, sender_e164: str,
+        status_callback_url: str, client: httpx.AsyncClient,
+    ) -> None:
         self.account_sid = account_sid
         self._auth_token = auth_token
         self.sender_e164 = sender_e164
+        self.status_callback_url = status_callback_url
         self.client = client
 
     @property
@@ -50,7 +55,12 @@ class TwilioSmsTransport:
         try:
             response = await self.client.post(
                 self.endpoint,
-                data={"From": self.sender_e164, "To": message.destination_e164, "Body": message.body},
+                data={
+                    "From": self.sender_e164,
+                    "To": message.destination_e164,
+                    "Body": message.body,
+                    "StatusCallback": self.status_callback_url,
+                },
                 auth=(self.account_sid, self._auth_token),
             )
         except httpx.TimeoutException:
@@ -62,9 +72,13 @@ class TwilioSmsTransport:
         except ValueError:
             body = None
         sid = body.get("sid") if isinstance(body, dict) else None
+        provider_status = body.get("status") if isinstance(body, dict) else None
         if 200 <= response.status_code < 300:
             if isinstance(sid, str) and MESSAGE_SID.fullmatch(sid):
-                return SmsTransportResult(SmsTransportOutcome.ACCEPTED, sid, response.status_code)
+                return SmsTransportResult(
+                    SmsTransportOutcome.ACCEPTED, sid, response.status_code,
+                    provider_status=str(provider_status or "accepted").lower(),
+                )
             return SmsTransportResult(SmsTransportOutcome.AMBIGUOUS, http_status=response.status_code)
         if response.status_code in {401, 403, 404, 405}:
             outcome = SmsTransportOutcome.CONFIGURATION_ERROR

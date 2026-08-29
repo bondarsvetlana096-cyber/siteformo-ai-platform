@@ -132,7 +132,7 @@ class SmsDeliveryService:
             raise SmsDeliveryError("sms_audit_unavailable", 503) from exc
         result = await self.transport.send(SmsMessage(recipient, body), identity.idempotency_hash)
         sid_hash = _hash(result.provider_message_sid) if result.provider_message_sid else ""
-        final_state = "DELIVERED" if result.outcome is SmsTransportOutcome.ACCEPTED else (
+        final_state = "PROVIDER_ACCEPTED" if result.outcome is SmsTransportOutcome.ACCEPTED else (
             "QUARANTINED" if result.outcome in {SmsTransportOutcome.AMBIGUOUS, SmsTransportOutcome.QUARANTINED} else "REJECTED"
         )
         try:
@@ -141,6 +141,8 @@ class SmsDeliveryService:
                 "http_status": "" if result.http_status is None else str(result.http_status),
                 "message_sid_present": str(bool(sid_hash)).lower(), "message_sid_hash": sid_hash,
                 "typed_outcome": result.outcome.value, "final_state": final_state,
+                "provider_status": result.provider_status or "",
+                "provider_error_code": "", "provider_error_message": "",
                 "updated_at": str(int(time.time())),
             })
         except Exception as exc:

@@ -67,6 +67,7 @@ def config(mode, **changes):
         sender_e164="+12025550123", allowed_countries=frozenset({"US"}),
         audit_ttl_seconds=604800, delivery_mode=mode, owner_to_e164="+12025550125",
         visitor_notifications_enabled=True, owner_requires_visitor_contact=False,
+        public_base_url="https://example.invalid",
     )
     values.update(changes)
     return SmsConfiguration(**values)

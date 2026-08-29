@@ -74,7 +74,10 @@ class RuntimeTransport:
 
 def runtime_service(outcome=SmsTransportOutcome.ACCEPTED):
     state, audit, transport = RuntimeState(), RuntimeAudit(), RuntimeTransport(outcome)
-    config = SmsConfiguration(True, "AC" + "1" * 32, "synthetic", "+12025550123", frozenset({"US"}), 604800)
+    config = SmsConfiguration(
+        True, "AC" + "1" * 32, "synthetic", "+12025550123",
+        frozenset({"US"}), 604800, public_base_url="https://example.invalid",
+    )
     return SmsDeliveryService(config=config, state=state, audit=audit, transport=transport), state, audit, transport
 
 

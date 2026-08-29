@@ -81,7 +81,10 @@ class FakeTransport:
 
 
 def ready_config(enabled: bool = True) -> SmsConfiguration:
-    return SmsConfiguration(enabled, "AC" + "1" * 32, "not-a-real-secret", "+12025550123", frozenset({"US"}), 604800)
+    return SmsConfiguration(
+        enabled, "AC" + "1" * 32, "not-a-real-secret", "+12025550123",
+        frozenset({"US"}), 604800, public_base_url="https://example.invalid",
+    )
 
 
 def make_service(*, outcome: SmsTransportOutcome = SmsTransportOutcome.ACCEPTED, audit=None):
@@ -237,7 +240,7 @@ def test_twilio_response_mapping_offline(status, body, expected) -> None:
         return httpx.Response(status, json=body)
     async def exercise():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            transport = TwilioSmsTransport(account_sid="AC" + "1" * 32, auth_token="secret", sender_e164="+12025550123", client=client)
+            transport = TwilioSmsTransport(account_sid="AC" + "1" * 32, auth_token="secret", sender_e164="+12025550123", status_callback_url="https://example.invalid/api/demo/sms/status", client=client)
             return await transport.send(type("Message", (), {"destination_e164": "+12025550124", "body": "server-owned"})(), "key")
     assert asyncio.run(exercise()).outcome is expected
 
@@ -250,7 +253,7 @@ def test_timeout_is_quarantined_without_retry() -> None:
         raise httpx.ReadTimeout("offline timeout", request=request)
     async def exercise():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            transport = TwilioSmsTransport(account_sid="AC" + "1" * 32, auth_token="secret", sender_e164="+12025550123", client=client)
+            transport = TwilioSmsTransport(account_sid="AC" + "1" * 32, auth_token="secret", sender_e164="+12025550123", status_callback_url="https://example.invalid/api/demo/sms/status", client=client)
             return await transport.send(type("Message", (), {"destination_e164": "+12025550124", "body": "server-owned"})(), "key")
     assert asyncio.run(exercise()).outcome is SmsTransportOutcome.QUARANTINED
     assert calls == 1
