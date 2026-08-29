@@ -3,10 +3,14 @@ from __future__ import annotations
 import hashlib
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from app.api import demo_sms
+from app.api import demo_voice
 from app.api.demo_contact_email import ContactEmailRequest
 from app.api.demo_voice import VoiceDemoRequest
+from app.main import app
 from app.services.contact_delivery.canary import CLAIM_SCRIPT as EMAIL_CLAIM_SCRIPT
 from app.services.contact_delivery.canary import _keys as email_keys
 from app.services.contact_delivery.canary import delivery_identity
@@ -14,6 +18,7 @@ from app.services.contact_delivery.example_scope import (
     BUSINESS_1_EXAMPLE_ID,
     BUSINESS_2_EXAMPLE_ID,
     BUSINESS_3_EXAMPLE_ID,
+    BUSINESS_4_EXAMPLE_ID,
     ExampleScopeError,
     resolve_trusted_example,
 )
@@ -46,10 +51,64 @@ class PersistentQuotaModel:
 
 def test_dev_origin_accepts_all_canonical_examples_and_rejects_arbitrary_scope() -> None:
     origin = "https://dev.siteformo.com"
-    for example_id in (BUSINESS_1_EXAMPLE_ID, BUSINESS_2_EXAMPLE_ID, BUSINESS_3_EXAMPLE_ID):
+    for example_id in (
+        BUSINESS_1_EXAMPLE_ID,
+        BUSINESS_2_EXAMPLE_ID,
+        BUSINESS_3_EXAMPLE_ID,
+        BUSINESS_4_EXAMPLE_ID,
+    ):
         assert resolve_trusted_example(origin, example_id).example_id == example_id
     with pytest.raises(ExampleScopeError, match="example_scope_not_allowed"):
         resolve_trusted_example(origin, "ATTACKER_OVERRIDE")
+
+
+def test_nexora_sms_and_voice_scope_passes_before_disabled_runtime_without_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin = "https://dev.siteformo.com"
+    monkeypatch.setenv("SMS_DEMO_ENABLED", "false")
+    monkeypatch.setattr(demo_sms, "_sms_service", None)
+    monkeypatch.setattr(demo_voice.runtime, "configuration", None)
+    monkeypatch.setattr(demo_voice.runtime, "service", None)
+    with TestClient(app) as client:
+        sms = client.post(
+            "/api/demo/sms/start",
+            headers={"Origin": origin},
+            json={
+                "example_id": BUSINESS_4_EXAMPLE_ID,
+                "first_name": "Oleh",
+                "phone": "+353871234567",
+                "customer_message": "Hello",
+                "idempotency_key": "nexora-sms-scope-0001",
+            },
+        )
+        voice = client.post(
+            "/api/demo/voice/request",
+            headers={"Origin": origin},
+            json={
+                "example_id": BUSINESS_4_EXAMPLE_ID,
+                "first_name": "Oleh",
+                "phone": "+353871234567",
+                "idempotency_key": "nexora-voice-scope-0001",
+            },
+        )
+    assert sms.status_code == 503 and sms.json() == {"detail": "sms_demo_disabled"}
+    assert voice.status_code == 503 and voice.json() == {"detail": "voice_demo_disabled"}
+
+
+@pytest.mark.parametrize("endpoint", ["/api/demo/sms/start", "/api/demo/voice/request"])
+def test_nexora_scope_rejects_wrong_origin_before_runtime(endpoint: str) -> None:
+    payload = {
+        "example_id": BUSINESS_4_EXAMPLE_ID,
+        "first_name": "Oleh",
+        "phone": "+353871234567",
+        "idempotency_key": "nexora-wrong-origin-0001",
+    }
+    if endpoint.endswith("sms/start"):
+        payload["customer_message"] = "Hello"
+    with TestClient(app) as client:
+        response = client.post(endpoint, headers={"Origin": "https://example.invalid"}, json=payload)
+    assert response.status_code == 403 and response.json() == {"detail": "origin_not_allowed"}
 
 
 def test_public_origins_are_uniquely_bound_and_migration_safe() -> None:
@@ -102,20 +161,20 @@ def test_sms_quota_keys_isolate_examples_and_channels() -> None:
     recipient = hashlib.sha256(b"+12025550124").hexdigest()
     keys = set()
     for channel in ("SMS:VISITOR", "SMS:OWNER"):
-        for example_id in (BUSINESS_1_EXAMPLE_ID, BUSINESS_2_EXAMPLE_ID, BUSINESS_3_EXAMPLE_ID):
+        for example_id in (BUSINESS_1_EXAMPLE_ID, BUSINESS_2_EXAMPLE_ID, BUSINESS_3_EXAMPLE_ID, BUSINESS_4_EXAMPLE_ID):
             identity = DeliveryIdentity(channel, digest(example_id)[:32], recipient,
                                         digest(channel + example_id), "f", "c")
             keys.add(state.keys(identity, 0)[1])
-    assert len(keys) == 6
+    assert len(keys) == 8
 
 
 def test_call_quota_identity_is_example_scoped_and_channel_specific() -> None:
     recipient = digest("+353871234567")
     keys = {
         f"sf:demo-voice:v1:quota:CALL:{digest(example_id)[:32]}:{recipient}"
-        for example_id in (BUSINESS_1_EXAMPLE_ID, BUSINESS_2_EXAMPLE_ID, BUSINESS_3_EXAMPLE_ID)
+        for example_id in (BUSINESS_1_EXAMPLE_ID, BUSINESS_2_EXAMPLE_ID, BUSINESS_3_EXAMPLE_ID, BUSINESS_4_EXAMPLE_ID)
     }
-    assert len(keys) == 3
+    assert len(keys) == 4
     request = VoiceRequest("request", digest(BUSINESS_3_EXAMPLE_ID)[:32], "Oleh",
                            "+353871234567", recipient, "i" * 64, "c" * 64, 100)
     assert request.example_hash in next(key for key in keys if request.example_hash in key)
