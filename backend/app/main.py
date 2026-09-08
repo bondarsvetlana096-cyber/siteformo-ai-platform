@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.admin_routes import router as admin_routes_router
+from app.api.assistant_routes import router as assistant_router
 from app.api.channel_routes import router as channel_router
 from app.api.create_order import router as create_order_router
 from app.api.demo_contact_email import router as demo_contact_email_router
@@ -95,6 +96,7 @@ def health():
 
 # Core routers
 app.include_router(api_router)
+app.include_router(assistant_router)
 app.include_router(channel_router)
 app.include_router(create_order_router)
 
