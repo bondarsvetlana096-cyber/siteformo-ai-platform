@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from urllib.parse import urlencode
 
 import httpx
 
@@ -24,19 +25,25 @@ class TwilioVoiceTransport:
         self.config, self.client = config, client
 
     async def submit(self, request: VoiceRequest) -> ProviderResult:
-        form = {
-            "To": request.phone_e164,
-            "From": self.config.caller_e164,
-            "Twiml": render_twiml(request.first_name, voice=self.config.voice, language=self.config.language),
-            "StatusCallback": self.config.status_callback_url,
-            "StatusCallbackMethod": "POST",
-            "StatusCallbackEvent": "initiated ringing answered completed",
-            "Timeout": "20",
-        }
+        form = [
+            ("To", request.phone_e164),
+            ("From", self.config.caller_e164),
+            ("Twiml", render_twiml(request.first_name, voice=self.config.voice, language=self.config.language)),
+            ("StatusCallback", self.config.status_callback_url),
+            ("StatusCallbackMethod", "POST"),
+            ("StatusCallbackEvent", "initiated"),
+            ("StatusCallbackEvent", "ringing"),
+            ("StatusCallbackEvent", "answered"),
+            ("StatusCallbackEvent", "completed"),
+            ("Timeout", "20"),
+        ]
         url = f"https://api.twilio.com/2010-04-01/Accounts/{self.config.account_sid}/Calls.json"
         try:
             response = await self.client.post(
-                url, data=form, auth=(self.config.account_sid, self.config.auth_token),
+                url,
+                content=urlencode(form).encode(),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                auth=(self.config.account_sid, self.config.auth_token),
                 timeout=self.config.timeout_seconds,
             )
         except httpx.TimeoutException:
