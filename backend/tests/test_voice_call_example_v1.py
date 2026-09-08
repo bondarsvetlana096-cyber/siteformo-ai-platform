@@ -152,6 +152,8 @@ def test_dispatcher_submits_at_most_once_and_timeout_is_not_retried() -> None:
 
 
 def test_transport_posts_one_server_owned_call_without_retry_features() -> None:
+    from urllib.parse import parse_qs
+
     captured: list[httpx.Request] = []
     def handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
@@ -162,8 +164,10 @@ def test_transport_posts_one_server_owned_call_without_retry_features() -> None:
     result = asyncio.run(TwilioVoiceTransport(config, client).submit(request))
     asyncio.run(client.aclose())
     body = captured[0].content.decode()
+    fields = parse_qs(body)
     assert result.state is VoiceState.PROVIDER_SUBMITTED and len(captured) == 1
     assert "Twiml=" in body and "StatusCallback=" in body and "To=" in body and "From=" in body
+    assert fields["StatusCallbackEvent"] == ["initiated", "ringing", "answered", "completed"]
     assert all(term not in body for term in ("Record", "MachineDetection", "SendDigits"))
 
 
