@@ -1,4 +1,4 @@
-"""Explicit, one-off PostgreSQL schema installer for Assistant Core V1.
+"""Explicit, one-off PostgreSQL schema installer for Journey Identity V1.
 
 This module is deliberately not imported by application or worker startup.
 Run it explicitly with ``python -m app.services.db.assistant_schema_installer``.
@@ -18,10 +18,12 @@ from sqlalchemy.engine.interfaces import ReflectedIndex
 from sqlalchemy.schema import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint
 
 from app.assistant.models import AssistantBase
+from app.journey.models import SiteFormoVisitor
 from app.db.session import engine as primary_engine
 
 
 ASSISTANT_TABLES = (
+    "siteformo_visitors",
     "assistant_visitors",
     "assistant_conversations",
     "assistant_messages",
@@ -205,6 +207,7 @@ def _assistant_relations(connection: Connection) -> set[str]:
             WHERE n.nspname = current_schema()
               AND (
                 c.relname LIKE 'assistant_%'
+                OR c.relname LIKE 'siteformo_%'
                 OR c.relname LIKE 'ix_assistant_%'
                 OR c.relname LIKE 'uq_assistant_%'
                 OR c.relname = ANY(:index_names)
@@ -234,6 +237,12 @@ def _verify_connection(connection: Connection) -> VerificationResult:
     if not present_tables and not relations:
         return VerificationResult(SchemaState.ABSENT)
 
+    if _is_core_v1_connection(connection, present_tables, relations):
+        return VerificationResult(
+            SchemaState.PARTIAL,
+            ("upgradeable Assistant Core V1 schema present; Journey Identity V1 absent",),
+        )
+
     differences: list[str] = []
     if present_tables != expected_tables:
         missing = sorted(expected_tables - present_tables)
@@ -259,6 +268,85 @@ def _verify_connection(connection: Connection) -> VerificationResult:
     return VerificationResult(SchemaState.EXACT)
 
 
+def _core_v1_expected_table(table_name: str) -> dict[str, Any]:
+    expected = _expected_table(table_name)
+    if table_name != "assistant_visitors":
+        return expected
+    expected["columns"] = dict(expected["columns"])
+    expected["columns"].pop("siteformo_visitor_id")
+    expected["unique"] = {
+        columns for columns in expected["unique"] if columns != ("siteformo_visitor_id",)
+    }
+    expected["foreign_keys"] = {
+        item for item in expected["foreign_keys"] if item[0] != ("siteformo_visitor_id",)
+    }
+    return expected
+
+
+def _is_core_v1_connection(
+    connection: Connection, present_tables: set[str], relations: set[str]
+) -> bool:
+    core_tables = set(ASSISTANT_TABLES) - {"siteformo_visitors"}
+    if present_tables != core_tables:
+        return False
+    allowed_relations = (
+        core_tables
+        | {name for name in ASSISTANT_INDEXES if "siteformo" not in name}
+        | {
+            name
+            for name in ASSISTANT_CONSTRAINT_INDEXES
+            if not name.startswith("siteformo_visitors_")
+            and name != "assistant_visitors_siteformo_visitor_id_key"
+        }
+    )
+    if relations - allowed_relations:
+        return False
+    return all(
+        _actual_table(connection, table_name) == _core_v1_expected_table(table_name)
+        for table_name in sorted(core_tables)
+    )
+
+
+def _upgrade_core_v1(connection: Connection) -> None:
+    SiteFormoVisitor.__table__.create(bind=connection, checkfirst=False)
+    connection.execute(
+        text("ALTER TABLE assistant_visitors ADD COLUMN siteformo_visitor_id UUID")
+    )
+    connection.execute(
+        text(
+            """
+            INSERT INTO siteformo_visitors (id, credential_hash, created_at, updated_at)
+            SELECT id, credential_hash, created_at, updated_at
+            FROM assistant_visitors
+            """
+        )
+    )
+    connection.execute(
+        text("UPDATE assistant_visitors SET siteformo_visitor_id = id")
+    )
+    connection.execute(
+        text(
+            "ALTER TABLE assistant_visitors "
+            "ALTER COLUMN siteformo_visitor_id SET NOT NULL"
+        )
+    )
+    connection.execute(
+        text(
+            "ALTER TABLE assistant_visitors "
+            "ADD CONSTRAINT assistant_visitors_siteformo_visitor_id_fkey "
+            "FOREIGN KEY (siteformo_visitor_id) REFERENCES siteformo_visitors(id) "
+            "ON DELETE CASCADE"
+        )
+    )
+    connection.execute(
+        text(
+            "ALTER TABLE assistant_visitors "
+            "ADD CONSTRAINT assistant_visitors_siteformo_visitor_id_key "
+            "UNIQUE (siteformo_visitor_id)"
+        )
+    )
+
+
 def install_schema(
     bind: Engine = primary_engine,
     *,
@@ -274,13 +362,19 @@ def install_schema(
         before = _verify_connection(connection)
         if before.state is SchemaState.EXACT:
             return before, False
-        if before.state is not SchemaState.ABSENT:
+        if before.state is SchemaState.PARTIAL and _is_core_v1_connection(
+            connection,
+            set(inspect(connection).get_table_names()).intersection(ASSISTANT_TABLES),
+            _assistant_relations(connection),
+        ):
+            _upgrade_core_v1(connection)
+        elif before.state is SchemaState.ABSENT:
+            AssistantBase.metadata.create_all(bind=connection, checkfirst=False)
+        else:
             raise AssistantSchemaError(
                 f"Refusing Assistant schema installation: {before.state.value}: "
                 + "; ".join(before.differences)
             )
-
-        AssistantBase.metadata.create_all(bind=connection, checkfirst=False)
         if failure_hook is not None:
             failure_hook(connection)
         after = _verify_connection(connection)
@@ -298,7 +392,7 @@ def _print_result(result: VerificationResult) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Verify or install the Assistant Core V1 PostgreSQL schema")
+    parser = argparse.ArgumentParser(description="Verify or install the SiteFormo Journey/Assistant PostgreSQL schema")
     parser.add_argument("action", choices=("verify", "install"))
     args = parser.parse_args(argv)
 

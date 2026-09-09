@@ -6,13 +6,12 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.assistant.config import AssistantSettings, get_assistant_settings
-from app.assistant.identity import ASSISTANT_COOKIE_MAX_AGE, ASSISTANT_COOKIE_NAME, hash_possession_credential
 from app.assistant.openai_adapter import AssistantInferenceError, AssistantOpenAIAdapter
 from app.assistant.rate_limit import assistant_rate_limiter
 from app.assistant.service import (
@@ -23,6 +22,9 @@ from app.assistant.service import (
     stream_message,
 )
 from app.db.session import get_db
+from app.journey.identity import JOURNEY_CREDENTIAL_HEADER
+from app.journey.models import SiteFormoVisitor
+from app.journey.service import JourneyCredentialError, require_journey_visitor
 
 logger = logging.getLogger("siteformo.assistant.api")
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
@@ -69,16 +71,14 @@ def require_ie_origin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Assistant request origin is not allowed")
 
 
-def _set_visitor_cookie(response: Response, credential: str) -> None:
-    response.set_cookie(
-        ASSISTANT_COOKIE_NAME,
-        credential,
-        max_age=ASSISTANT_COOKIE_MAX_AGE,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        path="/",
-    )
+def require_journey(
+    db: Session = Depends(get_db),
+    credential: str | None = Header(default=None, alias=JOURNEY_CREDENTIAL_HEADER),
+) -> SiteFormoVisitor:
+    try:
+        return require_journey_visitor(db, credential)
+    except JourneyCredentialError:
+        raise HTTPException(status_code=428, detail="Journey session is required") from None
 
 
 def _serialize_history(messages: list) -> list[dict[str, str]]:
@@ -89,17 +89,19 @@ def _serialize_history(messages: list) -> list[dict[str, str]]:
     ]
 
 
+@router.get("/availability")
+def assistant_availability(settings: AssistantSettings = Depends(get_assistant_settings)) -> dict[str, bool]:
+    return {"enabled": settings.enabled}
+
+
 @router.post("/session")
 def bootstrap_session(
-    response: Response,
     _: AssistantSettings = Depends(require_enabled),
     __: None = Depends(require_ie_origin),
     db: Session = Depends(get_db),
-    credential: str | None = Cookie(default=None, alias=ASSISTANT_COOKIE_NAME),
+    siteformo_visitor: SiteFormoVisitor = Depends(require_journey),
 ) -> dict:
-    _, conversation, new_credential = resolve_visitor_and_conversation(db, credential)
-    if new_credential:
-        _set_visitor_cookie(response, new_credential)
+    _, conversation = resolve_visitor_and_conversation(db, siteformo_visitor)
     return {"conversation_id": str(conversation.id), "history": _serialize_history(load_history(db, conversation.id))}
 
 
@@ -108,10 +110,10 @@ def get_history(
     conversation_id: uuid.UUID | None = Query(default=None),
     _: AssistantSettings = Depends(require_enabled),
     db: Session = Depends(get_db),
-    credential: str | None = Cookie(default=None, alias=ASSISTANT_COOKIE_NAME),
+    siteformo_visitor: SiteFormoVisitor = Depends(require_journey),
 ) -> dict:
     try:
-        _, conversation = require_owned_conversation(db, credential, conversation_id)
+        _, conversation = require_owned_conversation(db, siteformo_visitor, conversation_id)
     except AssistantOwnershipError:
         raise HTTPException(status_code=404, detail="Conversation was not found") from None
     return {"conversation_id": str(conversation.id), "history": _serialize_history(load_history(db, conversation.id))}
@@ -128,13 +130,13 @@ async def post_message(
     settings: AssistantSettings = Depends(require_enabled),
     _: None = Depends(require_ie_origin),
     db: Session = Depends(get_db),
-    credential: str | None = Cookie(default=None, alias=ASSISTANT_COOKIE_NAME),
+    siteformo_visitor: SiteFormoVisitor = Depends(require_journey),
 ) -> StreamingResponse:
     try:
-        _, conversation = require_owned_conversation(db, credential, payload.conversation_id)
+        _, conversation = require_owned_conversation(db, siteformo_visitor, payload.conversation_id)
     except AssistantOwnershipError:
         raise HTTPException(status_code=404, detail="Conversation was not found") from None
-    if not assistant_rate_limiter.check(hash_possession_credential(credential or "")):
+    if not assistant_rate_limiter.check(siteformo_visitor.credential_hash):
         raise HTTPException(status_code=429, detail="Too many Assistant messages")
     adapter = AssistantOpenAIAdapter(settings)
 

@@ -14,8 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api import assistant_routes
 from app.assistant.config import AssistantSettings
-from app.assistant.identity import ASSISTANT_COOKIE_NAME, hash_possession_credential, issue_possession_credential
-from app.assistant.models import AssistantBase, AssistantConversation, AssistantMessage
+from app.assistant.models import AssistantBase, AssistantConversation, AssistantMessage, AssistantVisitor
 from app.assistant.openai_adapter import AssistantInferenceError, AssistantOpenAIAdapter
 from app.assistant.service import (
     HISTORY_LIMIT,
@@ -26,6 +25,9 @@ from app.assistant.service import (
     stream_message,
 )
 from app.db.session import Base as AppBase, get_db
+from app.journey.identity import JOURNEY_CREDENTIAL_HEADER, hash_journey_credential, issue_journey_credential
+from app.journey.models import SiteFormoVisitor
+from app.journey.service import bootstrap_journey
 from app.main import app
 
 
@@ -117,25 +119,34 @@ def test_adapter_uses_dedicated_config_no_tools_and_sanitizes(caplog):
         assert secret not in caplog.text
 
 
+def journey(db):
+    session = bootstrap_journey(db, None)
+    assert session.credential
+    return session.visitor, session.credential
+
+
 def test_identity_is_high_entropy_and_only_hash_is_persisted(db_factory):
-    credential = issue_possession_credential()
+    credential = issue_journey_credential()
     assert len(credential) >= 43
     db = db_factory()
-    visitor, _, issued = resolve_visitor_and_conversation(db, None)
-    assert issued and visitor.credential_hash == hash_possession_credential(issued)
+    siteformo_visitor, issued = journey(db)
+    visitor, _ = resolve_visitor_and_conversation(db, siteformo_visitor)
+    assert visitor.credential_hash == hash_journey_credential(issued)
+    assert visitor.siteformo_visitor_id == siteformo_visitor.id
     assert issued != visitor.credential_hash
 
 
 def test_visitor_resume_forgery_and_cross_visitor_rejection(db_factory):
     db = db_factory()
-    visitor_a, conversation_a, credential_a = resolve_visitor_and_conversation(db, None)
-    resumed_visitor, resumed_conversation, replacement = resolve_visitor_and_conversation(db, credential_a)
-    visitor_b, _, credential_b = resolve_visitor_and_conversation(db, None)
+    journey_a, credential_a = journey(db)
+    visitor_a, conversation_a = resolve_visitor_and_conversation(db, journey_a)
+    resumed_visitor, resumed_conversation = resolve_visitor_and_conversation(db, journey_a)
+    journey_b, credential_b = journey(db)
+    visitor_b, _ = resolve_visitor_and_conversation(db, journey_b)
     assert (resumed_visitor.id, resumed_conversation.id) == (visitor_a.id, conversation_a.id)
-    assert replacement is None and visitor_b.id != visitor_a.id
-    for credential in (credential_b, "forged-unknown-token"):
-        with pytest.raises(AssistantOwnershipError):
-            require_owned_conversation(db, credential, conversation_a.id)
+    assert visitor_b.id != visitor_a.id
+    with pytest.raises(AssistantOwnershipError):
+        require_owned_conversation(db, journey_b, conversation_a.id)
 
 
 class SuccessfulAdapter:
@@ -155,7 +166,8 @@ class FailingAdapter:
 
 def test_stream_retry_idempotency_replay_and_partial_safety(db_factory):
     db = db_factory()
-    _, conversation, _ = resolve_visitor_and_conversation(db, None)
+    siteformo_visitor, _ = journey(db)
+    _, conversation = resolve_visitor_and_conversation(db, siteformo_visitor)
     turn_id = uuid.uuid4()
 
     async def fail():
@@ -193,7 +205,8 @@ def test_stream_retry_idempotency_replay_and_partial_safety(db_factory):
 
 def test_history_is_bounded(db_factory):
     db = db_factory()
-    _, conversation, _ = resolve_visitor_and_conversation(db, None)
+    siteformo_visitor, _ = journey(db)
+    _, conversation = resolve_visitor_and_conversation(db, siteformo_visitor)
     for index in range(HISTORY_LIMIT + 5):
         db.add(AssistantMessage(conversation_id=conversation.id, role="user", status="completed", content=str(index)))
         db.commit()
@@ -204,7 +217,8 @@ def test_history_is_bounded(db_factory):
 
 def test_one_active_conversation_uniqueness(db_factory):
     db = db_factory()
-    visitor, _, _ = resolve_visitor_and_conversation(db, None)
+    siteformo_visitor, _ = journey(db)
+    visitor, _ = resolve_visitor_and_conversation(db, siteformo_visitor)
     db.add(AssistantConversation(visitor_id=visitor.id, status="active"))
     with pytest.raises(IntegrityError):
         db.commit()
@@ -238,7 +252,7 @@ def test_disabled_routes_stop_before_client_and_business_activity(monkeypatch, d
         app.dependency_overrides.clear()
 
 
-def test_routes_cookie_origin_validation_history_and_progressive_sse(monkeypatch, db_factory):
+def test_routes_journey_origin_validation_history_and_progressive_sse(monkeypatch, db_factory):
     app.dependency_overrides[get_db] = database_override(db_factory)
     app.dependency_overrides[assistant_routes.get_assistant_settings] = lambda: AssistantSettings(
         enabled=True, openai_api_key="test-only", _env_file=None
@@ -248,36 +262,38 @@ def test_routes_cookie_origin_validation_history_and_progressive_sse(monkeypatch
         client = TestClient(app, base_url="https://ie.siteformo.com")
         origin = {"Origin": "https://ie.siteformo.com"}
         assert client.post("/api/assistant/session", headers={"Origin": "https://evil.test"}).status_code == 403
-        first = client.post("/api/assistant/session", headers=origin)
+        bootstrap = client.post("/api/journey/session", headers=origin)
+        credential = bootstrap.json()["credential"]
+        headers = {**origin, JOURNEY_CREDENTIAL_HEADER: credential}
+        first = client.post("/api/assistant/session", headers=headers)
         assert first.status_code == 200
-        cookie = first.headers["set-cookie"].lower()
-        assert "sf_assistant_visitor=" in cookie and "domain=" not in cookie
-        assert "path=/" in cookie and "httponly" in cookie and "secure" in cookie
-        assert "samesite=lax" in cookie and "max-age=31536000" in cookie
+        assert "set-cookie" not in first.headers
         conversation_id = first.json()["conversation_id"]
-        assert client.post("/api/assistant/session", headers=origin).json()["conversation_id"] == conversation_id
+        assert client.post("/api/assistant/session", headers=headers).json()["conversation_id"] == conversation_id
         payload = {"message": "first", "client_message_id": str(uuid.uuid4()), "conversation_id": conversation_id, "page_hint": "/start?x=1"}
         assert client.post("/api/assistant/message", headers={"Origin": "https://evil.test"}, json=payload).status_code == 403
-        with client.stream("POST", "/api/assistant/message", headers=origin, json=payload) as response:
+        with client.stream("POST", "/api/assistant/message", headers=headers, json=payload) as response:
             body = "".join(response.iter_text())
         assert response.status_code == 200
         assert response.headers["cache-control"] == "no-cache"
         assert response.headers["x-accel-buffering"] == "no"
         assert "event: start" in body and "event: done" in body
         assert body.index('"text": "hel"') < body.index('"text": "lo"')
-        restored = client.get("/api/assistant/history", params={"conversation_id": conversation_id}).json()
+        restored = client.get("/api/assistant/history", headers=headers, params={"conversation_id": conversation_id}).json()
         assert [row["content"] for row in restored["history"]] == ["first", "hello"]
-        assert client.post("/api/assistant/message", headers=origin, json={
+        assert client.post("/api/assistant/message", headers=headers, json={
             "message": "x" * 4001, "client_message_id": str(uuid.uuid4())
         }).status_code == 422
-        assert client.post("/api/assistant/message", headers=origin, json={
+        assert client.post("/api/assistant/message", headers=headers, json={
             "message": "ok", "client_message_id": str(uuid.uuid4()), "page_hint": "https://evil.test"
         }).status_code == 422
         other = TestClient(app, base_url="https://ie.siteformo.com")
-        other.post("/api/assistant/session", headers=origin)
-        assert other.get("/api/assistant/history", params={"conversation_id": conversation_id}).status_code == 404
-        other.cookies.set(ASSISTANT_COOKIE_NAME, "forged-unknown-token", domain="ie.siteformo.com")
-        assert other.get("/api/assistant/history", params={"conversation_id": conversation_id}).status_code == 404
+        other_bootstrap = other.post("/api/journey/session", headers=origin).json()
+        other_headers = {**origin, JOURNEY_CREDENTIAL_HEADER: other_bootstrap["credential"]}
+        other.post("/api/assistant/session", headers=other_headers)
+        assert other.get("/api/assistant/history", headers=other_headers, params={"conversation_id": conversation_id}).status_code == 404
+        forged = {**origin, JOURNEY_CREDENTIAL_HEADER: "forged-unknown-token"}
+        assert other.get("/api/assistant/history", headers=forged, params={"conversation_id": conversation_id}).status_code == 428
     finally:
         app.dependency_overrides.clear()
 
@@ -291,15 +307,17 @@ def test_provider_failure_is_sanitized_sse(monkeypatch, db_factory):
     try:
         client = TestClient(app, base_url="https://ie.siteformo.com")
         origin = {"Origin": "https://ie.siteformo.com"}
-        conversation_id = client.post("/api/assistant/session", headers=origin).json()["conversation_id"]
-        response = client.post("/api/assistant/message", headers=origin, json={
+        credential = client.post("/api/journey/session", headers=origin).json()["credential"]
+        headers = {**origin, JOURNEY_CREDENTIAL_HEADER: credential}
+        conversation_id = client.post("/api/assistant/session", headers=headers).json()["conversation_id"]
+        response = client.post("/api/assistant/message", headers=headers, json={
             "message": "private", "client_message_id": str(uuid.uuid4()), "conversation_id": conversation_id
         })
         assert "event: error" in response.text
         assert "temporarily unavailable" in response.text
         assert "partial" in response.text
         assert "sanitized" not in response.text and "private" not in response.text
-        history = client.get("/api/assistant/history", params={"conversation_id": conversation_id}).json()["history"]
+        history = client.get("/api/assistant/history", headers=headers, params={"conversation_id": conversation_id}).json()["history"]
         assert [row["role"] for row in history] == ["user"]
     finally:
         app.dependency_overrides.clear()
@@ -308,7 +326,7 @@ def test_provider_failure_is_sanitized_sse(monkeypatch, db_factory):
 def test_router_paths_are_unique_and_worker_independent():
     paths = [(route.path, tuple(sorted(getattr(route, "methods", ())))) for route in app.routes]
     assistant_paths = [item for item in paths if item[0].startswith("/api/assistant")]
-    assert len(assistant_paths) == 3 and len(assistant_paths) == len(set(assistant_paths))
+    assert len(assistant_paths) == 4 and len(assistant_paths) == len(set(assistant_paths))
     for module in (assistant_routes.__name__, stream_message.__module__, AssistantOpenAIAdapter.__module__):
         assert ".workers" not in module
 
@@ -317,7 +335,7 @@ def test_startup_metadata_cannot_create_assistant_tables():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     AppBase.metadata.create_all(engine)
     names = set(inspect(engine).get_table_names())
-    assert not {"assistant_visitors", "assistant_conversations", "assistant_messages"} & names
+    assert not {"siteformo_visitors", "assistant_visitors", "assistant_conversations", "assistant_messages"} & names
 
 
 def test_target_migration_lineage_and_postgresql_partial_index():
@@ -330,3 +348,8 @@ def test_target_migration_lineage_and_postgresql_partial_index():
     assert migration.down_revision == "0006_design_screenshot_flow"
     source = migration_path.read_text(encoding="utf-8")
     assert 'postgresql_where=sa.text("status = \'active\'")' in source
+
+    journey_path = Path(__file__).parents[1] / "alembic" / "versions" / "0008_siteformo_journey_identity_v1.py"
+    journey_source = journey_path.read_text(encoding="utf-8")
+    assert 'revision = "0008_siteformo_journey_identity_v1"' in journey_source
+    assert 'down_revision = "0007_assistant_core_v1"' in journey_source

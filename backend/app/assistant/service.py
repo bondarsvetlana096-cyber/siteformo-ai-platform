@@ -7,9 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.assistant.identity import hash_possession_credential, issue_possession_credential
 from app.assistant.models import AssistantConversation, AssistantMessage, AssistantVisitor
 from app.assistant.openai_adapter import AssistantOpenAIAdapter
+from app.journey.models import SiteFormoVisitor
 
 HISTORY_LIMIT = 40
 PLACEHOLDER_INSTRUCTIONS = (
@@ -23,20 +23,18 @@ class AssistantOwnershipError(RuntimeError):
 
 
 def resolve_visitor_and_conversation(
-    db: Session, credential: str | None
-) -> tuple[AssistantVisitor, AssistantConversation, str | None]:
-    visitor = None
-    if credential:
-        visitor = db.execute(
-            select(AssistantVisitor).where(
-                AssistantVisitor.credential_hash == hash_possession_credential(credential)
-            )
-        ).scalar_one_or_none()
-
-    new_credential = None
+    db: Session, siteformo_visitor: SiteFormoVisitor
+) -> tuple[AssistantVisitor, AssistantConversation]:
+    visitor = db.execute(
+        select(AssistantVisitor).where(
+            AssistantVisitor.siteformo_visitor_id == siteformo_visitor.id
+        )
+    ).scalar_one_or_none()
     if visitor is None:
-        new_credential = issue_possession_credential()
-        visitor = AssistantVisitor(credential_hash=hash_possession_credential(new_credential))
+        visitor = AssistantVisitor(
+            siteformo_visitor_id=siteformo_visitor.id,
+            credential_hash=siteformo_visitor.credential_hash,
+        )
         db.add(visitor)
         db.flush()
 
@@ -55,11 +53,9 @@ def resolve_visitor_and_conversation(
         db.commit()
     except IntegrityError:
         db.rollback()
-        if not credential:
-            raise
         visitor = db.execute(
             select(AssistantVisitor).where(
-                AssistantVisitor.credential_hash == hash_possession_credential(credential)
+                AssistantVisitor.siteformo_visitor_id == siteformo_visitor.id
             )
         ).scalar_one()
         conversation = db.execute(
@@ -70,17 +66,15 @@ def resolve_visitor_and_conversation(
         ).scalar_one()
     db.refresh(visitor)
     db.refresh(conversation)
-    return visitor, conversation, new_credential
+    return visitor, conversation
 
 
 def require_owned_conversation(
-    db: Session, credential: str | None, conversation_id: uuid.UUID | None = None
+    db: Session, siteformo_visitor: SiteFormoVisitor, conversation_id: uuid.UUID | None = None
 ) -> tuple[AssistantVisitor, AssistantConversation]:
-    if not credential:
-        raise AssistantOwnershipError("Assistant session is missing")
     visitor = db.execute(
         select(AssistantVisitor).where(
-            AssistantVisitor.credential_hash == hash_possession_credential(credential)
+            AssistantVisitor.siteformo_visitor_id == siteformo_visitor.id
         )
     ).scalar_one_or_none()
     if visitor is None:

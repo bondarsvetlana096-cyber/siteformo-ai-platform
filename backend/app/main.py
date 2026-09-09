@@ -25,6 +25,7 @@ from app.services.voice_delivery.runtime import (
 from app.api.demo_telegram import close_telegram_runtime, configure_telegram_runtime, router as demo_telegram_router
 from app.api.example_routes import router as example_router
 from app.api.leads import router as leads_router
+from app.api.journey_routes import router as journey_router
 from app.api.order_routes import router as order_router
 from app.api.payment_routes import router as payment_router
 from app.api.request_routes import router as request_router
@@ -97,6 +98,7 @@ def health():
 # Core routers
 app.include_router(api_router)
 app.include_router(assistant_router)
+app.include_router(journey_router)
 app.include_router(channel_router)
 app.include_router(create_order_router)
 

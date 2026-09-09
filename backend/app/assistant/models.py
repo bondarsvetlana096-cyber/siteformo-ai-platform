@@ -5,11 +5,12 @@ from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.journey.models import JourneyBase, SiteFormoVisitor
 
 
-class AssistantBase(DeclarativeBase):
-    """Separate metadata keeps startup create_all from owning Assistant tables."""
+AssistantBase = JourneyBase
 
 
 class AssistantVisitor(AssistantBase):
@@ -21,9 +22,13 @@ class AssistantVisitor(AssistantBase):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     credential_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    siteformo_visitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("siteformo_visitors.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     conversations: Mapped[list["AssistantConversation"]] = relationship(back_populates="visitor")
+    siteformo_visitor: Mapped[SiteFormoVisitor] = relationship()
 
 
 class AssistantConversation(AssistantBase):
