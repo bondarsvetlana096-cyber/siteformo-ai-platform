@@ -30,7 +30,7 @@ ASSISTANT_TABLES = (
 )
 ASSISTANT_INDEXES = frozenset(
     index.name
-    for table in AssistantBase.metadata.sorted_tables
+    for table in (AssistantBase.metadata.tables[name] for name in ASSISTANT_TABLES)
     for index in table.indexes
     if index.name is not None
 )
@@ -38,7 +38,7 @@ ASSISTANT_INDEXES = frozenset(
 
 def _constraint_index_names() -> frozenset[str]:
     names: set[str] = set()
-    for table in AssistantBase.metadata.sorted_tables:
+    for table in (AssistantBase.metadata.tables[name] for name in ASSISTANT_TABLES):
         names.add(f"{table.name}_pkey")
         for constraint in table.constraints:
             if isinstance(constraint, UniqueConstraint):
@@ -207,7 +207,7 @@ def _assistant_relations(connection: Connection) -> set[str]:
             WHERE n.nspname = current_schema()
               AND (
                 c.relname LIKE 'assistant_%'
-                OR c.relname LIKE 'siteformo_%'
+                OR c.relname = 'siteformo_visitors'
                 OR c.relname LIKE 'ix_assistant_%'
                 OR c.relname LIKE 'uq_assistant_%'
                 OR c.relname = ANY(:index_names)
@@ -369,7 +369,8 @@ def install_schema(
         ):
             _upgrade_core_v1(connection)
         elif before.state is SchemaState.ABSENT:
-            AssistantBase.metadata.create_all(bind=connection, checkfirst=False)
+            for table_name in ASSISTANT_TABLES:
+                AssistantBase.metadata.tables[table_name].create(bind=connection, checkfirst=False)
         else:
             raise AssistantSchemaError(
                 f"Refusing Assistant schema installation: {before.state.value}: "

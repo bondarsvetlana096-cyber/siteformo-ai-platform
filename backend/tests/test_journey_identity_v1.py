@@ -104,8 +104,10 @@ def test_journey_and_assistant_origin_binding_and_privilege_isolation():
         from pathlib import Path
 
         backend = Path(__file__).parents[1]
+        order_source = (backend / "app/api/order_routes.py").read_text(encoding="utf-8")
+        assert order_source.count("JOURNEY_CREDENTIAL_HEADER") == 3
+        assert order_source.count("require_journey_visitor") == 2
         for relative in (
-            "app/api/order_routes.py",
             "app/api/payment_routes.py",
             "app/api/admin_routes.py",
             "app/api/admin.py",
