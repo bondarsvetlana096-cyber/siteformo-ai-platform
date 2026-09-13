@@ -12,6 +12,9 @@ from app.journey.service import JourneyCredentialError, require_journey_visitor
 from app.schemas.payment import (
     CheckoutRequestV2,
     CheckoutResponseV2,
+    PrepaymentSummaryEmailRequest,
+    PrepaymentSummaryEmailResponse,
+    PrepaymentSummaryResponse,
     PaymentConfirmationRequest,
     PaymentConfirmationResponse,
     PaymentStatusResponse,
@@ -21,12 +24,44 @@ from app.services.payment_boundary_service import (
     confirm_brief_and_legal,
     create_checkout,
     payment_status,
+    prepayment_summary,
+    send_prepayment_summary,
 )
+from app.services.email_service import send_email
 from app.services.q1_service import Q1OwnershipError
 
 
 router = APIRouter(prefix="/api/orders", tags=["payment-boundary-v2"])
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+
+@router.get("/{order_id}/prepayment-summary", response_model=PrepaymentSummaryResponse)
+def get_prepayment_summary(
+    order_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    credential: str | None = Header(default=None, alias=JOURNEY_CREDENTIAL_HEADER),
+):
+    visitor = _visitor(request, db, credential)
+    try:
+        return PrepaymentSummaryResponse(**prepayment_summary(db, visitor, order_id))
+    except (Q1OwnershipError, PaymentBoundaryError) as exc:
+        _raise_boundary(exc)
+
+
+@router.post("/{order_id}/prepayment-summary-email", response_model=PrepaymentSummaryEmailResponse)
+async def email_prepayment_summary(
+    order_id: str,
+    _payload: PrepaymentSummaryEmailRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    credential: str | None = Header(default=None, alias=JOURNEY_CREDENTIAL_HEADER),
+):
+    visitor = _visitor(request, db, credential)
+    try:
+        return PrepaymentSummaryEmailResponse(**await send_prepayment_summary(db, visitor, order_id, send_email))
+    except (Q1OwnershipError, PaymentBoundaryError) as exc:
+        _raise_boundary(exc)
 
 
 def _visitor(request: Request, db: Session, credential: str | None):

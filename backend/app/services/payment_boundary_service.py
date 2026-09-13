@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ from app.models.payment import PaymentAttempt, StripeWebhookEvent
 from app.schemas.order import Q2V2Payload
 from app.services.q1_service import Q1OwnershipError, project_binding
 from app.services.q2_scope_planner import PACKAGE_RULE_VERSION, qualify_scope
+from app.services.email_service import compose_prepayment_summary_email
 
 
 PACKAGE_PRICES_CENTS = {
@@ -31,6 +32,7 @@ ADDON_REGISTRY_CENTS = {
 }
 ACTIVE_ATTEMPT_STATUSES = {"creating", "checkout_created", "pending"}
 SCOPE_VERSION = "payment_scope_v2"
+SUMMARY_VERSION = "prepayment_summary_v1"
 CURRENCY = "EUR"
 
 
@@ -94,7 +96,7 @@ def confirm_brief_and_legal(
     return order
 
 
-def _canonical_q2(order: Order) -> tuple[dict[str, Any], dict[str, Any]]:
+def _canonical_q2(order: Order, *, require_checkout_ready: bool = True) -> tuple[dict[str, Any], dict[str, Any]]:
     extended = order.extended_brief or {}
     stored = extended.get("q2_v2")
     if not isinstance(stored, dict):
@@ -102,7 +104,9 @@ def _canonical_q2(order: Order) -> tuple[dict[str, Any], dict[str, Any]]:
     authored = {key: value for key, value in stored.items() if key != "scope_qualification"}
     payload = Q2V2Payload.model_validate(authored)
     qualification = qualify_scope(payload)
-    if not qualification["checkout_ready"] or qualification["eligibility"] != "supported":
+    if qualification["eligibility"] != "supported" or not qualification.get("recommended_package"):
+        raise PaymentBoundaryError("Q2 scope is not resolved for payment")
+    if require_checkout_ready and not qualification["checkout_ready"]:
         raise PaymentBoundaryError("Q2 scope is not checkout ready")
     package = qualification.get("recommended_package")
     if package not in PACKAGE_PRICES_CENTS:
@@ -132,26 +136,38 @@ def _confirmed_addons(q2: dict[str, Any], confirmed_at: datetime) -> list[dict[s
     return addons
 
 
-def build_payment_snapshot(order: Order, visitor: SiteFormoVisitor) -> tuple[dict[str, Any], str]:
-    q2, qualification = _canonical_q2(order)
+def _scope_calculation(
+    order: Order, visitor: SiteFormoVisitor, *, require_checkout_ready: bool = False,
+) -> dict[str, Any]:
+    """Single financial calculation used by summary, email, and Checkout."""
+    q2, qualification = _canonical_q2(order, require_checkout_ready=require_checkout_ready)
     package = qualification["recommended_package"]
     base = package_price_cents(package)
-    if not order.brief_confirmed_at:
-        raise PaymentBoundaryError("Project Brief confirmation is required")
-    if not order.legal_confirmed_at or not order.legal_terms_version:
-        raise PaymentBoundaryError("Versioned legal confirmation is required")
-    if order.legal_terms_version != approved_legal_terms_version():
-        raise PaymentBoundaryError("Legal terms version is no longer current")
-    addons = _confirmed_addons(q2, order.brief_confirmed_at)
+    confirmed_at = order.brief_confirmed_at or order.updated_at or order.created_at or _now()
+    addons = _confirmed_addons(q2, confirmed_at)
     deposit = base // 2
     addon_balance = sum(item["confirmed_price_cents"] for item in addons)
     q2_canonical = json.dumps(q2, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    snapshot = {
-        "order_id": order.id,
-        "siteformo_visitor_id": str(visitor.id),
-        "q2_schema_version": q2["schema_version"],
-        "q2_content_hash": hashlib.sha256(q2_canonical.encode()).hexdigest(),
+    q2_hash = hashlib.sha256(q2_canonical.encode()).hexdigest()
+    scope_basis = {
+        "q2_content_hash": q2_hash,
         "scope_qualification_version": qualification["rule_version"],
+        "base_package": package,
+        "base_package_price_cents": base,
+        "confirmed_addons": [
+            {key: value for key, value in item.items() if key != "confirmed_at"}
+            for item in addons
+        ],
+        "scope_version": SCOPE_VERSION,
+    }
+    scope_hash = hashlib.sha256(
+        json.dumps(scope_basis, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    return {
+        "q2": q2,
+        "qualification": qualification,
+        "q2_content_hash": q2_hash,
+        "scope_hash": scope_hash,
         "base_package": package,
         "base_package_price_cents": base,
         "initial_deposit_rate": "0.50",
@@ -162,6 +178,210 @@ def build_payment_snapshot(order: Order, visitor: SiteFormoVisitor) -> tuple[dic
         "remaining_base_package_balance_cents": base - deposit,
         "confirmed_addons_balance_cents": addon_balance,
         "current_final_balance_cents": base - deposit + addon_balance,
+    }
+
+
+def build_prepayment_summary(order: Order, visitor: SiteFormoVisitor) -> dict[str, Any]:
+    calculation = _scope_calculation(order, visitor)
+    q2 = calculation["q2"]
+    qualification = calculation["qualification"]
+    identity = q2.get("business_identity") or {}
+    activity = q2.get("business_activity") or {}
+    architecture = qualification.get("provisional_architecture") or {}
+    email_meta = (order.extended_brief or {}).get("payment_boundary_v2_email") or {}
+    approved_terms = approved_legal_terms_version()
+    email_signature = _email_scope_signature(calculation["scope_hash"], order.legal_terms_version)
+    email_current = (
+        email_meta.get("signature") == email_signature
+        and order.legal_terms_version == approved_terms
+    )
+    email_status = order.prepayment_summary_email_status if email_current else "pending"
+    email_sent_at = order.prepayment_summary_email_sent_at if email_current and email_status == "sent" else None
+    return {
+        "order_id": order.id,
+        "project_summary": {
+            "business_identity": {"status": identity.get("status"), "name": identity.get("name")},
+            "business_activity": {"short_niche": activity.get("niche"), "broad_model": activity.get("broad_model")},
+            "audience": q2.get("audience"),
+            "primary_goal": q2.get("primary_goal"),
+            "confirmed_functions": [item.get("key") for item in q2.get("functions") or [] if item.get("confirmed")],
+            "provisional_architecture": {
+                "status": architecture.get("status"),
+                "minimum_coherent_pages": architecture.get("minimum_coherent_pages"),
+                "proposed_page_roles": architecture.get("proposed_page_roles") or [],
+                "reasoning_codes": architecture.get("reasoning_codes") or [],
+            },
+            "package_qualification": {
+                "eligibility": qualification.get("eligibility"),
+                "minimum_package": qualification.get("minimum_package"),
+                "recommended_package": qualification.get("recommended_package"),
+                "required_floor_reasons": qualification.get("required_floor_reasons") or [],
+                "optional_recommendation_reasons": qualification.get("optional_recommendation_reasons") or [],
+            },
+        },
+        "payment_summary": {
+            key: calculation[key] for key in (
+                "base_package", "base_package_price_cents", "initial_deposit_rate",
+                "initial_deposit_amount_cents", "currency", "addons_due_now_cents",
+                "remaining_base_package_balance_cents", "confirmed_addons_balance_cents",
+                "current_final_balance_cents",
+            )
+        } | {
+            "confirmed_addons": [
+                {
+                    "addon_key": item["addon_key"], "label": item["description"],
+                    "confirmed_price_cents": item["confirmed_price_cents"],
+                    "charge_phase": item["charge_phase"],
+                }
+                for item in calculation["confirmed_addons"]
+            ]
+        },
+        "confirmation_state": {
+            "package_and_addons_confirmed": bool(q2.get("package_and_addons_confirmed")),
+            "brief_confirmed_at": order.brief_confirmed_at,
+            "legal_confirmed_at": order.legal_confirmed_at,
+            "legal_terms_version": order.legal_terms_version,
+        },
+        "email_state": {"status": email_status, "sent_at": email_sent_at},
+        "scope": {
+            "q2_schema_version": q2["schema_version"],
+            "scope_version": SCOPE_VERSION,
+            "scope_hash": calculation["scope_hash"],
+            "summary_version": SUMMARY_VERSION,
+        },
+        "legal_terms_available": approved_terms is not None,
+        "approved_legal_terms_version": approved_terms,
+    }
+
+
+def prepayment_summary(db: Session, visitor: SiteFormoVisitor, order_id: str) -> dict[str, Any]:
+    project_binding(db, visitor, order_id)
+    order = db.get(Order, order_id)
+    if order is None or order.status != OrderStatus.DRAFT:
+        raise Q1OwnershipError("Only the current draft project has a pre-payment summary")
+    if not isinstance((order.brief_answers or {}).get("q1_v2"), dict):
+        raise PaymentBoundaryError("Q1 V2 is required")
+    return build_prepayment_summary(order, visitor)
+
+
+def _email_scope_signature(scope_hash: str, legal_terms_version: str | None) -> str:
+    value = f"{scope_hash}:{legal_terms_version or ''}:{SUMMARY_VERSION}"
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _require_current_email_attempt(order: Order, scope_hash: str) -> None:
+    signature = _email_scope_signature(scope_hash, order.legal_terms_version)
+    meta = (order.extended_brief or {}).get("payment_boundary_v2_email") or {}
+    if meta.get("signature") != signature:
+        raise PaymentBoundaryError("Pre-payment summary email is required for the current scope")
+    state = meta.get("operation_state")
+    if state == "sent" and meta.get("provider_attempted_at"):
+        return
+    if state == "failed" and meta.get("provider_attempted_at"):
+        return
+    raise PaymentBoundaryError("Pre-payment summary email operation has not completed for the current scope")
+
+
+async def send_prepayment_summary(
+    db: Session, visitor: SiteFormoVisitor, order_id: str,
+    provider: Callable[[str, str, str], Awaitable[Any]],
+) -> dict[str, Any]:
+    project_binding(db, visitor, order_id)
+    order = db.execute(select(Order).where(Order.id == order_id).with_for_update()).scalar_one_or_none()
+    if order is None or order.status != OrderStatus.DRAFT:
+        raise Q1OwnershipError("Only the current draft project may send a pre-payment summary")
+    summary = build_prepayment_summary(order, visitor)
+    confirmation = summary["confirmation_state"]
+    if not confirmation["package_and_addons_confirmed"]:
+        raise PaymentBoundaryError("Package and add-ons confirmation is required")
+    if not confirmation["brief_confirmed_at"]:
+        raise PaymentBoundaryError("Project Brief confirmation is required")
+    approved = approved_legal_terms_version()
+    if not confirmation["legal_confirmed_at"] or not approved:
+        raise PaymentBoundaryError("Approved legal confirmation is required")
+    if confirmation["legal_terms_version"] != approved:
+        raise PaymentBoundaryError("Legal terms version is no longer current")
+    recipient = getattr(order.client, "email", None)
+    if not recipient:
+        raise PaymentBoundaryError("A verified project email address is required", 409)
+    signature = _email_scope_signature(summary["scope"]["scope_hash"], approved)
+    extended = dict(order.extended_brief or {})
+    meta = dict(extended.get("payment_boundary_v2_email") or {})
+    if meta.get("signature") == signature and order.prepayment_summary_email_status == "sent":
+        return {"order_id": order.id, "result": "already_sent", "email_status": "sent", "sent_at": order.prepayment_summary_email_sent_at, "retry_allowed": False}
+    if meta.get("signature") == signature and meta.get("operation_state") == "sending":
+        try:
+            requested_at = _utc(datetime.fromisoformat(str(meta.get("requested_at"))))
+        except (TypeError, ValueError):
+            requested_at = None
+        if requested_at and _now() - requested_at < timedelta(minutes=10):
+            return {"order_id": order.id, "result": "in_progress", "email_status": "pending", "sent_at": None, "retry_allowed": False}
+    meta = {"signature": signature, "operation_state": "sending", "requested_at": _now().isoformat()}
+    extended["payment_boundary_v2_email"] = meta
+    order.extended_brief = extended
+    order.prepayment_summary_email_status = "pending"
+    order.prepayment_summary_email_sent_at = None
+    db.commit()
+    message = compose_prepayment_summary_email(summary)
+    try:
+        await provider(recipient, message["subject"], message["html"])
+    except Exception:
+        db.rollback()
+        order = db.execute(select(Order).where(Order.id == order_id).with_for_update()).scalar_one()
+        extended = dict(order.extended_brief or {})
+        meta = dict(extended.get("payment_boundary_v2_email") or {})
+        if meta.get("signature") == signature:
+            meta["operation_state"] = "failed"
+            meta["provider_attempted_at"] = _now().isoformat()
+            extended["payment_boundary_v2_email"] = meta
+            order.extended_brief = extended
+            order.prepayment_summary_email_status = "failed"
+            order.prepayment_summary_email_sent_at = None
+            db.commit()
+        return {"order_id": order.id, "result": "failed", "email_status": "failed", "sent_at": None, "retry_allowed": True}
+    order = db.execute(select(Order).where(Order.id == order_id).with_for_update()).scalar_one()
+    extended = dict(order.extended_brief or {})
+    meta = dict(extended.get("payment_boundary_v2_email") or {})
+    current_summary = build_prepayment_summary(order, visitor)
+    current_signature = _email_scope_signature(current_summary["scope"]["scope_hash"], approved)
+    sent_at = _now()
+    meta["operation_state"] = "sent" if current_signature == signature else "sent_for_previous_scope"
+    meta["provider_attempted_at"] = sent_at.isoformat()
+    meta["sent_at"] = sent_at.isoformat()
+    extended["payment_boundary_v2_email"] = meta
+    order.extended_brief = extended
+    order.prepayment_summary_email_status = "sent" if current_signature == signature else "pending"
+    order.prepayment_summary_email_sent_at = sent_at if current_signature == signature else None
+    db.commit()
+    if current_signature != signature:
+        return {"order_id": order.id, "result": "failed", "email_status": "pending", "sent_at": None, "retry_allowed": True}
+    return {"order_id": order.id, "result": "sent", "email_status": "sent", "sent_at": sent_at, "retry_allowed": False}
+
+
+def build_payment_snapshot(order: Order, visitor: SiteFormoVisitor) -> tuple[dict[str, Any], str]:
+    calculation = _scope_calculation(order, visitor, require_checkout_ready=True)
+    q2 = calculation["q2"]
+    qualification = calculation["qualification"]
+    if not order.brief_confirmed_at:
+        raise PaymentBoundaryError("Project Brief confirmation is required")
+    if not order.legal_confirmed_at or not order.legal_terms_version:
+        raise PaymentBoundaryError("Versioned legal confirmation is required")
+    if order.legal_terms_version != approved_legal_terms_version():
+        raise PaymentBoundaryError("Legal terms version is no longer current")
+    _require_current_email_attempt(order, calculation["scope_hash"])
+    snapshot = {
+        "order_id": order.id,
+        "siteformo_visitor_id": str(visitor.id),
+        "q2_schema_version": q2["schema_version"],
+        "q2_content_hash": calculation["q2_content_hash"],
+        "scope_qualification_version": qualification["rule_version"],
+        "scope_hash": calculation["scope_hash"],
+        **{key: calculation[key] for key in (
+            "base_package", "base_package_price_cents", "initial_deposit_rate",
+            "initial_deposit_amount_cents", "currency", "confirmed_addons",
+            "addons_due_now_cents", "remaining_base_package_balance_cents",
+            "confirmed_addons_balance_cents", "current_final_balance_cents",
+        )},
         "brief_confirmed_at": order.brief_confirmed_at.isoformat(),
         "legal_terms_version": order.legal_terms_version,
         "legal_confirmed_at": order.legal_confirmed_at.isoformat(),

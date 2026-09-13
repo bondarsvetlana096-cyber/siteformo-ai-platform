@@ -1,4 +1,5 @@
 import os
+from html import escape
 from typing import Any, Dict, Iterable, Optional
 
 import requests
@@ -7,6 +8,40 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 EMAIL_FROM = os.getenv("EMAIL_FROM", "SiteFormo <hello@siteformo.com>")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://siteformo.com").rstrip("/")
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "klon97048@gmail.com")
+
+
+def compose_prepayment_summary_email(summary: Dict[str, Any]) -> Dict[str, str]:
+    """Build a factual transactional email from a trusted server summary."""
+    payment = summary["payment_summary"]
+    confirmation = summary["confirmation_state"]
+    addons = payment["confirmed_addons"]
+    addon_rows = "".join(
+        f"<li>{escape(str(item['label']))}: €{item['confirmed_price_cents'] / 100:.2f} (due with final balance)</li>"
+        for item in addons
+    ) or "<li>No optional services confirmed.</li>"
+    order_id = escape(str(summary["order_id"]))
+    package = escape(str(payment["base_package"]).title())
+    terms = escape(str(confirmation["legal_terms_version"]))
+    confirmed_at = escape(str(confirmation["legal_confirmed_at"]))
+    html = f"""
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111;max-width:680px;margin:auto">
+      <h2>SiteFormo pre-payment summary</h2>
+      <p><strong>Project reference:</strong> {order_id}</p>
+      <p><strong>Confirmed base package:</strong> {package}<br>
+         <strong>Base package price:</strong> €{payment['base_package_price_cents'] / 100:.2f}<br>
+         <strong>Deposit payable now:</strong> €{payment['initial_deposit_amount_cents'] / 100:.2f}</p>
+      <p>The initial deposit is 50% of the base package only.</p>
+      <h3>Confirmed optional services</h3><ul>{addon_rows}</ul>
+      <p>Optional services are not charged in the initial payment.</p>
+      <p><strong>Current final balance:</strong> €{payment['current_final_balance_cents'] / 100:.2f}</p>
+      <p><strong>Legal terms version:</strong> {terms}<br>
+         <strong>Confirmed at:</strong> {confirmed_at}</p>
+    </div>
+    """
+    return {
+        "subject": f"SiteFormo pre-payment summary — {order_id}",
+        "html": html,
+    }
 
 
 def _safe_get(obj: Any, key: str, default: Any = None) -> Any:
