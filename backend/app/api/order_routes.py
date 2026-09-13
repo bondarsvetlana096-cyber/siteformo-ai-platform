@@ -11,10 +11,11 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.order import FinalPackage, Order, OrderStatus
-from app.schemas.order import ApprovalResponse, IntakePayload, IntakeResponse, Q1ProjectRequest, Q1ProjectResponse, Q1V2Payload, Q1V2Response
+from app.schemas.order import ApprovalResponse, IntakePayload, IntakeResponse, Q1ProjectRequest, Q1ProjectResponse, Q1V2Payload, Q1V2Response, Q2V2Payload, Q2V2Response
 from app.journey.identity import JOURNEY_CREDENTIAL_HEADER
 from app.journey.service import JourneyCredentialError, require_journey_visitor
 from app.services.q1_service import Q1OwnershipError, ensure_project, save_q1
+from app.services.q2_service import save_q2
 from app.services.approval_service import ApprovalService
 from app.services.intake_service import IntakeService
 from app.services.launch_link_service import LaunchLinkService
@@ -27,9 +28,9 @@ from app.services.review_service import apply_creative_payload, package_revision
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 
-def _q1_visitor(request: Request, db: Session, credential: str | None):
+def _questionnaire_visitor(request: Request, db: Session, credential: str | None):
     if request.headers.get("origin") != "https://ie.siteformo.com":
-        raise HTTPException(status_code=403, detail="Q1 request origin is not allowed")
+        raise HTTPException(status_code=403, detail="Questionnaire request origin is not allowed")
     try:
         return require_journey_visitor(db, credential)
     except JourneyCredentialError as exc:
@@ -316,7 +317,7 @@ def ensure_q1_project(
     db: Session = Depends(get_db),
     credential: str | None = Header(default=None, alias=JOURNEY_CREDENTIAL_HEADER),
 ):
-    visitor = _q1_visitor(request, db, credential)
+    visitor = _questionnaire_visitor(request, db, credential)
     try:
         order, created = ensure_project(
             db, visitor, payload.order_id, payload.handoff_id, payload.start_new_project
@@ -334,12 +335,35 @@ def update_q1(
     db: Session = Depends(get_db),
     credential: str | None = Header(default=None, alias=JOURNEY_CREDENTIAL_HEADER),
 ):
-    visitor = _q1_visitor(request, db, credential)
+    visitor = _questionnaire_visitor(request, db, credential)
     try:
         repeated = save_q1(db, visitor, order_id, payload)
     except Q1OwnershipError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from None
     return Q1V2Response(order_id=order_id, journey_id=str(visitor.id), flow_version="q1_v2", schema_version=2, idempotent=repeated)
+
+
+@router.patch("/{order_id}/q2", response_model=Q2V2Response)
+def update_q2(
+    order_id: str,
+    payload: Q2V2Payload,
+    request: Request,
+    db: Session = Depends(get_db),
+    credential: str | None = Header(default=None, alias=JOURNEY_CREDENTIAL_HEADER),
+):
+    visitor = _questionnaire_visitor(request, db, credential)
+    try:
+        repeated, qualification = save_q2(db, visitor, order_id, payload)
+    except Q1OwnershipError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
+    return Q2V2Response(
+        order_id=order_id,
+        journey_id=str(visitor.id),
+        flow_version="q2_v2",
+        schema_version=2,
+        idempotent=repeated,
+        scope_qualification=qualification,
+    )
 
 @router.post("/intake", response_model=IntakeResponse)
 def create_order_intake(

@@ -105,7 +105,8 @@ def test_journey_and_assistant_origin_binding_and_privilege_isolation():
 
         backend = Path(__file__).parents[1]
         order_source = (backend / "app/api/order_routes.py").read_text(encoding="utf-8")
-        assert order_source.count("JOURNEY_CREDENTIAL_HEADER") == 3
+        # Import plus Q1 project, Q1 save, and Journey-authorized Q2 save.
+        assert order_source.count("JOURNEY_CREDENTIAL_HEADER") == 4
         assert order_source.count("require_journey_visitor") == 2
         for relative in (
             "app/api/payment_routes.py",
