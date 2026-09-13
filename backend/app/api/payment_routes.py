@@ -2,8 +2,12 @@ import os
 import uuid
 import stripe
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.db.session import get_db
+from app.models.order import Order
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
@@ -60,11 +64,15 @@ def is_whitelisted(data: CheckoutRequest) -> bool:
 
 
 @router.post("/create-checkout")
-async def create_checkout(data: CheckoutRequest):
+async def create_checkout(data: CheckoutRequest, db: Session = Depends(get_db)):
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
     order_id = data.order_id or str(uuid.uuid4())
+    if data.order_id:
+        order = db.get(Order, data.order_id)
+        if order and isinstance((order.brief_answers or {}).get("q1_v2"), dict):
+            raise HTTPException(status_code=410, detail="Q1/Q2 V2 projects must use the Journey-owned checkout endpoint")
 
     success_url = (
         data.success_url

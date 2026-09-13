@@ -28,6 +28,10 @@ from app.services.review_service import apply_creative_payload, package_revision
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 
+def _is_v2_project(order: Order) -> bool:
+    return isinstance((order.brief_answers or {}).get("q1_v2"), dict)
+
+
 def _questionnaire_visitor(request: Request, db: Session, credential: str | None):
     if request.headers.get("origin") != "https://ie.siteformo.com":
         raise HTTPException(status_code=403, detail="Questionnaire request origin is not allowed")
@@ -411,6 +415,8 @@ def confirm_paid_order(
     db: Session = Depends(get_db),
 ):
     order = _get_order_or_404(db, order_id)
+    if _is_v2_project(order):
+        raise HTTPException(status_code=410, detail="Legacy payment confirmation is disabled for Q1/Q2 V2 projects")
 
     if _is_owner_bypass_order(order):
         order.status = _status("APPROVED", "FINAL_READY")
@@ -440,6 +446,8 @@ def get_order(
     db: Session = Depends(get_db),
 ):
     order = _get_order_or_404(db, order_id)
+    if _is_v2_project(order):
+        raise HTTPException(status_code=410, detail="Legacy full-order read is disabled for Q1/Q2 V2 projects")
     owner_bypass = _is_owner_bypass_order(order)
     estimated_price = int(order.estimated_price_eur or 0)
     deposit_amount = 0 if owner_bypass else int(estimated_price / 2)
@@ -494,6 +502,8 @@ async def payment_reported(
     db: Session = Depends(get_db),
 ):
     order = _get_order_or_404(db, order_id)
+    if _is_v2_project(order):
+        raise HTTPException(status_code=410, detail="Legacy payment reporting is disabled for Q1/Q2 V2 projects")
 
     if _is_owner_bypass_order(order):
         order.status = _status("APPROVED", "FINAL_READY")
@@ -597,6 +607,8 @@ async def submit_extended_brief(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Missing order_id")
 
     order = _get_order_or_404(db, order_id)
+    if _is_v2_project(order):
+        raise HTTPException(status_code=410, detail="Legacy extended brief is disabled for Q1/Q2 V2 projects")
 
     # Save the detailed questionnaire on the order. Keep brief_answers in sync as
     # a fallback for older code paths that still read that field.
@@ -655,6 +667,8 @@ async def approve_design(
     should show the already-selected state, not allow another approval.
     """
     order = _get_order_or_404(db, order_id)
+    if _is_v2_project(order):
+        raise HTTPException(status_code=409, detail="Q1/Q2 V2 post-payment design flow is not activated in Payment Boundary Phase 2")
 
     payload_order_id = payload.get("order_id")
     if payload_order_id and str(payload_order_id) != str(order_id):

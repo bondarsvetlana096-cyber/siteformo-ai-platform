@@ -28,6 +28,7 @@ from app.api.leads import router as leads_router
 from app.api.journey_routes import router as journey_router
 from app.api.order_routes import router as order_router
 from app.api.payment_routes import router as payment_router
+from app.api.payment_boundary_routes import router as payment_boundary_router
 from app.api.request_routes import router as request_router
 from app.api.review_routes import router as review_router
 
@@ -109,6 +110,7 @@ app.include_router(leads_router)
 app.include_router(order_router)
 app.include_router(request_router)
 app.include_router(payment_router)
+app.include_router(payment_boundary_router)
 app.include_router(stripe_webhook_router)
 app.include_router(admin_routes_router)
 app.include_router(review_router)

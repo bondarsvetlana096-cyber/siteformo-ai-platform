@@ -32,6 +32,11 @@ def _get_order(db: Session, order_id: str) -> Order:
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    if isinstance((order.brief_answers or {}).get("q1_v2"), dict):
+        raise HTTPException(
+            status_code=409,
+            detail="Q1/Q2 V2 design/effects flow is not activated in Payment Boundary Phase 2",
+        )
     return order
 
 

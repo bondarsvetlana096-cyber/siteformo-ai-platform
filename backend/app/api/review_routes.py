@@ -10,6 +10,14 @@ from app.services.review_service import ReviewService, apply_creative_payload, n
 router = APIRouter(prefix="/api/review", tags=["protected-review"])
 
 
+def _block_unactivated_v2_flow(order: Order) -> None:
+    if isinstance((order.brief_answers or {}).get("q1_v2"), dict):
+        raise HTTPException(
+            status_code=409,
+            detail="Q1/Q2 V2 protected review is not activated in Payment Boundary Phase 2",
+        )
+
+
 def _order(db: Session, order_id: str) -> Order:
     order = (
         db.query(Order)
@@ -19,6 +27,7 @@ def _order(db: Session, order_id: str) -> Order:
     )
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _block_unactivated_v2_flow(order)
     return order
 
 

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db.session import get_db
 from app.models.order import Order
+from app.services.payment_boundary_service import process_v2_checkout_completed
 from app.services import generation_service
 from app.services.pdf_service import create_divi_pdf
 
@@ -414,6 +415,12 @@ async def stripe_webhook(
         raise HTTPException(status_code=400, detail=str(e))
 
     if event["type"] == "checkout.session.completed":
+        v2_session = event["data"]["object"]
+        v2_metadata = _safe_get(v2_session, "metadata", {}) or {}
+        if _safe_get(v2_metadata, "payment_contract") == "q2_v2_initial_deposit":
+            return process_v2_checkout_completed(db, event)
+
+    if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
 
         amount_total = _safe_get(session, "amount_total", 0) or 0
@@ -435,12 +442,6 @@ async def stripe_webhook(
         deposit_eur = _safe_get(metadata, "deposit_eur") or amount_eur
 
         print("🔥 STRIPE CHECKOUT COMPLETED")
-        print("Metadata:", metadata)
-        print("Order ID:", order_id)
-        print("Customer email:", customer_email)
-        print("Tier:", tier)
-        print("Deposit EUR:", deposit_eur)
-
         payment_type = _safe_get(metadata, "type", "deposit") or "deposit"
 
         if not order_id:
@@ -451,6 +452,18 @@ async def stripe_webhook(
             }
 
         order = _load_order(db, order_id)
+
+        if order and isinstance((order.brief_answers or {}).get("q1_v2"), dict):
+            return {
+                "status": "rejected",
+                "reason": "v2_order_requires_persisted_payment_attempt",
+            }
+
+        print("Metadata:", metadata)
+        print("Order ID:", order_id)
+        print("Customer email:", customer_email)
+        print("Tier:", tier)
+        print("Deposit EUR:", deposit_eur)
 
         if not order:
             print("⚠️ Order not found in database, but payment is real. Sending payment emails from Stripe metadata:", order_id)
