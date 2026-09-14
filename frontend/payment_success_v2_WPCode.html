@@ -1,0 +1,104 @@
+<!-- SiteFormo Payment Success V2 — local WPCode 145 replacement candidate. -->
+<script>
+(function(){
+  "use strict";
+  const PAGE_PATH="/payment-success";
+  if(location.pathname.replace(/\/+$/,"/").replace(/\/$/,"")!==PAGE_PATH)return;
+
+  const API_BASE="https://siteformo-ai-platform-production.up.railway.app";
+  const JOURNEY_KEY="siteformo_journey_credential_v1";
+  const POLL_INTERVAL_MS=2500;
+  const AGGRESSIVE_POLL_MS=60000;
+  const params=new URLSearchParams(location.search);
+  const orderId=(params.get("order_id")||"").trim();
+  const credential=localStorage.getItem(JOURNEY_KEY);
+  let state="checking";
+  let statusData=null;
+  let controller=null;
+  let pollTimer=null;
+  let pollStartedAt=Date.now();
+  let persistentPending=false;
+
+  const style=document.createElement("style");
+  style.dataset.siteformoPaymentSuccessV2="";
+  style.textContent=`
+    html,body{max-width:100%;overflow-x:clip}
+    .sfpay{box-sizing:border-box;width:min(720px,100%);margin:clamp(28px,8vh,88px) auto;padding:0 18px;color:#17231d;font:16px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .sfpay *{box-sizing:border-box}.sfpay-card{background:#fff;border:1px solid #dbe5df;border-radius:24px;padding:clamp(24px,5vw,46px);box-shadow:0 18px 54px #193c2920;text-align:center}
+    .sfpay-mark{display:grid;place-items:center;width:54px;height:54px;margin:0 auto 18px;border-radius:50%;background:#edf7f1;color:#1d6b4c;font-size:25px;font-weight:800}
+    .sfpay h1{margin:0 0 14px;font-size:clamp(28px,6vw,44px);line-height:1.12}.sfpay p{margin:0;color:#5d6c65}.sfpay-note{margin-top:16px!important;padding:13px 15px;border-radius:13px;background:#f3f7f5}
+    .sfpay-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:26px}.sfpay-btn{display:inline-flex;align-items:center;justify-content:center;min-height:50px;padding:12px 20px;border:0;border-radius:14px;background:#1d6b4c;color:#fff;font:700 16px/1.2 system-ui;text-decoration:none;cursor:pointer}.sfpay-btn-secondary{background:#eef3f0;color:#17231d}
+    .sfpay-btn:focus-visible{outline:3px solid #75b99a;outline-offset:3px}.sfpay-spinner{width:28px;height:28px;margin:0 auto 20px;border:3px solid #dbe5df;border-top-color:#1d6b4c;border-radius:50%;animation:sfpay-spin 1.2s linear infinite}
+    @keyframes sfpay-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.sfpay-spinner{animation:none;border-top-color:#dbe5df;background:#1d6b4c}}
+    @media(max-width:520px){.sfpay{margin-top:20px;padding:0 12px}.sfpay-card{padding:26px 18px}.sfpay-btn{width:100%;min-height:52px}}
+  `;
+  document.head.appendChild(style);
+  const root=document.createElement("main");
+  root.id="sf-payment-success-v2";
+  root.className="sfpay";
+  root.setAttribute("aria-live","polite");
+  document.body.appendChild(root);
+
+  const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+  const retryUrl=()=>`/extended-questionnaire/?order_id=${encodeURIComponent(orderId)}`;
+  function content(){
+    if(state==="checking")return `<div class="sfpay-spinner" aria-hidden="true"></div><h1 tabindex="-1">Checking your payment</h1><p>Please wait while SiteFormo verifies the payment securely.</p>`;
+    if(state==="pending")return `<div class="sfpay-mark" aria-hidden="true">…</div><h1 tabindex="-1">Your payment is being confirmed</h1><p>The secure payment confirmation has not reached SiteFormo yet. This page will update automatically.</p>${persistentPending?'<p class="sfpay-note">This is taking longer than usual. Your project will not advance until confirmation is received.</p><div class="sfpay-actions"><button class="sfpay-btn" type="button" data-check>Check payment status</button></div>':""}`;
+    if(state==="confirmed")return `<div class="sfpay-mark" aria-hidden="true">✓</div><h1 tabindex="-1">Payment confirmed</h1><p>Your deposit has been confirmed securely. Your next project step is being prepared.</p><p class="sfpay-note">You do not need to select a design or start generation from this page.</p>`;
+    if(state==="retry")return `<div class="sfpay-mark" aria-hidden="true">!</div><h1 tabindex="-1">Payment is not complete</h1><p>${statusData?.deposit_status==="cancelled"?"The Checkout was cancelled.":statusData?.deposit_status==="failed"?"The payment could not be completed.":"No completed deposit is recorded for this project."}</p>${statusData?.retry_allowed?`<div class="sfpay-actions"><a class="sfpay-btn" href="${retryUrl()}">Return to project payment</a></div>`:""}`;
+    if(state==="refunded")return `<div class="sfpay-mark" aria-hidden="true">i</div><h1 tabindex="-1">Payment refunded</h1><p>This deposit is recorded as refunded. No post-payment project step is available from this page.</p>`;
+    if(state==="recovery")return `<div class="sfpay-mark" aria-hidden="true">i</div><h1 tabindex="-1">We couldn’t verify this project session</h1><p>Please return to the previous SiteFormo step and reopen the same project.</p>`;
+    return `<div class="sfpay-mark" aria-hidden="true">!</div><h1 tabindex="-1">We couldn’t check the payment</h1><p>A temporary connection or server problem prevented verification. No payment result has been assumed.</p><div class="sfpay-actions"><button class="sfpay-btn" type="button" data-check>Check payment status again</button></div>`;
+  }
+  function render(focus=false){
+    root.innerHTML=`<section class="sfpay-card" data-payment-state="${esc(state)}">${content()}</section>`;
+    root.querySelector("[data-check]")?.addEventListener("click",()=>checkStatus(true));
+    if(focus)requestAnimationFrame(()=>root.querySelector("h1")?.focus());
+  }
+  function stopPolling(){if(pollTimer){clearTimeout(pollTimer);pollTimer=null;}if(controller){controller.abort();controller=null;}}
+  function schedulePoll(){
+    if(document.hidden||state!=="pending"||persistentPending)return;
+    const elapsed=Date.now()-pollStartedAt;
+    if(elapsed>=AGGRESSIVE_POLL_MS){persistentPending=true;render();return;}
+    pollTimer=setTimeout(()=>checkStatus(false),POLL_INTERVAL_MS);
+  }
+  function validPayload(data){
+    const statuses=["not_started","checkout_created","pending","paid","failed","cancelled","refunded"];
+    return data&&data.order_id===orderId&&statuses.includes(data.deposit_status)&&typeof data.payment_confirmed==="boolean"&&typeof data.retry_allowed==="boolean"&&typeof data.next_step==="string";
+  }
+  function applyStatus(data){
+    statusData=data;
+    if(data.payment_confirmed===true&&data.deposit_status==="paid"){state="confirmed";stopPolling();render(true);return;}
+    if(data.payment_confirmed===true||data.deposit_status==="paid"){state="temporary_error";stopPolling();render(true);return;}
+    if(["checkout_created","pending"].includes(data.deposit_status)){state="pending";render();schedulePoll();return;}
+    stopPolling();
+    if(data.deposit_status==="refunded")state="refunded";
+    else if(["not_started","failed","cancelled"].includes(data.deposit_status))state="retry";
+    else state="temporary_error";
+    render(true);
+  }
+  async function checkStatus(manual=false){
+    if(!orderId||!credential){state="recovery";stopPolling();render(true);return;}
+    if(controller)controller.abort();
+    if(pollTimer){clearTimeout(pollTimer);pollTimer=null;}
+    const requestController=new AbortController();
+    controller=requestController;
+    if(manual){state="checking";render();}
+    try{
+      const response=await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}/payment-status`,{method:"GET",headers:{"X-SiteFormo-Visitor":credential},signal:requestController.signal,credentials:"omit"});
+      let data=null;try{data=await response.json();}catch(_error){}
+      if(response.status===401||response.status===403||response.status===404){state="recovery";stopPolling();render(true);return;}
+      if(!response.ok||!validPayload(data)){state="temporary_error";stopPolling();render(true);return;}
+      applyStatus(data);
+    }catch(error){
+      if(error?.name!=="AbortError"){state="temporary_error";stopPolling();render(true);}
+    }finally{if(controller===requestController)controller=null;}
+  }
+  document.addEventListener("visibilitychange",()=>{
+    if(document.hidden){if(pollTimer){clearTimeout(pollTimer);pollTimer=null;}if(controller)controller.abort();return;}
+    if(state==="pending")checkStatus(false);
+  });
+  render();
+  checkStatus(false);
+})();
+</script>
