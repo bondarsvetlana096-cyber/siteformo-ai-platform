@@ -17,6 +17,7 @@ node_modules/
 qa/screenshots/
 qa/reports/
 *.png
+.stage-artifacts/
 
 # system
 .DS_Store
