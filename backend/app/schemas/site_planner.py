@@ -42,6 +42,61 @@ ValidatorReasonCode = Literal[
 ]
 
 
+class NavigationAuthorityPolicyV1(ClosedModel):
+    targets_are_page_keys_only: Literal[True]
+    target_page_key_must_exist: Literal[True]
+    action_target_must_differ_from_current_page: Literal[True]
+    navigation_edge_endpoints_must_differ: Literal[True]
+    self_or_circular_navigation_cannot_satisfy_conversion_reachability: Literal[True]
+
+
+class LogoAuthorityPolicyV1(ClosedModel):
+    authority_path: Literal["generation_context.media.logo.simple_logo_required"]
+    simple_logo_requires_confirmed_true: Literal[True]
+    business_identity_does_not_authorize_logo_generation: Literal[True]
+    unconfirmed_logo_generation_or_media_requirement_forbidden: Literal[True]
+
+
+class CriticalActionPolicyV1(ClosedModel):
+    component_family_registry: dict[
+        Literal[
+            "navigation", "contact_form", "enquiry_form", "file_upload",
+            "booking", "reservation", "checkout", "account", "login",
+            "registration", "dashboard",
+        ],
+        Literal["navigation", "forms", "booking", "checkout_payment", "account_security"],
+    ]
+    explicit_action_families: list[Literal[
+        "navigation", "forms", "booking", "checkout_payment",
+        "account_security", "primary_conversion_actions",
+    ]]
+    protected_section_must_set_critical_action_true: Literal[True]
+    signature_interactions_forbidden_on_critical_sections: Literal[True]
+    allowed_critical_motion_levels: list[Literal["none", "subtle", "contextual"]]
+    motion_or_interaction_required_for_completion_forbidden: Literal[True]
+    hover_only_required_forbidden: Literal[True]
+    static_or_reduced_motion_control_availability_required: Literal[True]
+    obscure_delay_replace_or_gate_required_action_forbidden: Literal[True]
+    client_preference_never_overrides_critical_safety: Literal[True]
+
+
+class FactualSourcePolicyV1(ClosedModel):
+    content_kinds: list[Literal[
+        "confirmed_fact", "generated_copy_allowed", "client_material_required",
+        "placeholder_allowed", "unsupported_unresolved",
+    ]]
+    confirmed_fact_source_prefixes: list[Literal[
+        "business.identity", "business.activity", "business.operating_model",
+        "business.location", "business.audience", "business.primary_goal",
+        "business.trust_materials", "source_signals.selected_example_id",
+        "source_signals.viewed_example_ids",
+    ]]
+    confirmed_fact_requires_allowlisted_source_key: Literal[True]
+    generated_copy_cannot_create_factual_claims: Literal[True]
+    missing_fact_uses_client_material_placeholder_or_unresolved_kind: Literal[True]
+    invented_awards_statistics_history_addresses_credentials_testimonials_product_or_team_facts_forbidden: Literal[True]
+
+
 class PlannerPolicyV1(ClosedModel):
     contract_version: Literal["v1"]
     context_is_immutable_authority: Literal[True]
@@ -58,6 +113,10 @@ class PlannerPolicyV1(ClosedModel):
     mobile_coverage_required: Literal[True]
     reduced_motion_coverage_required: Literal[True]
     interaction_safety_required: Literal[True]
+    navigation_authority: NavigationAuthorityPolicyV1
+    logo_authority: LogoAuthorityPolicyV1
+    critical_action_policy: CriticalActionPolicyV1
+    factual_source_policy: FactualSourcePolicyV1
     max_semantic_repairs: Literal[1]
 
 

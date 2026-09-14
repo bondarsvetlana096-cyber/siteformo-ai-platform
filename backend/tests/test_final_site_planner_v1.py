@@ -8,6 +8,7 @@ from app.schemas.generation_context import GenerationContextV1
 from app.schemas.site_planner import SitePlannerProviderResult
 from app.services.final_site_planner import create_final_site_plan_v1, planner_operation_key
 from app.services.generation_context_service import build_generation_context_v1
+from app.services.site_plan_validator import validate_site_plan_v1
 from app.services.site_planner_config import SitePlannerConfigV1
 from app.services.site_planner_provider import SitePlannerProviderException
 from test_generation_context_v1 import order, q2
@@ -76,6 +77,64 @@ async def test_provider_request_is_closed_typed_authority_without_raw_sources():
     assert request.planner_policy.context_is_immutable_authority is True
     assert "brief_answers" not in str(serialized) and "extended_brief" not in str(serialized)
     assert not hasattr(request, "prompt")
+
+
+@sync_test
+async def test_provider_request_exposes_validator_aligned_authority_as_structured_policy():
+    context = context_for(); provider = FakeProvider([success(candidate(context))])
+    await create_final_site_plan_v1(context, provider, config(), current)
+    policy = provider.requests[0].planner_policy
+
+    assert policy.navigation_authority.model_dump() == {
+        "targets_are_page_keys_only": True,
+        "target_page_key_must_exist": True,
+        "action_target_must_differ_from_current_page": True,
+        "navigation_edge_endpoints_must_differ": True,
+        "self_or_circular_navigation_cannot_satisfy_conversion_reachability": True,
+    }
+    assert policy.logo_authority.authority_path == "generation_context.media.logo.simple_logo_required"
+    assert policy.logo_authority.simple_logo_requires_confirmed_true is True
+    critical = policy.critical_action_policy
+    assert critical.component_family_registry["enquiry_form"] == "forms"
+    assert critical.component_family_registry["checkout"] == "checkout_payment"
+    assert critical.protected_section_must_set_critical_action_true is True
+    assert critical.signature_interactions_forbidden_on_critical_sections is True
+    assert critical.allowed_critical_motion_levels == ["none", "subtle", "contextual"]
+    assert critical.client_preference_never_overrides_critical_safety is True
+    factual = policy.factual_source_policy
+    assert factual.confirmed_fact_requires_allowlisted_source_key is True
+    assert "business.primary_goal" in factual.confirmed_fact_source_prefixes
+    assert factual.generated_copy_cannot_create_factual_claims is True
+
+
+@sync_test
+async def test_calibrated_starter_candidate_is_valid_through_fake_provider_pipeline():
+    context = context_for(); plan = candidate(context)
+    assert validate_site_plan_v1(context, plan).status == "valid"
+    result = await create_final_site_plan_v1(context, FakeProvider([success(plan)]), config(), current)
+    assert result.status == "valid" and result.validated_plan is not None
+
+
+@pytest.mark.parametrize("violation,reason", [
+    ("self_reference", "unsafe_self_reference"),
+    ("simple_logo", "unconfirmed_simple_logo"),
+    ("critical_unmarked", "critical_action_not_marked"),
+    ("unsafe_critical", "unsafe_critical_action_interaction"),
+    ("unconfirmed_fact", "unconfirmed_factual_source"),
+])
+def test_policy_calibration_does_not_weaken_validator(violation, reason):
+    context = context_for(); plan = candidate(context); item = plan["pages"][0]["sections"][0]
+    if violation == "self_reference":
+        item["primary_actions"][0]["target_page_key"] = "home"
+    elif violation == "simple_logo":
+        item["media_requirements"] = [{"media_key": "logo", "kind": "simple_logo", "required": True}]
+    elif violation == "critical_unmarked":
+        item["critical_action"] = False
+    elif violation == "unsafe_critical":
+        item["motion_policy"]["level"] = "expressive"
+    else:
+        item["content_requirements"][0]["source_key"] = "model.invented.award"
+    assert reason in validate_site_plan_v1(context, plan).reason_codes
 
 
 def missing_reduced(plan):

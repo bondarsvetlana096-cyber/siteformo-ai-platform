@@ -136,6 +136,25 @@ async def test_exact_responses_parse_request_and_safe_usage_metadata():
 
 
 @sync_test
+async def test_sol_and_astra_receive_identical_validator_aligned_policy():
+    ctx = context(); parsed = SitePlanV1.model_validate(candidate(ctx)); instructions = []
+    for model in ("gpt-5.6-sol", "gpt-6-astra"):
+        client = FakeClient([fake_response(parsed, model=model)])
+        await OpenAISitePlannerProvider(openai_config(model=model), client).create_structured_candidate(
+            _request(ctx, "initial", 0)
+        )
+        call = client.responses.calls[0]
+        instructions.append(call["instructions"])
+        authority = json.loads(call["instructions"])["planner_policy"]
+        assert authority["navigation_authority"]["action_target_must_differ_from_current_page"] is True
+        assert authority["logo_authority"]["simple_logo_requires_confirmed_true"] is True
+        assert authority["critical_action_policy"]["protected_section_must_set_critical_action_true"] is True
+        assert authority["critical_action_policy"]["allowed_critical_motion_levels"] == ["none", "subtle", "contextual"]
+        assert authority["factual_source_policy"]["confirmed_fact_requires_allowlisted_source_key"] is True
+    assert instructions[0] == instructions[1]
+
+
+@sync_test
 async def test_fake_openai_provider_integrates_with_producer_but_not_authority():
     ctx = context(); parsed = SitePlanV1.model_validate(candidate(ctx))
     client = FakeClient([fake_response(parsed)])
