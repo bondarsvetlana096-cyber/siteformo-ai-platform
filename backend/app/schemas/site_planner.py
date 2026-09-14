@@ -109,6 +109,13 @@ class SitePlannerProviderResult(ClosedModel):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     reported_output_bytes: int | None = Field(default=None, ge=0)
+    response_id: str | None = Field(default=None, max_length=160)
+    actual_model: str | None = Field(default=None, max_length=160)
+    response_status: str | None = Field(default=None, max_length=40)
+    service_tier: str | None = Field(default=None, max_length=40)
+    cached_input_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def consistent_status(self) -> "SitePlannerProviderResult":

@@ -12,7 +12,7 @@ class SitePlannerProviderException(RuntimeError):
 
 
 class SitePlannerProvider(Protocol):
-    """Inference-only injected boundary. No network-capable implementation exists in V1."""
+    """Inference-only injected boundary; orchestration and authority stay outside adapters."""
 
     async def create_structured_candidate(
         self, request: SitePlannerProviderRequest,
