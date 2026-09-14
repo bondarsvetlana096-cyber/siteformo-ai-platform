@@ -1,0 +1,102 @@
+<!-- SiteFormo Design Direction V2 — local WPCode 149 replacement candidate. -->
+<script>
+(function(){
+  "use strict";
+  const PAGE_PATH="/design-previews";
+  if(location.pathname.replace(/\/+$/,"/").replace(/\/$/,"")!==PAGE_PATH)return;
+
+  const API_BASE="https://siteformo-ai-platform-production.up.railway.app";
+  const JOURNEY_KEY="siteformo_journey_credential_v1";
+  const CONTRACT_VERSION="v1";
+  // Compatibility validation only. Options are always rendered from the server response.
+  const EXPECTED_V1_KEYS=new Set(["clean-modern","premium-business","bold-startup","luxury-elite","tech-minimal","creative-studio","nordic-soft","dark-contrast"]);
+  const orderId=(new URLSearchParams(location.search).get("order_id")||"").trim();
+  const credential=localStorage.getItem(JOURNEY_KEY);
+  let view="checking";
+  let serverState=null;
+  let selectedKey=null;
+  let message="";
+  let controller=null;
+
+  const style=document.createElement("style");
+  style.dataset.siteformoDesignDirectionV2="";
+  style.textContent=`
+    html,body{max-width:100%;overflow-x:clip}.sfdd{--ink:#17231d;--muted:#607069;--line:#dbe5df;--brand:#1d6b4c;box-sizing:border-box;width:min(1060px,100%);margin:clamp(22px,5vh,64px) auto 90px;padding:0 18px;color:var(--ink);font:16px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.sfdd *{box-sizing:border-box}.sfdd-shell{background:#fff;border:1px solid var(--line);border-radius:24px;padding:clamp(22px,4vw,44px);box-shadow:0 18px 54px #193c2920}.sfdd-kicker{margin:0 0 9px;color:var(--brand)!important;font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.sfdd h1{margin:0 0 12px;font-size:clamp(29px,5vw,48px);line-height:1.08}.sfdd p{color:var(--muted)}.sfdd-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px;margin:28px 0}.sfdd-card{display:block;min-height:190px;padding:0;border:2px solid var(--line);border-radius:18px;overflow:hidden;background:#fff;color:var(--ink);text-align:left;cursor:pointer;font:inherit}.sfdd-card:hover{border-color:#91b9a5}.sfdd-card[aria-pressed=true]{border-color:var(--brand);box-shadow:0 0 0 3px #1d6b4c24}.sfdd-card:focus-visible,.sfdd-btn:focus-visible{outline:3px solid #75b99a;outline-offset:3px}.sfdd-preview{display:grid;grid-template-columns:32% 1fr;gap:10px;height:116px;padding:14px;background:linear-gradient(135deg,#edf4ef,#dceae2)}.sfdd-preview:before,.sfdd-preview:after{content:"";border-radius:9px;background:#fff9;box-shadow:0 9px 20px #173b2820}.sfdd-card:nth-child(2n) .sfdd-preview{background:linear-gradient(135deg,#17231d,#527161)}.sfdd-card:nth-child(3n) .sfdd-preview{grid-template-columns:1fr 28%;background:linear-gradient(135deg,#f5ead7,#c99352)}.sfdd-card:nth-child(4n) .sfdd-preview{background:linear-gradient(135deg,#241d2a,#9b8060)}.sfdd-label{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 17px;font-weight:780}.sfdd-check{display:none;color:var(--brand)}.sfdd-card[aria-pressed=true] .sfdd-check{display:inline}.sfdd-actions{display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap}.sfdd-btn{min-height:50px;padding:12px 22px;border:0;border-radius:14px;background:var(--brand);color:#fff;font:750 16px/1.2 system-ui;cursor:pointer}.sfdd-btn:disabled{opacity:.5;cursor:not-allowed}.sfdd-btn-secondary{background:#eef3f0;color:var(--ink)}.sfdd-note,.sfdd-error{margin-top:18px;padding:14px 16px;border-radius:13px}.sfdd-note{background:#f2f8f4;color:#315642}.sfdd-error{background:#fff1f1;color:#842424}.sfdd-status{text-align:center;padding:28px 8px}.sfdd-spinner{width:28px;height:28px;margin:0 auto 20px;border:3px solid #dbe5df;border-top-color:var(--brand);border-radius:50%;animation:sfdd-spin 1.2s linear infinite}@keyframes sfdd-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.sfdd-spinner{animation:none;border-color:#dbe5df;background:var(--brand)}}@media(max-width:650px){.sfdd{margin-top:14px;padding:0 12px}.sfdd-shell{padding:22px 16px}.sfdd-grid{grid-template-columns:1fr}.sfdd-card{min-height:174px}.sfdd-btn{width:100%;min-height:52px}}
+  `;
+  document.head.appendChild(style);
+  const root=document.createElement("main");
+  root.id="sf-design-direction-v2";
+  root.className="sfdd";
+  root.dataset.siteformoStage="design_direction";
+  root.setAttribute("aria-live","polite");
+  document.body.appendChild(root);
+
+  const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+  function validState(data){
+    if(!data||data.order_id!==orderId||data.contract_version!==CONTRACT_VERSION)return false;
+    if(!["design_direction_required","design_direction_confirmed"].includes(data.stage))return false;
+    if(!["design_direction","post_payment_pending"].includes(data.next_step))return false;
+    if(!Array.isArray(data.available_directions)||data.available_directions.length!==EXPECTED_V1_KEYS.size)return false;
+    const keys=data.available_directions.map(item=>item&&item.key);
+    if(new Set(keys).size!==keys.length||keys.some(key=>!EXPECTED_V1_KEYS.has(key)))return false;
+    if(data.available_directions.some(item=>typeof item.label!=="string"||!item.label.trim()))return false;
+    if(data.selected_direction!==null&&!EXPECTED_V1_KEYS.has(data.selected_direction))return false;
+    return true;
+  }
+  function cards(){
+    return serverState.available_directions.map(item=>`<button class="sfdd-card" type="button" role="radio" aria-checked="${selectedKey===item.key}" aria-pressed="${selectedKey===item.key}" data-direction="${esc(item.key)}"><span class="sfdd-preview" aria-hidden="true"></span><span class="sfdd-label"><span>${esc(item.label)}</span><span class="sfdd-check" aria-hidden="true">Selected</span></span></button>`).join("");
+  }
+  function content(){
+    if(view==="checking")return `<div class="sfdd-status"><div class="sfdd-spinner" aria-hidden="true"></div><h1 tabindex="-1">Checking your project</h1><p>Verifying payment and project ownership securely.</p></div>`;
+    if(view==="selection")return `<p class="sfdd-kicker">Design Direction</p><h1 tabindex="-1">Choose your visual direction</h1><p>Select the overall visual character SiteFormo should use later. This is not a generated website preview.</p><div class="sfdd-grid" role="radiogroup" aria-label="Available Design Directions">${cards()}</div>${message?`<p class="sfdd-error" role="alert">${esc(message)}</p>`:""}<div class="sfdd-actions"><button class="sfdd-btn" type="button" data-confirm ${selectedKey?"":"disabled"}>Confirm Design Direction</button></div>`;
+    if(view==="confirmed")return `<div class="sfdd-status"><p class="sfdd-kicker">Design Direction</p><h1 tabindex="-1">Design direction confirmed</h1><p>Your visual direction has been saved securely as <strong>${esc(serverState.available_directions.find(item=>item.key===serverState.selected_direction)?.label||serverState.selected_direction)}</strong>.</p><p class="sfdd-note">Your next project step is being prepared.</p></div>`;
+    if(view==="conflict")return `<div class="sfdd-status"><h1 tabindex="-1">This direction is already confirmed</h1><p>The confirmed Design Direction cannot currently be changed from this step.</p><button class="sfdd-btn sfdd-btn-secondary" type="button" data-reload>Reload confirmed direction</button></div>`;
+    if(view==="recovery")return `<div class="sfdd-status"><h1 tabindex="-1">We couldn’t verify this project session</h1><p>Please return to the previous SiteFormo step and reopen the same project.</p></div>`;
+    if(view==="unavailable")return `<div class="sfdd-status"><h1 tabindex="-1">Design Direction is not available</h1><p>${esc(message||"This project has not reached the verified Design Direction stage.")}</p></div>`;
+    if(view==="update_required")return `<div class="sfdd-status"><h1 tabindex="-1">This page needs an update</h1><p>The server returned a newer Design Direction contract that this page cannot safely display.</p></div>`;
+    return `<div class="sfdd-status"><h1 tabindex="-1">We couldn’t load Design Direction</h1><p>A temporary connection or server problem prevented verification.</p><button class="sfdd-btn" type="button" data-reload>Try again</button></div>`;
+  }
+  function render(focus=false){
+    root.innerHTML=`<section class="sfdd-shell">${content()}</section>`;
+    root.querySelectorAll("[data-direction]").forEach(button=>button.addEventListener("click",()=>{selectedKey=button.dataset.direction;message="";render();root.querySelector(`[data-direction="${CSS.escape(selectedKey)}"]`)?.focus();}));
+    root.querySelector("[data-confirm]")?.addEventListener("click",confirmSelection);
+    root.querySelector("[data-reload]")?.addEventListener("click",loadState);
+    if(focus)requestAnimationFrame(()=>root.querySelector("h1")?.focus());
+  }
+  async function request(method,body){
+    if(controller)controller.abort();
+    controller=new AbortController();
+    const response=await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}/design-direction`,{method,headers:{"X-SiteFormo-Visitor":credential,...(body?{"Content-Type":"application/json"}:{})},body:body?JSON.stringify(body):undefined,signal:controller.signal,credentials:"omit"});
+    let data=null;try{data=await response.json();}catch(_error){}
+    return {response,data};
+  }
+  async function loadState(){
+    if(!orderId||!credential){view="recovery";render(true);return;}
+    view="checking";message="";render();
+    try{
+      const {response,data}=await request("GET");
+      if([401,403,404].includes(response.status)){view="recovery";render(true);return;}
+      if(response.status===409){view="unavailable";message="Design Direction is available only after the deposit and project stage are verified.";render(true);return;}
+      if(!response.ok){view=response.status>=500?"temporary_error":"unavailable";render(true);return;}
+      if(data?.contract_version&&data.contract_version!==CONTRACT_VERSION){view="update_required";render(true);return;}
+      if(!validState(data)){view="temporary_error";render(true);return;}
+      serverState=data;selectedKey=data.selected_direction;
+      view=data.stage==="design_direction_confirmed"&&data.selected_direction?"confirmed":"selection";
+      render(true);
+    }catch(error){if(error?.name!=="AbortError"){view="temporary_error";render(true);}}
+  }
+  async function confirmSelection(){
+    if(!selectedKey||!serverState)return;
+    view="checking";render();
+    try{
+      const {response,data}=await request("POST",{direction:selectedKey});
+      if([401,403,404].includes(response.status)){view="recovery";render(true);return;}
+      if(response.status===409){view="conflict";render(true);return;}
+      if(!response.ok||!validState(data)){view="temporary_error";render(true);return;}
+      await loadState();
+    }catch(error){if(error?.name!=="AbortError"){view="temporary_error";render(true);}}
+  }
+  render();
+  loadState();
+})();
+</script>
