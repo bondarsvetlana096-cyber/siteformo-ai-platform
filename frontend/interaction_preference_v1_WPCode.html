@@ -1,0 +1,82 @@
+<!-- SiteFormo Interaction Preference V1 — local WPCode 158 replacement candidate. -->
+<script>
+(function(){
+  "use strict";
+  const PAGE_PATH="/homepage-interaction-style";
+  if(location.pathname.replace(/\/+$/,"/").replace(/\/$/,"")!==PAGE_PATH)return;
+
+  const API_BASE=String(window.SITEFORMO_API_BASE||"").replace(/\/+$/,"");
+  const JOURNEY_KEY="siteformo_journey_credential_v1";
+  const CONTRACT_VERSION="v1";
+  const orderId=(new URLSearchParams(location.search).get("order_id")||"").trim();
+  const credential=localStorage.getItem(JOURNEY_KEY);
+  let view="checking",serverState=null,selectedKey=null,message="",controller=null;
+  const descriptions={
+    subtle:"Keep movement restrained and use it only where it improves understanding.",
+    recommended:"Let SiteFormo choose the interaction and motion language that best fits the business, architecture and selected Design Direction.",
+    more_expressive:"Allow a more distinctive interaction language where it improves the experience without interfering with important actions."
+  };
+
+  const style=document.createElement("style");
+  style.dataset.siteformoInteractionPreferenceV1="";
+  style.textContent=`html,body{max-width:100%;overflow-x:clip}.sfip{--ink:#17231d;--muted:#607069;--line:#dbe5df;--brand:#1d6b4c;box-sizing:border-box;width:min(980px,100%);margin:clamp(22px,5vh,64px) auto 90px;padding:0 18px;color:var(--ink);font:16px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.sfip *{box-sizing:border-box}.sfip-shell{background:#fff;border:1px solid var(--line);border-radius:24px;padding:clamp(22px,4vw,44px);box-shadow:0 18px 54px #193c2920}.sfip-kicker{margin:0 0 9px;color:var(--brand)!important;font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.sfip h1{margin:0 0 12px;font-size:clamp(29px,5vw,46px);line-height:1.08}.sfip-intro,.sfip p{color:var(--muted)}.sfip-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px;margin:28px 0}.sfip-card{position:relative;display:block;min-height:210px;padding:24px 20px;border:2px solid var(--line);border-radius:18px;background:#fff;color:var(--ink);text-align:left;cursor:pointer;font:inherit}.sfip-card:hover{border-color:#91b9a5}.sfip-card[aria-checked=true]{border-color:var(--brand);background:#f5faf7;box-shadow:0 0 0 3px #1d6b4c24}.sfip-card:focus-visible,.sfip-btn:focus-visible{outline:3px solid #75b99a;outline-offset:3px}.sfip-card-title{display:block;margin:0 0 10px;font-size:20px;font-weight:800}.sfip-card-copy{display:block;color:var(--muted)}.sfip-badge{display:inline-block;margin-bottom:14px;padding:5px 9px;border-radius:999px;background:#e8f4ed;color:var(--brand);font-size:12px;font-weight:800;text-transform:uppercase}.sfip-selected{position:absolute;right:15px;top:15px;color:var(--brand);font-weight:800}.sfip-actions{display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap}.sfip-btn{min-height:50px;padding:12px 22px;border:0;border-radius:14px;background:var(--brand);color:#fff;font:750 16px/1.2 system-ui;cursor:pointer}.sfip-btn:disabled{opacity:.5;cursor:not-allowed}.sfip-btn-secondary{background:#eef3f0;color:var(--ink)}.sfip-note,.sfip-error{margin-top:18px;padding:14px 16px;border-radius:13px}.sfip-note{background:#f2f8f4;color:#315642}.sfip-error{background:#fff1f1;color:#842424}.sfip-status{text-align:center;padding:28px 8px}.sfip-spinner{width:28px;height:28px;margin:0 auto 20px;border:3px solid #dbe5df;border-top-color:var(--brand);border-radius:50%;animation:sfip-spin 1.2s linear infinite}@keyframes sfip-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.sfip-spinner{animation:none;border-color:#dbe5df;background:var(--brand)}}@media(max-width:760px){.sfip-grid{grid-template-columns:1fr}.sfip-card{min-height:154px}}@media(max-width:650px){.sfip{margin-top:14px;padding:0 12px}.sfip-shell{padding:22px 16px}.sfip-btn{width:100%;min-height:52px}}`;
+  document.head.appendChild(style);
+  const root=document.createElement("main");
+  root.id="sf-interaction-preference-v1";root.className="sfip";root.dataset.siteformoStage="interaction_preference";root.setAttribute("aria-live","polite");document.body.appendChild(root);
+
+  const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+  function validState(data){
+    if(!data||data.order_id!==orderId||data.contract_version!==CONTRACT_VERSION)return false;
+    if(!["interaction_preference_required","interaction_preference_confirmed"].includes(data.stage)||!["interaction_preference","post_payment_pending"].includes(data.next_step))return false;
+    if(!Array.isArray(data.available_preferences)||data.available_preferences.length!==3)return false;
+    const keys=data.available_preferences.map(item=>item&&item.key);
+    if(new Set(keys).size!==3||keys.some(key=>!Object.prototype.hasOwnProperty.call(descriptions,key)))return false;
+    if(data.available_preferences.some(item=>typeof item.label!=="string"||!item.label.trim()||typeof item.recommended!=="boolean"))return false;
+    if(data.available_preferences.filter(item=>item.recommended).length!==1||!data.available_preferences.find(item=>item.key==="recommended")?.recommended)return false;
+    if(data.selected_preference!==null&&!keys.includes(data.selected_preference))return false;
+    return true;
+  }
+  function cards(){return serverState.available_preferences.map(item=>`<button class="sfip-card" type="button" role="radio" aria-checked="${selectedKey===item.key}" data-preference="${esc(item.key)}">${item.recommended?`<span class="sfip-badge">Recommended</span>`:""}<span class="sfip-selected" aria-hidden="true">${selectedKey===item.key?"✓":""}</span><span class="sfip-card-title">${esc(item.label)}</span><span class="sfip-card-copy">${esc(descriptions[item.key])}</span></button>`).join("");}
+  function content(){
+    if(view==="checking")return `<div class="sfip-status"><div class="sfip-spinner" aria-hidden="true"></div><h1 tabindex="-1">Checking your project</h1><p>Verifying payment and project ownership securely.</p></div>`;
+    if(view==="selection")return `<p class="sfip-kicker">Interaction Preference</p><h1 tabindex="-1">Choose how expressive the experience may be</h1><p class="sfip-intro">This preference guides SiteFormo later. It does not select individual effects or change your package or price.</p><div class="sfip-grid" role="radiogroup" aria-label="Interaction preferences">${cards()}</div>${message?`<p class="sfip-error" role="alert">${esc(message)}</p>`:""}<div class="sfip-actions"><button class="sfip-btn" type="button" data-confirm>Confirm Interaction Preference</button></div>`;
+    if(view==="confirmed")return `<div class="sfip-status"><p class="sfip-kicker">Interaction Preference</p><h1 tabindex="-1">Interaction preference confirmed</h1><p>Your preference has been saved as <strong>${esc(serverState.available_preferences.find(item=>item.key===serverState.selected_preference)?.label||serverState.selected_preference)}</strong>.</p><p class="sfip-note">SiteFormo will use it when preparing the interaction system for your website.</p></div>`;
+    if(view==="conflict")return `<div class="sfip-status"><h1 tabindex="-1">This preference is already confirmed</h1><p>The confirmed Interaction Preference cannot currently be changed from this step.</p><button class="sfip-btn sfip-btn-secondary" type="button" data-reload>Reload confirmed preference</button></div>`;
+    if(view==="recovery")return `<div class="sfip-status"><h1 tabindex="-1">We couldn’t verify this project session</h1><p>Please return to the previous SiteFormo step and reopen the same project.</p></div>`;
+    if(view==="unavailable")return `<div class="sfip-status"><h1 tabindex="-1">Interaction Preference is not available</h1><p>${esc(message||"This project has not reached the verified Interaction Preference stage.")}</p></div>`;
+    if(view==="update_required")return `<div class="sfip-status"><h1 tabindex="-1">This page needs an update</h1><p>The server returned an Interaction Preference contract that this page cannot safely display.</p></div>`;
+    return `<div class="sfip-status"><h1 tabindex="-1">We couldn’t load Interaction Preference</h1><p>A temporary connection or server problem prevented verification.</p><button class="sfip-btn" type="button" data-reload>Try again</button></div>`;
+  }
+  function render(focus=false){
+    root.innerHTML=`<section class="sfip-shell">${content()}</section>`;
+    root.querySelectorAll("[data-preference]").forEach(button=>button.addEventListener("click",()=>{selectedKey=button.dataset.preference;message="";render();root.querySelector(`[data-preference="${CSS.escape(selectedKey)}"]`)?.focus();}));
+    root.querySelector("[data-confirm]")?.addEventListener("click",confirmSelection);root.querySelector("[data-reload]")?.addEventListener("click",loadState);if(focus)requestAnimationFrame(()=>root.querySelector("h1")?.focus());
+  }
+  async function request(method,body){
+    if(!API_BASE)throw new Error("API configuration unavailable");
+    if(controller)controller.abort();controller=new AbortController();
+    const response=await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}/interaction-preference`,{method,headers:{"X-SiteFormo-Visitor":credential,...(body?{"Content-Type":"application/json"}:{})},body:body?JSON.stringify(body):undefined,signal:controller.signal,credentials:"omit"});
+    let data=null;try{data=await response.json();}catch(_error){}return {response,data};
+  }
+  async function loadState(){
+    if(!orderId||!credential){view="recovery";render(true);return;}view="checking";message="";render();
+    try{const {response,data}=await request("GET");
+      if([401,403,404].includes(response.status)){view="recovery";render(true);return;}
+      if(response.status===409){view="unavailable";message="Interaction Preference is available only after payment and Design Direction are confirmed.";render(true);return;}
+      if(!response.ok){view=response.status>=500?"temporary_error":"unavailable";render(true);return;}
+      if(data?.contract_version&&data.contract_version!==CONTRACT_VERSION){view="update_required";render(true);return;}
+      if(!validState(data)){view="temporary_error";render(true);return;}
+      serverState=data;selectedKey=data.selected_preference||data.available_preferences.find(item=>item.recommended)?.key||null;view=data.stage==="interaction_preference_confirmed"&&data.selected_preference?"confirmed":"selection";render(true);
+    }catch(error){if(error?.name!=="AbortError"){view="temporary_error";render(true);}}
+  }
+  async function confirmSelection(){
+    if(!selectedKey||!serverState)return;view="checking";render();
+    try{const {response,data}=await request("POST",{preference:selectedKey});
+      if([401,403,404].includes(response.status)){view="recovery";render(true);return;}
+      if(response.status===409){view="conflict";render(true);return;}
+      if(!response.ok||!validState(data)){view="temporary_error";render(true);return;}await loadState();
+    }catch(error){if(error?.name!=="AbortError"){view="temporary_error";render(true);}}
+  }
+  render();loadState();
+})();
+</script>
