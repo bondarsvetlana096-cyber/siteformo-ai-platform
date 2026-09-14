@@ -19,6 +19,41 @@ from app.services.site_planner_provider import SitePlannerProviderException
 OpenAIClientFactory = Callable[..., Any]
 
 
+class _OuterDeadlineExpired(Exception):
+    """Private control-flow signal; never exposed in provider results."""
+
+
+def _consume_cancelled_task(task: asyncio.Task[Any]) -> None:
+    """Retrieve a late task result without retaining or logging provider data."""
+    try:
+        task.exception()
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
+async def _await_with_outer_deadline(awaitable: Any, timeout_seconds: float) -> Any:
+    """Bound the entire SDK coroutine independently of HTTP phase timeouts.
+
+    ``asyncio.wait_for`` can wait beyond its timeout while a cancellation-hostile
+    coroutine cleans up.  Waiting on the task and cancelling it ourselves keeps
+    the caller's deadline authoritative without adding a second grace window.
+    """
+    task = asyncio.ensure_future(awaitable)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=timeout_seconds)
+    except asyncio.CancelledError:
+        task.cancel()
+        task.add_done_callback(_consume_cancelled_task)
+        raise
+    if task in done:
+        return task.result()
+    task.cancel()
+    task.add_done_callback(_consume_cancelled_task)
+    # Deliver cancellation once, but never await provider cleanup indefinitely.
+    await asyncio.sleep(0)
+    raise _OuterDeadlineExpired
+
+
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -120,17 +155,25 @@ def _exception_category(error: Exception) -> str:
 class OpenAISitePlannerProvider:
     """One-call OpenAI transport adapter; authority remains with the producer/validator."""
 
-    def __init__(self, config: OpenAISitePlannerConfigV1, client: Any) -> None:
+    def __init__(
+        self, config: OpenAISitePlannerConfigV1, client: Any,
+        *, outer_timeout_seconds: float | None = None,
+    ) -> None:
         if not config.enabled:
             raise SitePlannerProviderException("configuration")
         self._config = config
         self._client = client
+        self._outer_timeout_seconds = (
+            config.timeout_seconds if outer_timeout_seconds is None else outer_timeout_seconds
+        )
+        if self._outer_timeout_seconds <= 0:
+            raise ValueError("outer timeout must be positive")
 
     async def create_structured_candidate(
         self, request: SitePlannerProviderRequest,
     ) -> SitePlannerProviderResult:
         try:
-            response = await self._client.responses.parse(
+            response = await _await_with_outer_deadline(self._client.responses.parse(
                 model=self._config.model,
                 instructions=_instructions(request),
                 input=_input_data(request),
@@ -143,7 +186,7 @@ class OpenAISitePlannerProvider:
                 truncation="disabled",
                 service_tier=self._config.service_tier,
                 timeout=self._config.timeout_seconds,
-            )
+            ), self._outer_timeout_seconds)
             metadata = _metadata(response)
             failure = _response_failure(response)
             if failure:
@@ -157,6 +200,10 @@ class OpenAISitePlannerProvider:
                 status="candidate", candidate=candidate, reported_output_bytes=output_bytes,
                 **metadata,
             )
+        except _OuterDeadlineExpired:
+            return SitePlannerProviderResult(status="failure", error_category="timeout")
+        except asyncio.CancelledError:
+            raise
         except Exception as error:
             return SitePlannerProviderResult(status="failure", error_category=_exception_category(error))
 

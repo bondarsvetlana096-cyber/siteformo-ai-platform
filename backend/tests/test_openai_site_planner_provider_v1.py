@@ -3,6 +3,7 @@ from copy import deepcopy
 from functools import wraps
 import json
 from types import SimpleNamespace
+from time import perf_counter
 
 import httpx
 import pytest
@@ -23,6 +24,7 @@ from app.services.site_planner_config import (
     load_openai_site_planner_config_v1,
 )
 from app.services.site_planner_provider import SitePlannerProviderException
+from evals.site_planner.eval_harness import EvaluationBudget, RecordingBudgetProvider
 from test_generation_context_v1 import order, q2
 from test_site_plan_v1 import candidate
 
@@ -83,6 +85,28 @@ class FakeResponses:
 
 class FakeClient:
     def __init__(self, outcomes): self.responses = FakeResponses(outcomes)
+
+
+class BlockingResponses:
+    def __init__(self, *, ignore_cancellation=False):
+        self.calls = []; self.cancelled = 0; self.ignore_cancellation = ignore_cancellation
+
+    async def parse(self, **kwargs):
+        self.calls.append(kwargs)
+        while True:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled += 1
+                # Ignore the adapter's cancellation once to model hostile SDK
+                # cleanup, then permit the test runner to shut the task down.
+                if not self.ignore_cancellation or self.cancelled > 1:
+                    raise
+
+
+class BlockingClient:
+    def __init__(self, *, ignore_cancellation=False):
+        self.responses = BlockingResponses(ignore_cancellation=ignore_cancellation)
 
 
 @sync_test
@@ -255,6 +279,70 @@ async def test_producer_owns_transport_retry_and_total_sdk_calls_are_bounded():
     result = await create_final_site_plan_v1(ctx, provider, planner_config(), lambda value: value)
     assert result.status == "temporary_failure" and result.provider_call_count == 2
     assert len(client.responses.calls) == 2
+
+
+@sync_test
+@pytest.mark.parametrize("scenario", ["connection", "body", "structured_parse"])
+async def test_outer_deadline_bounds_all_hanging_sdk_phases(scenario):
+    del scenario  # The adapter boundary deliberately treats all SDK await phases alike.
+    ctx = context(); client = BlockingClient()
+    provider = OpenAISitePlannerProvider(openai_config(), client, outer_timeout_seconds=0.01)
+    started = perf_counter()
+    result = await provider.create_structured_candidate(_request(ctx, "initial", 0))
+    assert perf_counter() - started < 0.25
+    assert result.status == "failure" and result.error_category == "timeout"
+    assert len(client.responses.calls) == 1 and client.responses.cancelled == 1
+    assert "exception" not in str(result.model_dump()).lower()
+
+
+@sync_test
+async def test_outer_deadline_does_not_wait_for_cancellation_hostile_cleanup():
+    ctx = context(); client = BlockingClient(ignore_cancellation=True)
+    provider = OpenAISitePlannerProvider(openai_config(), client, outer_timeout_seconds=0.01)
+    started = perf_counter()
+    result = await provider.create_structured_candidate(_request(ctx, "initial", 0))
+    assert perf_counter() - started < 0.25
+    assert result.status == "failure" and result.error_category == "timeout"
+    assert len(client.responses.calls) == 1 and client.responses.cancelled >= 1
+
+
+@sync_test
+async def test_parse_completing_before_outer_deadline_succeeds():
+    ctx = context(); parsed = SitePlanV1.model_validate(candidate(ctx))
+
+    class JustInTimeResponses(FakeResponses):
+        async def parse(self, **kwargs):
+            self.calls.append(kwargs); await asyncio.sleep(0.005)
+            return self.outcomes.pop(0)
+
+    client = SimpleNamespace(responses=JustInTimeResponses([fake_response(parsed)]))
+    provider = OpenAISitePlannerProvider(openai_config(), client, outer_timeout_seconds=0.05)
+    result = await provider.create_structured_candidate(_request(ctx, "initial", 0))
+    assert result.status == "candidate" and len(client.responses.calls) == 1
+
+
+@sync_test
+async def test_outer_timeouts_get_one_transport_retry_and_no_semantic_repair():
+    ctx = context(); client = BlockingClient()
+    provider = OpenAISitePlannerProvider(openai_config(), client, outer_timeout_seconds=0.01)
+    result = await create_final_site_plan_v1(ctx, provider, planner_config(), lambda value: value)
+    assert result.status == "temporary_failure"
+    assert result.reason_codes == ["timeout"]
+    assert result.provider_call_count == 2 and result.attempt_count == 1
+    assert len(client.responses.calls) == 2
+    assert all(attempt.attempt_type == "initial" for attempt in result.attempts)
+
+
+@sync_test
+async def test_timed_out_call_is_charged_to_eval_call_budget_without_fake_usage():
+    ctx = context(); client = BlockingClient()
+    provider = OpenAISitePlannerProvider(openai_config(), client, outer_timeout_seconds=0.01)
+    budget = EvaluationBudget(max_calls=2, max_spend=10)
+    recording = RecordingBudgetProvider(provider, "gpt-5.6-sol", budget, 1000, 4096)
+    result = await recording.create_structured_candidate(_request(ctx, "initial", 0))
+    assert result.error_category == "timeout" and budget.calls == 1
+    assert budget.estimated_spend == 0 and result.total_tokens is None
+    assert len(recording.observations) == 1
 
 
 @sync_test
