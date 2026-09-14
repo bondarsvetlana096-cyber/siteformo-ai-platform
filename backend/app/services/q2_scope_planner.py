@@ -143,9 +143,12 @@ def qualify_scope(
     if manual_review:
         minimum_package = None
         recommended = None
+    # Compatibility field name: this now means that the confirmed scope is
+    # ready to enter Payment Boundary V2. Brief, legal, email and payment state
+    # are authoritative Order-level concerns and are deliberately excluded.
     checkout_ready = bool(
         eligibility == "supported" and not unresolved and recommended
-        and payload.legal_gate_confirmed and payload.package_and_addons_confirmed
+        and payload.package_and_addons_confirmed
         and all(item.explicit_confirmed for item in payload.paid_structural_options)
     )
 

@@ -1,0 +1,294 @@
+<!-- SiteFormo Q2 V2 + trusted prepayment flow — local WPCode 138 replacement candidate. -->
+<script>
+(function(){
+  "use strict";
+  const Q2_PATH="/extended-questionnaire";
+  if(location.pathname.replace(/\/+$/,"")!==Q2_PATH)return;
+
+  const API_BASE="https://siteformo-ai-platform-production.up.railway.app";
+  const DRAFT_KEY="siteformo_q2_v2_draft";
+  const ORDER_KEY="siteformo_order_id";
+  const JOURNEY_KEY="siteformo_journey_credential_v1";
+  const QUESTION_STEPS=["q2_intro","q2_business_identity","q2_business_activity","q2_location","q2_audience_goal","q2_functions","q2_assets","q2_delivery","q2_review","q2_package_confirmation"];
+  const POST_Q2_STEPS=["q2_project_brief","q2_legal","q2_email","q2_checkout","q2_manual_review","q2_recovery"];
+  const FUNCTIONS=[
+    ["standard_content_contact","Standard content/contact site","Included from Starter",false],
+    ["contact_enquiry","Contact / enquiry form","Included from Starter",false],
+    ["direct_contact_channel","Direct WhatsApp or chat contact","Included from Starter",false],
+    ["blog_news","Blog / news","Scope and package need review",true],
+    ["newsletter","Newsletter","Scope and package need review",true],
+    ["booking","Booking","Scope and package need review",true],
+    ["catalogue_display","Catalogue / product display","Scope and package need review",true],
+    ["transactional_ecommerce","Online sales / checkout","Scope and package need review",true],
+    ["customer_account_login","Customer account / login","Scope and package need review",true],
+    ["portal_membership","Portal / membership","Scope and package need review",true],
+    ["multilingual","Multilingual website","Scope and package need review",true],
+    ["advanced_form","Advanced form","Scope and package need review",true],
+    ["search_filter_compare","Search / filter / compare","Scope and package need review",true],
+    ["custom_other","Other custom functionality","Scope and package need review",true]
+  ];
+  const LABELS={
+    starter:"Starter",business:"Business",advanced:"Advanced",reference:"Reference",
+    enquiries:"Enquiries",calls:"Calls",quote_requests:"Quote requests",bookings:"Bookings",
+    online_sales:"Online sales",physical_visits:"Visits to a physical location",
+    present_and_build_trust:"Present the business and build trust"
+  };
+
+  function readJson(key){try{return JSON.parse(localStorage.getItem(key)||"null");}catch(_e){return null;}}
+  const q1=readJson("siteformo_q1_v2_draft")||{};
+  const packages=["starter","business","reference","advanced"];
+  const browsed=q1.package_browsing_context&&packages.includes(q1.package_browsing_context.package_key)?q1.package_browsing_context.package_key:null;
+  const analyzed=q1.existing_website?.analysis?.source==="existing_website"&&q1.existing_website.analysis.status==="unconfirmed"?q1.existing_website.analysis.data:null;
+  const safeHints=analyzed?{
+    source:"existing_website",status:"unconfirmed",
+    business_hints:Array.isArray(analyzed.business_hints)?analyzed.business_hints:[],
+    function_hints:Array.isArray(analyzed.function_hints)?analyzed.function_hints:[],
+    complexity_hints:Array.isArray(analyzed.complexity_hints)?analyzed.complexity_hints:[]
+  }:{};
+  const fresh=()=>({
+    schema_version:2,step:"q2_intro",
+    business_identity:{status:"",name:""},
+    business_activity:{niche:"",broad_model:"",other_clarification:""},
+    operating_model:"",location:{public_address:"",service_area:"",multiple_locations_summary:""},
+    audience:"",primary_goal:"",functions:[],trust_materials:[],
+    media:{photos:"",client_photos_timing:null,video:""},
+    social_presence:{expected_channels:[],other_platform:"",links:"pending",presentation:"flexible"},
+    logo:{choice:"",price_eur:0,scope:{}},
+    delivery_context:{hosting_status:"",hosting_help_included:true,domain_and_hosting_client_owned:true,installation_selected:false,installation_price_eur:0},
+    paid_structural_options:[],
+    package_context:{starting_package:browsed,source:browsed?"package_browsing_context":"direct_entry",rule_version:"ireland_accepted_v1"},
+    analysis_hints:safeHints,assistant_context:{current_step_id:"q2_intro",enabled:false},
+    package_and_addons_confirmed:false,qualification:null
+  });
+  let state=fresh();
+  const cached=readJson(DRAFT_KEY);
+  if(cached?.schema_version===2)state=Object.assign(state,cached);
+  if(!QUESTION_STEPS.includes(state.step))state.step="q2_intro";
+  let summary=null;
+  let statusMessage="";
+  let errorMessage="";
+  let recoveryTemporary=false;
+  let busy=false;
+  const orderId=new URL(location.href).searchParams.get("order_id")||localStorage.getItem(ORDER_KEY);
+  const credential=localStorage.getItem(JOURNEY_KEY);
+
+  const css=document.createElement("style");
+  css.textContent=`
+    html,body{max-width:100%;overflow-x:clip}.sfq2{--ink:#17231d;--muted:#607069;--line:#dbe5df;--brand:#1d6b4c;box-sizing:border-box;width:min(900px,100%);margin:32px auto 110px;padding:0 18px;color:var(--ink);font:16px/1.5 system-ui,sans-serif}.sfq2 *{box-sizing:border-box}.sfq2-card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:clamp(20px,4vw,42px);box-shadow:0 16px 48px #193c2920}.sfq2-progress{font-size:13px;color:var(--muted);margin-bottom:12px}.sfq2 h1{font-size:clamp(28px,5vw,46px);line-height:1.1;margin:0 0 12px}.sfq2 h2{font-size:clamp(21px,4vw,30px);margin:25px 0 10px}.sfq2 h3{margin:18px 0 6px}.sfq2 p{color:var(--muted)}.sfq2-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:22px 0}.sfq2-choice{min-height:54px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:#fff;text-align:left;cursor:pointer;font:inherit;color:var(--ink)}.sfq2-choice[aria-pressed=true]{border-color:var(--brand);box-shadow:0 0 0 2px #1d6b4c22;background:#f3faf6}.sfq2-choice small{display:block;color:var(--muted);margin-top:3px}.sfq2-field{display:block;margin:18px 0}.sfq2-field span{display:block;font-weight:650;margin-bottom:6px}.sfq2 input{width:100%;min-height:50px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit}.sfq2 input:focus,.sfq2 button:focus-visible{outline:3px solid #75b99a;outline-offset:2px}.sfq2-actions{display:flex;justify-content:space-between;gap:12px;margin-top:26px;flex-wrap:wrap}.sfq2-btn{min-height:50px;border:0;border-radius:14px;padding:12px 20px;font:700 16px/1.15 system-ui;cursor:pointer}.sfq2-btn:disabled{opacity:.5;cursor:not-allowed}.sfq2-btn-primary{background:var(--brand);color:#fff;margin-left:auto}.sfq2-btn-secondary{background:#eef3f0;color:var(--ink)}.sfq2-error{color:#8d2020;background:#fff1f1;border-radius:12px;padding:12px 14px;font-weight:650;margin:12px 0}.sfq2-status{color:#245b42;background:#f1faf5;border-radius:12px;padding:12px 14px;margin:12px 0}.sfq2-note{padding:12px 14px;border-radius:12px;background:#f3f7f5;color:#405149}.sfq2-warning{background:#fff5da;border:1px solid #e5c66c}.sfq2-summary{display:grid;gap:10px}.sfq2-row{display:flex;justify-content:space-between;gap:18px;padding:12px 0;border-bottom:1px solid var(--line)}.sfq2-row span:last-child{text-align:right;font-weight:650}.sfq2-list{margin:8px 0 18px;padding-left:22px}.sfq2-package{font-size:20px;font-weight:750}.sfq2-check{display:flex;gap:10px;align-items:flex-start;margin:15px 0}.sfq2-check input{width:22px;min-height:22px;flex:0 0 auto}.sfq2-modal{position:fixed;inset:0;background:#14231bbb;display:grid;place-items:center;padding:20px;z-index:99999}.sfq2-modal>div{max-width:480px;background:white;border-radius:18px;padding:24px}.sfq2[aria-busy=true]{opacity:.72;pointer-events:none}@media(max-width:600px){.sfq2{margin-top:14px;padding:0 12px}.sfq2-grid{grid-template-columns:1fr}.sfq2-card{padding:20px 16px}.sfq2-row{display:block}.sfq2-row span{display:block;text-align:left!important}.sfq2-btn{min-width:120px;min-height:52px}}
+  `;
+  document.head.appendChild(css);
+  const root=document.createElement("main");
+  root.id="siteformo-q2-v2";root.className="sfq2";root.dataset.q2Step=state.step;
+  document.body.appendChild(root);
+
+  const esc=v=>String(v??"").replace(/[&<>\"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const label=v=>LABELS[v]||String(v||"").replaceAll("_"," ");
+  const money=cents=>new Intl.NumberFormat("en-IE",{style:"currency",currency:"EUR"}).format(Number(cents)/100);
+  const headers=(json=false)=>({...(json?{"Content-Type":"application/json"}:{}),"X-SiteFormo-Visitor":credential||""});
+  function saveDraft(){
+    if(!QUESTION_STEPS.includes(state.step))return;
+    state.schema_version=2;state.assistant_context={current_step_id:state.step,enabled:false};
+    localStorage.setItem(DRAFT_KEY,JSON.stringify(state));root.dataset.q2Step=state.step;
+  }
+  function setStep(step,focus=true){state.step=step;root.dataset.q2Step=step;if(QUESTION_STEPS.includes(step))saveDraft();render();if(focus)requestAnimationFrame(()=>root.querySelector("h1")?.focus());}
+  async function api(path,options={}){
+    if(!orderId||!credential)throw new Error("This Journey or project cannot be verified. Return to Q1 and resume the same project.");
+    const response=await fetch(`${API_BASE}${path}`,options);
+    let body={};try{body=await response.json();}catch(_e){}
+    if(!response.ok){const error=new Error(typeof body.detail==="string"?body.detail:"The server could not complete this step.");error.status=response.status;throw error;}
+    return body;
+  }
+  const choice=(key,value,text,selected=getPath(key)===value)=>`<button type="button" class="sfq2-choice" data-key="${key}" data-value="${value}" aria-pressed="${selected}">${text}</button>`;
+  const grid=items=>`<div class="sfq2-grid">${items.join("")}</div>`;
+  const field=(id,text,value,placeholder="")=>`<label class="sfq2-field"><span>${text}</span><input id="${id}" data-field="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}"></label>`;
+  const nav=(back=true,next="Continue")=>`<div class="sfq2-actions">${back?'<button type="button" class="sfq2-btn sfq2-btn-secondary" data-back>Back</button>':""}<button type="button" class="sfq2-btn sfq2-btn-primary" data-next>${next}</button></div>`;
+  const title=(text,sub="")=>`${QUESTION_STEPS.includes(state.step)&&state.step!=="q2_intro"?`<div class="sfq2-progress">Detailed questionnaire · ${Math.max(1,QUESTION_STEPS.indexOf(state.step))} of ${QUESTION_STEPS.length-1}</div>`:""}<h1 tabindex="-1">${text}</h1>${sub?`<p>${sub}</p>`:""}`;
+  function getPath(path){return path.split(".").reduce((v,k)=>v?.[k],state);}
+  function setPath(path,value){const parts=path.split(".");let target=state;while(parts.length>1)target=target[parts.shift()];target[parts[0]]=value;saveDraft();render();}
+
+  function questionnaireScreen(){
+    if(state.step==="q2_intro")return title("A few simple questions","Tell us the facts. SiteFormo will plan the pages and structure—no sitemap or long brief needed.")+nav(false,"Start");
+    if(state.step==="q2_business_identity")return title("What name should we use?")+grid([
+      choice("business_identity.status","business_name","Business name"),choice("business_identity.status","personal_name","My personal name"),choice("business_identity.status","temporary_pending","Name not decided yet")
+    ])+(state.business_identity.status&&state.business_identity.status!=="temporary_pending"?field("identity_name",state.business_identity.status==="business_name"?"Business name":"Your name",state.business_identity.name):state.business_identity.status==="temporary_pending"?'<p class="sfq2-note">We will keep the identity temporary and will not invent a final name.</p>':"")+nav();
+    if(state.step==="q2_business_activity")return title("What does the business do?","Use a short factual answer, such as Electrician or Dental clinic.")+field("niche","Business or niche",state.business_activity.niche,"Electrician")+grid(["local_service|Local service","consultant_expert|Consultant / expert","clinic_beauty_wellness|Clinic / beauty / wellness","construction_renovation|Construction / renovation","restaurant_cafe|Restaurant / café","portfolio_creative|Portfolio / creative","other|Other"].map(x=>{const [v,l]=x.split("|");return choice("business_activity.broad_model",v,l);}))+ (state.business_activity.broad_model==="other"?field("other_clarification","Short clarification",state.business_activity.other_clarification):"")+nav();
+    if(state.step==="q2_location")return title("How do you work with customers?")+grid(["customer_location|Customers visit my location","travel_to_customers|I travel to customers","both|Both","online_remote|Online / remote","multiple_locations|Multiple locations"].map(x=>{const [v,l]=x.split("|");return choice("operating_model",v,l);}))+(["customer_location","both"].includes(state.operating_model)?field("public_address","Public business address",state.location.public_address):"")+(["travel_to_customers","both"].includes(state.operating_model)?field("service_area","Service area / region",state.location.service_area):"")+(state.operating_model==="multiple_locations"?field("multiple_locations_summary","High-level location information",state.location.multiple_locations_summary):"")+nav();
+    if(state.step==="q2_audience_goal")return title("Who is the website for?")+grid(["individuals|Individuals / private customers","businesses|Businesses","both|Both","organisations_public_sector|Organisations / public sector","mixed_unsure|Mixed / not sure"].map(x=>{const [v,l]=x.split("|");return choice("audience",v,l);}))+`<h2>What is the primary goal?</h2>`+grid(["enquiries|Enquiries","calls|Calls","quote_requests|Quote requests","bookings|Bookings","online_sales|Online sales","physical_visits|Visits to a location","present_and_build_trust|Present the business / build trust"].map(x=>{const [v,l]=x.split("|");return choice("primary_goal",v,l);})) +nav();
+    if(state.step==="q2_functions")return title("What must the website do?","Package consequences are shown before a function is added.")+`<div class="sfq2-grid">${FUNCTIONS.map(([k,l,e,review])=>`<button type="button" class="sfq2-choice" data-function="${k}" data-review="${review}" aria-pressed="${state.functions.some(f=>f.key===k)}">${l}<small>${e}</small></button>`).join("")}</div>`+(state.functions.some(f=>f.key==="blog_news")?'<p class="sfq2-note">After launch, one-off placement of client-supplied finished articles may be available. It is not part of this checkout.</p>':"")+(state.functions.some(f=>["catalogue_display","transactional_ecommerce"].includes(f.key))?'<p class="sfq2-note">Future product updates may be available as a separate one-off service. They are not added here.</p>':"")+nav();
+    if(state.step==="q2_assets")return title("What materials are available?")+`<h2>Trust materials</h2>`+grid(["reviews|Reviews","project_photos|Project photos","certifications|Certifications","awards|Awards","client_logos|Client / company logos","team_photos|Team photos","none_yet|None yet"].map(x=>{const [v,l]=x.split("|");return `<button type="button" class="sfq2-choice" data-trust="${v}" aria-pressed="${state.trust_materials.includes(v)}">${l}</button>`;}))+`<h2>Photos</h2>`+grid(["client_provides|I will provide my own photos","siteformo_selects|SiteFormo may select suitable photos","none|I do not want photos"].map(x=>{const [v,l]=x.split("|");return choice("media.photos",v,l);}))+ (state.media.photos==="client_provides"?grid([choice("media.client_photos_timing","available","Available now"),choice("media.client_photos_timing","later","I will provide them later")]):"")+`<h2>Video</h2>`+grid(["none|No video","client_has|I have a video","client_later|I will provide a video later"].map(x=>{const [v,l]=x.split("|");return choice("media.video",v,l);}))+`<h2>Social presence</h2>`+grid(["instagram|Instagram","facebook|Facebook","tiktok|TikTok","linkedin|LinkedIn","youtube|YouTube","telegram|Telegram","other|Other","none|None"].map(x=>{const [v,l]=x.split("|");return `<button type="button" class="sfq2-choice" data-social="${v}" aria-pressed="${state.social_presence.expected_channels.includes(v)}">${l}</button>`;}))+(state.social_presence.expected_channels.includes("other")?field("other_platform","Platform name",state.social_presence.other_platform):"")+nav();
+    if(state.step==="q2_delivery")return title("Logo and delivery")+`<h2>Logo</h2>`+grid([choice("logo.choice","client_has","I have a logo / will provide it"),choice("logo.choice","siteformo_simple_logo","Simple SiteFormo Logo · optional service"),choice("logo.choice","none","No logo required")])+(state.logo.choice==="siteformo_simple_logo"?'<p class="sfq2-note">One direction, one revision and web-ready delivery. No naming, full branding or trademark/legal clearance.</p>':"")+`<h2>Hosting</h2>`+grid([choice("delivery_context.hosting_status","already_have","I already have hosting"),choice("delivery_context.hosting_status","do_not_have","I do not have hosting"),choice("delivery_context.hosting_status","not_sure","Not sure")])+`<p class="sfq2-note">Help choosing hosting is included. Your domain and hosting remain yours.</p><label class="sfq2-check"><input type="checkbox" data-install ${state.delivery_context.installation_selected?"checked":""}> Installation by SiteFormo</label><h2>Paid structural option</h2><label class="sfq2-check"><input type="checkbox" data-video-entry ${state.paid_structural_options.some(x=>x.key==="video_entry_page")?"checked":""}> Video Entry Page (Starter/Business; counts as the single additional page)</label>`+nav();
+    if(state.step==="q2_review")return title("Review your answers","SiteFormo—not you—will plan the sitemap and page order.")+`<div class="sfq2-summary"><div class="sfq2-row"><span>Identity</span><span>${esc(state.business_identity.name||"Name pending")}</span></div><div class="sfq2-row"><span>Business</span><span>${esc(state.business_activity.niche)}</span></div><div class="sfq2-row"><span>Goal</span><span>${esc(label(state.primary_goal))}</span></div><div class="sfq2-row"><span>Functions</span><span>${esc(state.functions.map(x=>label(x.key)).join(", ")||"Standard content only")}</span></div></div>`+nav(true,"Calculate scope");
+    const q=state.qualification||{},manual=q.eligibility==="manual_review"||q.unresolved_requirements?.length;
+    return title("Confirm the calculated scope","This is based on confirmed requirements, not on the package you browsed.")+`<p class="sfq2-package">Calculated fit: ${esc(label(q.recommended_package)||"Review required")}</p>${q.optional_recommendation_reasons?.some(x=>String(x.reason_code).includes("downgrade"))?'<p class="sfq2-note">Your requirements fit a cheaper package than the starting context.</p>':""}${manual?'<p class="sfq2-note sfq2-warning">The scope contains unresolved requirements. Payment will remain unavailable.</p>':""}<label class="sfq2-check"><input type="checkbox" data-confirm-package ${state.package_and_addons_confirmed?"checked":""}> I confirm the calculated package and selected optional services</label><div id="sfq2-save-status" aria-live="polite"></div>`+nav(true,"Save Q2 and continue");
+  }
+
+  function projectBriefScreen(){
+    const p=summary.project_summary,a=p.provisional_architecture||{},q=p.package_qualification||{},pay=summary.payment_summary;
+    const addons=pay.confirmed_addons.length?`<ul class="sfq2-list">${pay.confirmed_addons.map(x=>`<li>${esc(x.label)} — ${money(x.confirmed_price_cents)} (final balance)</li>`).join("")}</ul>`:'<p class="sfq2-note">No optional services confirmed.</p>';
+    return title("Project Brief Review","This functional summary comes from the saved project. The architecture is provisional, not a final sitemap.")+`
+      <h2>Project</h2><div class="sfq2-summary">
+      <div class="sfq2-row"><span>Identity</span><span>${esc(p.business_identity.name||"Name pending")}</span></div>
+      <div class="sfq2-row"><span>Business</span><span>${esc(p.business_activity.short_niche)}</span></div>
+      <div class="sfq2-row"><span>Audience</span><span>${esc(label(p.audience))}</span></div>
+      <div class="sfq2-row"><span>Primary goal</span><span>${esc(label(p.primary_goal))}</span></div>
+      <div class="sfq2-row"><span>Confirmed functions</span><span>${esc(p.confirmed_functions.map(label).join(", ")||"Standard content/contact")}</span></div>
+      <div class="sfq2-row"><span>Provisional architecture</span><span>${esc(a.minimum_coherent_pages?`${a.minimum_coherent_pages} coherent page${a.minimum_coherent_pages===1?"":"s"}`:"Review required")}</span></div>
+      <div class="sfq2-row"><span>Recommended package</span><span>${esc(label(q.recommended_package))}</span></div></div>
+      <h2>Trusted financial summary</h2>
+      <div class="sfq2-row"><span>Base package</span><span>${esc(label(pay.base_package))}</span></div>
+      <div class="sfq2-row"><span>Base package price</span><span>${money(pay.base_package_price_cents)}</span></div>
+      <div class="sfq2-row"><span>Deposit due now</span><span>${money(pay.initial_deposit_amount_cents)}</span></div>
+      <p class="sfq2-note"><b>The initial deposit is 50% of the base package only.</b></p>
+      <h3>Confirmed optional services</h3>${addons}
+      <div class="sfq2-row"><span>Optional services due now</span><span>${money(pay.addons_due_now_cents)}</span></div>
+      <div class="sfq2-row"><span>Remaining base package balance</span><span>${money(pay.remaining_base_package_balance_cents)}</span></div>
+      <div class="sfq2-row"><span>Confirmed optional-services balance</span><span>${money(pay.confirmed_addons_balance_cents)}</span></div>
+      <div class="sfq2-row"><span>Current final balance</span><span>${money(pay.current_final_balance_cents)}</span></div>
+      <p class="sfq2-note">Optional services are confirmed now but are not charged in the initial deposit. They are carried into the final balance.</p>
+      <label class="sfq2-check"><input type="checkbox" data-brief-check> I confirm this Project Brief</label>
+      <div class="sfq2-actions"><button type="button" class="sfq2-btn sfq2-btn-secondary" data-change-q2>Change answers</button><button type="button" class="sfq2-btn sfq2-btn-primary" data-confirm-brief disabled>Confirm Project Brief</button></div>`;
+  }
+  function legalScreen(){
+    if(!summary.legal_terms_available||!summary.approved_legal_terms_version)return title("Legal terms are not yet available for checkout")+'<p class="sfq2-note sfq2-warning">Checkout remains blocked until an approved terms version is available.</p><div class="sfq2-actions"><button type="button" class="sfq2-btn sfq2-btn-secondary" data-back-brief>Back to Project Brief</button></div>';
+    return title("Legal confirmation","This is an integration shell only. Final legal document copy is not included in this candidate.")+`<p class="sfq2-note">Server-approved terms version: <b>${esc(summary.approved_legal_terms_version)}</b></p><label class="sfq2-check"><input type="checkbox" data-legal-check> I explicitly confirm the server-approved legal terms version shown above</label><div class="sfq2-actions"><button type="button" class="sfq2-btn sfq2-btn-secondary" data-back-brief>Back</button><button type="button" class="sfq2-btn sfq2-btn-primary" data-confirm-legal disabled>Confirm legal terms</button></div>`;
+  }
+  function emailScreen(){
+    const email=summary.email_state;
+    if(email.status==="failed")return title("Prepayment confirmation email","The email could not be delivered. You can retry, but secure payment may continue.")+`<div class="sfq2-actions"><button type="button" class="sfq2-btn sfq2-btn-secondary" data-email>Retry email</button><button type="button" class="sfq2-btn sfq2-btn-primary" data-to-checkout>Continue to secure payment</button></div>`;
+    return title("Prepayment confirmation email","A transactional project and payment summary must be attempted for the current scope before Checkout.")+`<p class="sfq2-note">Checkout does not send this email automatically.</p><div class="sfq2-actions"><button type="button" class="sfq2-btn sfq2-btn-secondary" data-back-legal>Back</button><button type="button" class="sfq2-btn sfq2-btn-primary" data-email>Prepare/send confirmation email</button></div>`;
+  }
+  function checkoutScreen(){
+    const pay=summary.payment_summary,email=summary.email_state;
+    const ready=summary.confirmation_state.package_and_addons_confirmed&&summary.confirmation_state.brief_confirmed_at&&summary.confirmation_state.legal_confirmed_at&&summary.confirmation_state.legal_terms_version===summary.approved_legal_terms_version&&["sent","failed"].includes(email.status);
+    return title("Secure initial deposit")+`<div class="sfq2-row"><span>Deposit due now</span><span>${money(pay.initial_deposit_amount_cents)}</span></div><p class="sfq2-note">This is 50% of the base package only. Optional services are due with the final balance.</p>${email.status==="sent"?'<p class="sfq2-status">Confirmation email prepared/sent.</p>':'<p class="sfq2-warning sfq2-note">Email delivery failed after an attempted send. Retry remains available, and secure payment may continue.</p>'}<div class="sfq2-actions">${email.status==="failed"?'<button type="button" class="sfq2-btn sfq2-btn-secondary" data-email>Retry email</button>':""}<button type="button" class="sfq2-btn sfq2-btn-secondary" data-change-q2>Change answers</button><button type="button" class="sfq2-btn sfq2-btn-primary" data-checkout ${ready?"":"disabled"}>Continue to secure Stripe Checkout</button></div>`;
+  }
+  function manualReviewScreen(){return title("This project needs a scope review","The confirmed requirements cannot yet be safely qualified for payment.")+'<p class="sfq2-note sfq2-warning">No package or price has been substituted. Stripe Checkout is unavailable.</p><div class="sfq2-actions"><button type="button" class="sfq2-btn sfq2-btn-secondary" data-change-q2>Review answers</button></div>';}
+  function recoveryScreen(){return title(recoveryTemporary?"We could not check this project":"Resume the same SiteFormo project")+'<p class="sfq2-error">'+(recoveryTemporary?"This project could not be checked right now. Please retry.":"We couldn’t verify this project session. Please return to the previous SiteFormo step and reopen your project.")+'</p>'+(recoveryTemporary?'<div class="sfq2-actions"><button type="button" class="sfq2-btn sfq2-btn-primary" data-retry-summary>Retry</button></div>':'');}
+  function screen(){
+    if(QUESTION_STEPS.includes(state.step))return questionnaireScreen();
+    if(state.step==="q2_project_brief")return projectBriefScreen();
+    if(state.step==="q2_legal")return legalScreen();
+    if(state.step==="q2_email")return emailScreen();
+    if(state.step==="q2_checkout")return checkoutScreen();
+    if(state.step==="q2_manual_review")return manualReviewScreen();
+    return recoveryScreen();
+  }
+  function render(){
+    root.dataset.q2Step=state.step;root.setAttribute("aria-busy",String(busy));
+    root.innerHTML=`<section class="sfq2-card">${errorMessage?`<div class="sfq2-error" role="alert" id="sfq2-error">${esc(errorMessage)}</div>`:""}${statusMessage?`<div class="sfq2-status" role="status">${esc(statusMessage)}</div>`:""}${screen()}<div aria-live="polite" id="sfq2-live" class="sr-only"></div></section>`;
+    bind();
+  }
+  function toggleMulti(list,key,none){if(key===none)list.splice(0,list.length,key);else{const n=list.indexOf(none);if(n>=0)list.splice(n,1);const i=list.indexOf(key);i>=0?list.splice(i,1):list.push(key);}saveDraft();render();}
+  function toggleFunction(key,review){const i=state.functions.findIndex(x=>x.key===key);if(i>=0){state.functions.splice(i,1);saveDraft();render();return;}if(review){const modal=document.createElement("div");modal.className="sfq2-modal";modal.innerHTML='<div role="dialog" aria-modal="true"><h2>Scope review required</h2><p>This requirement is recorded, but its accepted package entitlement is unresolved. Adding it will pause Checkout for review.</p><div class="sfq2-actions"><button class="sfq2-btn sfq2-btn-secondary" data-keep>Keep current scope</button><button class="sfq2-btn sfq2-btn-primary" data-add>Add requirement</button></div></div>';document.body.appendChild(modal);modal.querySelector("[data-keep]").onclick=()=>modal.remove();modal.querySelector("[data-add]").onclick=()=>{state.functions.push({key,confirmed:true});saveDraft();modal.remove();render();};modal.querySelector("[data-keep]").focus();return;}state.functions.push({key,confirmed:true});saveDraft();render();}
+  function validate(){
+    if(state.step==="q2_business_identity"&&(!state.business_identity.status||(state.business_identity.status!=="temporary_pending"&&!state.business_identity.name)))return ["Choose a name status and enter the factual name.","identity_name"];
+    if(state.step==="q2_business_activity"&&(!state.business_activity.niche||!state.business_activity.broad_model||(state.business_activity.broad_model==="other"&&!state.business_activity.other_clarification)))return ["Complete the business activity details.","niche"];
+    if(state.step==="q2_location"&&(!state.operating_model||(state.operating_model==="customer_location"&&!state.location.public_address)||(state.operating_model==="travel_to_customers"&&!state.location.service_area)||(state.operating_model==="both"&&(!state.location.public_address||!state.location.service_area))||(state.operating_model==="multiple_locations"&&!state.location.multiple_locations_summary)))return ["Complete the location information for the selected operating model.",state.operating_model==="multiple_locations"?"multiple_locations_summary":state.operating_model==="travel_to_customers"?"service_area":"public_address"];
+    if(state.step==="q2_audience_goal"&&(!state.audience||!state.primary_goal))return ["Choose both the audience and primary goal.",null];
+    if(state.step==="q2_assets"&&(!state.media.photos||!state.media.video||(state.media.photos==="client_provides"&&!state.media.client_photos_timing)||!state.trust_materials.length||!state.social_presence.expected_channels.length||(state.social_presence.expected_channels.includes("other")&&!state.social_presence.other_platform)))return ["Complete the trust, photo, video and social choices.",null];
+    if(state.step==="q2_delivery"&&(!state.logo.choice||!state.delivery_context.hosting_status))return ["Choose both logo and hosting options.",null];
+    if(state.step==="q2_package_confirmation"&&!state.package_and_addons_confirmed)return ["Confirm the calculated package and selected optional services.",null];
+    return null;
+  }
+  function canonical(){
+    const copy=JSON.parse(JSON.stringify(state));
+    delete copy.step;delete copy.qualification;delete copy.legal_gate_confirmed;copy.flow_version="q2_v2";copy.schema_version=2;
+    if(copy.logo.choice==="siteformo_simple_logo"){copy.logo.price_eur=100;copy.logo.scope={one_direction:true,one_revision:true,web_ready_delivery:true,full_branding:false,naming:false,trademark_or_legal_clearance:false};}else{copy.logo.price_eur=0;copy.logo.scope={};}
+    if(!copy.analysis_hints.source)copy.analysis_hints={business_hints:[],function_hints:[],complexity_hints:[]};
+    return copy;
+  }
+  async function saveCanonical(){
+    setBusy(true);errorMessage="";
+    try{
+      const result=await api(`/api/orders/${encodeURIComponent(orderId)}/q2`,{method:"PATCH",headers:headers(true),body:JSON.stringify(canonical())});
+      state.qualification=result.scope_qualification;saveDraft();
+      if(result.scope_qualification.eligibility!=="supported"||(result.scope_qualification.unresolved_requirements||[]).length){setStep("q2_manual_review");return;}
+      await loadSummary(true);
+    }catch(error){errorMessage=`Q2 could not be saved: ${error.message} Nothing was sent to Checkout.`;render();}
+    finally{setBusy(false);}
+  }
+  function setBusy(value){busy=value;root.setAttribute("aria-busy",String(value));}
+  async function loadSummary(route=true){
+    setBusy(true);errorMessage="";
+    try{summary=await api(`/api/orders/${encodeURIComponent(orderId)}/prepayment-summary`,{headers:headers()});if(route)routeFromSummary();else render();return true;}
+    catch(error){errorMessage=error.message;if(/reference/i.test(error.message)){state.step="q2_manual_review";statusMessage="Reference checkout remains unavailable until its authoritative price is approved.";}else if(route){state.step="q2_review";}render();return false;}
+    finally{setBusy(false);}
+  }
+  function routeFromSummary(){
+    const c=summary.confirmation_state,e=summary.email_state;
+    if(!c.brief_confirmed_at){setStep("q2_project_brief");return;}
+    if(!summary.legal_terms_available||!c.legal_confirmed_at||c.legal_terms_version!==summary.approved_legal_terms_version){setStep("q2_legal");return;}
+    if(["sent","failed"].includes(e.status)){setStep("q2_checkout");return;}
+    setStep("q2_email");
+  }
+  async function confirmPaymentPart(payload){
+    setBusy(true);errorMessage="";
+    try{await api(`/api/orders/${encodeURIComponent(orderId)}/payment-confirmation`,{method:"POST",headers:headers(true),body:JSON.stringify(payload)});await loadSummary(true);}
+    catch(error){errorMessage=error.message;render();}
+    finally{setBusy(false);}
+  }
+  async function sendEmail(){
+    setBusy(true);errorMessage="";statusMessage="";
+    try{
+      const result=await api(`/api/orders/${encodeURIComponent(orderId)}/prepayment-summary-email`,{method:"POST",headers:headers(true),body:"{}"});
+      if(result.result==="in_progress"){statusMessage="The email operation is in progress. Checkout remains blocked until it resolves.";setStep("q2_email");return;}
+      await loadSummary(false);
+      if(result.result==="failed"){statusMessage="The email could not be delivered. Retry remains available; secure payment may continue.";setStep("q2_checkout");return;}
+      statusMessage="Confirmation email prepared/sent.";setStep("q2_checkout");
+    }catch(error){errorMessage=error.message;setStep("q2_email");}
+    finally{setBusy(false);}
+  }
+  async function launchCheckout(){
+    setBusy(true);errorMessage="";
+    try{const result=await api(`/api/orders/${encodeURIComponent(orderId)}/checkout`,{method:"POST",headers:headers(true),body:"{}"});if(!result.checkout_url)throw new Error("The server did not return a secure Checkout URL.");location.assign(result.checkout_url);}
+    catch(error){errorMessage=error.message;render();}
+    finally{setBusy(false);}
+  }
+  async function advance(){
+    const issue=validate();
+    if(issue){errorMessage=issue[0];render();const target=(issue[1]&&root.querySelector(`[data-field="${issue[1]}"]`))||root.querySelector("button,input");if(target){target.setAttribute("aria-invalid","true");target.setAttribute("aria-describedby","sfq2-error");target.scrollIntoView({block:"center",behavior:"smooth"});target.focus();}return;}
+    errorMessage="";statusMessage="";
+    if(state.step==="q2_review"){setStep("q2_package_confirmation");return;}
+    if(state.step==="q2_package_confirmation"){await saveCanonical();return;}
+    setStep(QUESTION_STEPS[QUESTION_STEPS.indexOf(state.step)+1]);
+  }
+  function bind(){
+    root.querySelectorAll("[data-key]").forEach(b=>b.onclick=()=>setPath(b.dataset.key,b.dataset.value));
+    root.querySelectorAll("[data-field]").forEach(i=>i.onchange=()=>{const map={identity_name:[state.business_identity,"name"],niche:[state.business_activity,"niche"],other_clarification:[state.business_activity,"other_clarification"],public_address:[state.location,"public_address"],service_area:[state.location,"service_area"],multiple_locations_summary:[state.location,"multiple_locations_summary"],other_platform:[state.social_presence,"other_platform"]};const target=map[i.dataset.field];target[0][target[1]]=i.value.trim();saveDraft();});
+    root.querySelectorAll("[data-function]").forEach(b=>b.onclick=()=>toggleFunction(b.dataset.function,b.dataset.review==="true"));
+    root.querySelectorAll("[data-trust]").forEach(b=>b.onclick=()=>toggleMulti(state.trust_materials,b.dataset.trust,"none_yet"));
+    root.querySelectorAll("[data-social]").forEach(b=>b.onclick=()=>toggleMulti(state.social_presence.expected_channels,b.dataset.social,"none"));
+    const install=root.querySelector("[data-install]");if(install)install.onchange=()=>{state.delivery_context.installation_selected=install.checked;state.delivery_context.installation_price_eur=install.checked?125:0;saveDraft();};
+    const video=root.querySelector("[data-video-entry]");if(video)video.onchange=()=>{state.paid_structural_options=video.checked?[{key:"video_entry_page",quantity:1,price_eur_each:120,counts_as_page:true,explicit_confirmed:true}]:[];saveDraft();};
+    const packageCheck=root.querySelector("[data-confirm-package]");if(packageCheck)packageCheck.onchange=()=>{state.package_and_addons_confirmed=packageCheck.checked;saveDraft();};
+    const briefCheck=root.querySelector("[data-brief-check]"),briefButton=root.querySelector("[data-confirm-brief]");if(briefCheck&&briefButton)briefCheck.onchange=()=>briefButton.disabled=!briefCheck.checked;
+    const legalCheck=root.querySelector("[data-legal-check]"),legalButton=root.querySelector("[data-confirm-legal]");if(legalCheck&&legalButton)legalCheck.onchange=()=>legalButton.disabled=!legalCheck.checked;
+    root.querySelector("[data-confirm-brief]")?.addEventListener("click",()=>confirmPaymentPart({brief_confirmed:true}));
+    root.querySelector("[data-confirm-legal]")?.addEventListener("click",()=>confirmPaymentPart({legal_confirmed:true,legal_terms_version:summary.approved_legal_terms_version}));
+    root.querySelectorAll("[data-email]").forEach(b=>b.onclick=sendEmail);
+    root.querySelector("[data-checkout]")?.addEventListener("click",launchCheckout);
+    root.querySelector("[data-to-checkout]")?.addEventListener("click",()=>setStep("q2_checkout"));
+    root.querySelectorAll("[data-change-q2]").forEach(b=>b.onclick=()=>{summary=null;state.package_and_addons_confirmed=false;setStep("q2_business_identity");});
+    root.querySelector("[data-back-brief]")?.addEventListener("click",()=>setStep("q2_project_brief"));
+    root.querySelector("[data-back-legal]")?.addEventListener("click",()=>setStep("q2_legal"));
+    root.querySelector("[data-retry-summary]")?.addEventListener("click",()=>boot());
+    const back=root.querySelector("[data-back]");if(back)back.onclick=()=>setStep(QUESTION_STEPS[Math.max(0,QUESTION_STEPS.indexOf(state.step)-1)]);
+    const next=root.querySelector("[data-next]");if(next)next.onclick=advance;
+  }
+  async function boot(){
+    if(!orderId||!credential){state.step="q2_recovery";render();return;}
+    render();
+    try{summary=await api(`/api/orders/${encodeURIComponent(orderId)}/prepayment-summary`,{headers:headers()});routeFromSummary();}
+    catch(error){
+      const resumableDraft=error.status===409&&/^Q2 V2 is required$/i.test(error.message);
+      if(!resumableDraft){recoveryTemporary=!error.status||error.status>=500;state.step="q2_recovery";errorMessage="";render();return;}
+      const q=state.qualification||{};
+      if(q.eligibility==="manual_review"||q.recommended_package==="reference"||(q.unresolved_requirements||[]).length){state.step="q2_manual_review";}
+      else state.step=QUESTION_STEPS.includes(state.step)?state.step:"q2_intro";
+      render();
+    }
+  }
+  window.addEventListener("scroll",()=>document.dispatchEvent(new CustomEvent("siteformo:assistant-collapse",{detail:{source:"q2_scroll",terminateConversation:false}})),{passive:true});
+  boot();
+})();
+</script>

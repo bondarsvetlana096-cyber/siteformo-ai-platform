@@ -66,6 +66,17 @@ def q2_payload(starting="advanced", functions=None, options=None, legal=True, pa
     }
 
 
+def test_scope_readiness_excludes_legacy_q2_legal_boolean():
+    false_payload = Q2V2Payload.model_validate(q2_payload(starting="starter", legal=False))
+    assert qualify_scope(false_payload)["checkout_ready"] is True
+
+    absent_payload = q2_payload(starting="starter")
+    absent_payload.pop("legal_gate_confirmed")
+    validated = Q2V2Payload.model_validate(absent_payload)
+    assert validated.legal_gate_confirmed is False
+    assert qualify_scope(validated)["checkout_ready"] is True
+
+
 def create_q1(client, credential):
     headers = {"Origin": "https://ie.siteformo.com", JOURNEY_CREDENTIAL_HEADER: credential}
     order_id = client.post("/api/orders/q1/project", headers=headers, json={}).json()["order_id"]

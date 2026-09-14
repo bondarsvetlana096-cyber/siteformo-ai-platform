@@ -181,6 +181,40 @@ def test_readiness_and_confirmation_gates(boundary):
     assert client.post(f"/api/orders/{order_id}/checkout", headers=headers, json={}).status_code == 409
 
 
+@pytest.mark.parametrize("legacy_legal_field", [False, None])
+def test_order_legal_state_is_sole_v2_checkout_authority(boundary, legacy_legal_field):
+    client, maker, order_id, headers = boundary
+    payload = q2_payload(legal=False)
+    if legacy_legal_field is None:
+        payload.pop("legal_gate_confirmed")
+    saved = client.patch(f"/api/orders/{order_id}/q2", headers=headers, json=payload)
+    assert saved.status_code == 200 and saved.json()["scope_qualification"]["checkout_ready"] is True
+
+    # The Q2 compatibility boolean cannot substitute for Order-level events.
+    assert client.post(f"/api/orders/{order_id}/checkout", headers=headers, json={}).status_code == 409
+    assert client.post(f"/api/orders/{order_id}/payment-confirmation", headers=headers, json={
+        "brief_confirmed": True, "legal_confirmed": True, "legal_terms_version": TERMS,
+    }).status_code == 200
+    assert client.post(f"/api/orders/{order_id}/prepayment-summary-email", headers=headers, json={}).status_code == 200
+    assert client.post(f"/api/orders/{order_id}/checkout", headers=headers, json={}).status_code == 200
+
+    with maker() as db:
+        order = db.get(Order, order_id)
+        stored = order.extended_brief["q2_v2"]
+        assert stored.get("legal_gate_confirmed", False) is False
+        assert order.legal_confirmed_at is not None and order.legal_terms_version == TERMS
+
+
+def test_q2_legal_true_cannot_replace_order_level_legal_confirmation(boundary):
+    client, _, order_id, headers = boundary
+    saved = client.patch(f"/api/orders/{order_id}/q2", headers=headers, json=q2_payload(legal=True))
+    assert saved.status_code == 200 and saved.json()["scope_qualification"]["checkout_ready"] is True
+    assert client.post(f"/api/orders/{order_id}/checkout", headers=headers, json={}).status_code == 409
+    summary = client.get(f"/api/orders/{order_id}/prepayment-summary", headers=headers).json()
+    assert summary["confirmation_state"]["legal_confirmed_at"] is None
+    assert summary["confirmation_state"]["legal_terms_version"] is None
+
+
 def test_brief_and_legal_are_separate_durable_events(boundary):
     client, _, order_id, headers = boundary
     assert client.patch(f"/api/orders/{order_id}/q2", headers=headers, json=q2_payload()).status_code == 200
