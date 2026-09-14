@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import os
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
@@ -36,7 +37,7 @@ class OpenAISitePlannerConfigV1(BaseModel):
     model: Literal["gpt-5.6-sol", "gpt-6-astra"] | None = None
     reasoning_effort: Literal["medium", "high"] = "medium"
     service_tier: Literal["default"] = "default"
-    timeout_seconds: float = Field(default=180, ge=30, le=600)
+    timeout_seconds: int = Field(default=180, ge=30, le=600)
     max_provider_attempts: int = Field(default=2, ge=1, le=2)
     max_repair_attempts: Literal[1] = 1
     max_output_tokens: int = Field(default=24_576, ge=4_096, le=32_768)
@@ -63,6 +64,23 @@ class OpenAISitePlannerConfigV1(BaseModel):
 
 
 _ENV_PREFIX = "SITEFORMO_SITE_PLANNER_"
+_DECIMAL_INTEGER = re.compile(r"^[0-9]+$")
+
+
+def _parse_environment_bool(name: str, raw: str) -> bool:
+    value = raw.strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise ValueError(f"{name} must be exactly true or false")
+
+
+def _parse_environment_integer(name: str, raw: str) -> int:
+    value = raw.strip()
+    if not _DECIMAL_INTEGER.fullmatch(value):
+        raise ValueError(f"{name} must be a base-10 unsigned integer")
+    return int(value, 10)
 
 
 def load_openai_site_planner_config_v1(
@@ -79,8 +97,22 @@ def load_openai_site_planner_config_v1(
         "max_output_tokens": "MAX_OUTPUT_TOKENS", "contract_version": "CONTRACT_VERSION",
         "config_version": "CONFIG_VERSION",
     }
-    payload = {
-        field: values[_ENV_PREFIX + suffix]
-        for field, suffix in names.items() if _ENV_PREFIX + suffix in values
+    payload: dict[str, object] = {}
+    integer_fields = {
+        "timeout_seconds", "max_provider_attempts", "max_repair_attempts",
+        "max_output_tokens",
     }
+    for field, suffix in names.items():
+        name = _ENV_PREFIX + suffix
+        if name not in values:
+            continue
+        raw = values[name]
+        if not isinstance(raw, str):
+            raise ValueError(f"{name} must be supplied as an environment string")
+        if field == "enabled":
+            payload[field] = _parse_environment_bool(name, raw)
+        elif field in integer_fields:
+            payload[field] = _parse_environment_integer(name, raw)
+        else:
+            payload[field] = raw.strip()
     return OpenAISitePlannerConfigV1.model_validate(payload)

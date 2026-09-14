@@ -198,6 +198,76 @@ def test_explicit_environment_loader_uses_only_dedicated_namespace():
     assert "dedicated-fake-key" not in repr(config)
 
 
+def railway_environment(**changes):
+    values = {
+        "SITEFORMO_SITE_PLANNER_ENABLED": "false",
+        "SITEFORMO_SITE_PLANNER_PROVIDER": "openai",
+        "SITEFORMO_SITE_PLANNER_REASONING_EFFORT": "medium",
+        "SITEFORMO_SITE_PLANNER_SERVICE_TIER": "default",
+        "SITEFORMO_SITE_PLANNER_TIMEOUT_SECONDS": "180",
+        "SITEFORMO_SITE_PLANNER_MAX_PROVIDER_ATTEMPTS": "2",
+        "SITEFORMO_SITE_PLANNER_MAX_REPAIR_ATTEMPTS": "1",
+        "SITEFORMO_SITE_PLANNER_MAX_OUTPUT_TOKENS": "24576",
+        "SITEFORMO_SITE_PLANNER_CONTRACT_VERSION": "v1",
+        "SITEFORMO_SITE_PLANNER_CONFIG_VERSION": "openai-eval-v1",
+    }
+    values.update(changes)
+    return values
+
+
+def test_exact_railway_string_configuration_is_typed_before_validation():
+    config = load_openai_site_planner_config_v1(railway_environment())
+    assert config.enabled is False and type(config.enabled) is bool
+    assert config.timeout_seconds == 180 and type(config.timeout_seconds) is int
+    assert config.max_provider_attempts == 2 and type(config.max_provider_attempts) is int
+    assert config.max_repair_attempts == 1 and type(config.max_repair_attempts) is int
+    assert config.max_output_tokens == 24_576 and type(config.max_output_tokens) is int
+
+
+def test_enabled_railway_string_configuration_remains_fail_closed_and_typed():
+    config = load_openai_site_planner_config_v1(railway_environment(**{
+        "SITEFORMO_SITE_PLANNER_ENABLED": " TrUe ",
+        "SITEFORMO_SITE_PLANNER_API_KEY": " fake-planner-key ",
+        "SITEFORMO_SITE_PLANNER_MODEL": " gpt-5.6-sol ",
+        "SITEFORMO_SITE_PLANNER_TIMEOUT_SECONDS": " 180 ",
+    }))
+    assert config.enabled is True and config.model == "gpt-5.6-sol"
+    assert config.timeout_seconds == 180 and config.api_key.get_secret_value() == "fake-planner-key"
+
+
+@pytest.mark.parametrize(("name", "value"), [
+    ("SITEFORMO_SITE_PLANNER_MAX_REPAIR_ATTEMPTS", "0"),
+    ("SITEFORMO_SITE_PLANNER_MAX_REPAIR_ATTEMPTS", "2"),
+    ("SITEFORMO_SITE_PLANNER_MAX_REPAIR_ATTEMPTS", "1.0"),
+    ("SITEFORMO_SITE_PLANNER_MAX_PROVIDER_ATTEMPTS", "two"),
+    ("SITEFORMO_SITE_PLANNER_TIMEOUT_SECONDS", ""),
+    ("SITEFORMO_SITE_PLANNER_TIMEOUT_SECONDS", "   "),
+    ("SITEFORMO_SITE_PLANNER_MAX_OUTPUT_TOKENS", "24576.0"),
+    ("SITEFORMO_SITE_PLANNER_ENABLED", "1"),
+    ("SITEFORMO_SITE_PLANNER_ENABLED", "yes"),
+    ("SITEFORMO_SITE_PLANNER_ENABLED", ""),
+])
+def test_malformed_explicit_environment_values_fail_without_default(name, value):
+    with pytest.raises((ValueError, ValidationError)):
+        load_openai_site_planner_config_v1(railway_environment(**{name: value}))
+
+
+def test_missing_optional_numeric_environment_values_use_safe_defaults():
+    environment = railway_environment()
+    for name in (
+        "SITEFORMO_SITE_PLANNER_TIMEOUT_SECONDS",
+        "SITEFORMO_SITE_PLANNER_MAX_PROVIDER_ATTEMPTS",
+        "SITEFORMO_SITE_PLANNER_MAX_REPAIR_ATTEMPTS",
+        "SITEFORMO_SITE_PLANNER_MAX_OUTPUT_TOKENS",
+    ):
+        environment.pop(name)
+    config = load_openai_site_planner_config_v1(environment)
+    assert config.timeout_seconds == 180
+    assert config.max_provider_attempts == 2
+    assert config.max_repair_attempts == 1
+    assert config.max_output_tokens == 24_576
+
+
 def test_base_url_allowlist_supports_global_and_eu_only():
     assert openai_config(base_url="https://api.openai.com/v1/").base_url == "https://api.openai.com/v1"
     assert openai_config(base_url="https://eu.api.openai.com/v1").base_url == "https://eu.api.openai.com/v1"
