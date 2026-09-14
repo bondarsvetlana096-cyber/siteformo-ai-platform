@@ -48,7 +48,7 @@ class PaymentStatusResponse(BaseModel):
     order_id: str
     deposit_status: Literal["not_started", "checkout_created", "pending", "paid", "failed", "cancelled", "refunded"]
     payment_confirmed: bool
-    next_step: Literal["complete_payment", "await_payment_confirmation", "post_payment_pending"]
+    next_step: Literal["complete_payment", "await_payment_confirmation", "design_direction", "post_payment_pending"]
     retry_allowed: bool
 
 

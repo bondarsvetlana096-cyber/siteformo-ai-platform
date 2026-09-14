@@ -36,6 +36,24 @@ SUMMARY_VERSION = "prepayment_summary_v1"
 CURRENCY = "EUR"
 
 
+def has_post_design_activity(order: Order) -> bool:
+    """Return true when an Order has already entered a later legacy/design stage."""
+    return any((
+        order.design_status,
+        order.generation_status,
+        order.full_generation_started_at,
+        order.design_approved_at,
+        order.refund_window_started_at,
+        order.refund_window_expires_at,
+        order.selected_design_id,
+        order.selected_design_label,
+        order.selected_design_url,
+        order.selected_screenshot_url,
+        order.interaction_style,
+        order.production_payload,
+    ))
+
+
 class PaymentBoundaryError(RuntimeError):
     def __init__(self, message: str, status_code: int = 409):
         super().__init__(message)
@@ -480,7 +498,15 @@ def payment_status(db: Session, visitor: SiteFormoVisitor, order_id: str) -> dic
     status = order.deposit_status or "not_started"
     confirmed = status == "paid"
     if confirmed:
-        next_step = "post_payment_pending"
+        q1_exists = isinstance((order.brief_answers or {}).get("q1_v2"), dict)
+        q2_exists = isinstance((order.extended_brief or {}).get("q2_v2"), dict)
+        direction_required = (
+            q1_exists
+            and q2_exists
+            and not order.design_direction
+            and not has_post_design_activity(order)
+        )
+        next_step = "design_direction" if direction_required else "post_payment_pending"
     elif status in {"checkout_created", "pending"}:
         next_step = "await_payment_confirmation"
     else:

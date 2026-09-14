@@ -19,6 +19,7 @@ from app.api.demo_contact_whatsapp import (
 )
 from app.api.demo_sms import close_sms_runtime, configure_sms_runtime, router as demo_sms_router
 from app.api.demo_voice import router as demo_voice_router
+from app.api.design_direction_routes import router as design_direction_router
 from app.services.voice_delivery.runtime import (
     close_voice_runtime, configure_voice_runtime, start_voice_dispatcher,
 )
@@ -111,6 +112,7 @@ app.include_router(order_router)
 app.include_router(request_router)
 app.include_router(payment_router)
 app.include_router(payment_boundary_router)
+app.include_router(design_direction_router)
 app.include_router(stripe_webhook_router)
 app.include_router(admin_routes_router)
 app.include_router(review_router)

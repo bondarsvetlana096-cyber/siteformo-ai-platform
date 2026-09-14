@@ -15,6 +15,10 @@ from app.journey.models import JourneyBase
 from app.main import app
 from app.models.order import Order
 from app.models.payment import PaymentAttempt, StripeWebhookEvent
+from app.services.design_direction_service import (
+    DESIGN_DIRECTION_CONTRACT_VERSION,
+    DESIGN_DIRECTION_KEYS,
+)
 from app.services.payment_boundary_service import (
     ADDON_REGISTRY_CENTS, PaymentBoundaryError, package_price_cents,
     _email_scope_signature, process_v2_checkout_completed,
@@ -276,7 +280,215 @@ def test_webhook_payment_truth_status_and_duplicate(boundary):
         assert len(db.execute(select(StripeWebhookEvent)).scalars().all()) == 1
     paid = client.get(f"/api/orders/{order_id}/payment-status", headers=headers).json()
     assert paid == {"order_id": order_id, "deposit_status": "paid", "payment_confirmed": True,
-                    "next_step": "post_payment_pending", "retry_allowed": False}
+                    "next_step": "design_direction", "retry_allowed": False}
+
+
+def _mark_deposit(client, maker, order_id, headers, status="paid"):
+    assert client.patch(f"/api/orders/{order_id}/q2", headers=headers, json=q2_payload()).status_code == 200
+    with maker() as db:
+        order = db.get(Order, order_id)
+        order.deposit_status = status
+        if status == "paid":
+            order.deposit_paid_at = datetime.now(timezone.utc)
+            order.deposit_amount_cents = 45_000
+            order.deposit_currency = "EUR"
+        db.commit()
+
+
+def test_paid_v2_next_step_tracks_canonical_design_direction(boundary):
+    client, maker, order_id, headers = boundary
+    _mark_deposit(client, maker, order_id, headers)
+    status = client.get(f"/api/orders/{order_id}/payment-status", headers=headers).json()
+    assert status["payment_confirmed"] is True
+    assert status["next_step"] == "design_direction"
+
+    selected = client.post(
+        f"/api/orders/{order_id}/design-direction",
+        headers=headers,
+        json={"direction": "clean-modern"},
+    )
+    assert selected.status_code == 200
+    status = client.get(f"/api/orders/{order_id}/payment-status", headers=headers).json()
+    assert status["next_step"] == "post_payment_pending"
+
+
+@pytest.mark.parametrize("deposit_status", ["not_started", "checkout_created", "pending", "failed", "cancelled", "refunded"])
+def test_unpaid_or_refunded_v2_never_enters_design_direction(boundary, deposit_status):
+    client, maker, order_id, headers = boundary
+    _mark_deposit(client, maker, order_id, headers, deposit_status)
+    status = client.get(f"/api/orders/{order_id}/payment-status", headers=headers).json()
+    assert status["payment_confirmed"] is False
+    assert status["next_step"] != "design_direction"
+    assert client.get(f"/api/orders/{order_id}/design-direction", headers=headers).status_code == 409
+
+
+def test_design_direction_read_is_safe_versioned_and_journey_authorized(boundary):
+    client, maker, order_id, headers = boundary
+    _mark_deposit(client, maker, order_id, headers)
+    response = client.get(f"/api/orders/{order_id}/design-direction", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "order_id": order_id,
+        "stage": "design_direction_required",
+        "contract_version": DESIGN_DIRECTION_CONTRACT_VERSION,
+        "available_directions": [
+            {"key": key, "label": label}
+            for key, label in (
+                ("clean-modern", "Clean Modern"),
+                ("premium-business", "Premium Business"),
+                ("bold-startup", "Bold Startup"),
+                ("luxury-elite", "Luxury Elite"),
+                ("tech-minimal", "Tech Minimal"),
+                ("creative-studio", "Creative Studio"),
+                ("nordic-soft", "Nordic Soft"),
+                ("dark-contrast", "Dark Contrast"),
+            )
+        ],
+        "selected_direction": None,
+        "confirmed_at": None,
+        "next_step": "design_direction",
+        "idempotent": False,
+    }
+    assert {item["key"] for item in body["available_directions"]} == DESIGN_DIRECTION_KEYS
+    serialized = response.text.lower()
+    assert "brief_answers" not in serialized and "extended_brief" not in serialized
+    assert "owner@example.test" not in serialized and "q2_v2" not in serialized
+
+    assert client.get(f"/api/orders/{order_id}/design-direction", headers=ORIGIN).status_code == 403
+    other = client.post("/api/journey/session", headers=ORIGIN).json()["credential"]
+    assert client.get(
+        f"/api/orders/{order_id}/design-direction",
+        headers={**ORIGIN, JOURNEY_CREDENTIAL_HEADER: other},
+    ).status_code == 403
+    assert client.get(f"/api/orders/{uuid.uuid4()}/design-direction", headers=headers).status_code == 403
+
+
+def test_design_direction_write_is_idempotent_immutable_and_side_effect_free(boundary):
+    client, maker, order_id, headers = boundary
+    _mark_deposit(client, maker, order_id, headers)
+    with maker() as db:
+        before = db.get(Order, order_id)
+        original = {
+            "status": before.status,
+            "design_status": before.design_status,
+            "generation_status": before.generation_status,
+            "full_generation_started_at": before.full_generation_started_at,
+            "selected_design_id": before.selected_design_id,
+            "selected_design_label": before.selected_design_label,
+            "selected_design_url": before.selected_design_url,
+            "selected_screenshot_url": before.selected_screenshot_url,
+            "design_approved_at": before.design_approved_at,
+            "refund_window_started_at": before.refund_window_started_at,
+            "refund_window_expires_at": before.refund_window_expires_at,
+        }
+
+    first = client.post(
+        f"/api/orders/{order_id}/design-direction", headers=headers,
+        json={"direction": "nordic-soft"},
+    )
+    assert first.status_code == 200
+    assert first.json()["stage"] == "design_direction_confirmed"
+    assert first.json()["next_step"] == "post_payment_pending"
+    assert first.json()["idempotent"] is False
+
+    repeated = client.post(
+        f"/api/orders/{order_id}/design-direction", headers=headers,
+        json={"direction": "nordic-soft"},
+    )
+    assert repeated.status_code == 200 and repeated.json()["idempotent"] is True
+    changed = client.post(
+        f"/api/orders/{order_id}/design-direction", headers=headers,
+        json={"direction": "dark-contrast"},
+    )
+    assert changed.status_code == 409
+    assert client.post(
+        f"/api/orders/{order_id}/design-direction", headers=headers,
+        json={"direction": "not-a-direction"},
+    ).status_code == 422
+
+    with maker() as db:
+        after = db.get(Order, order_id)
+        assert after.design_direction == "nordic-soft"
+        assert {
+            "status": after.status,
+            "design_status": after.design_status,
+            "generation_status": after.generation_status,
+            "full_generation_started_at": after.full_generation_started_at,
+            "selected_design_id": after.selected_design_id,
+            "selected_design_label": after.selected_design_label,
+            "selected_design_url": after.selected_design_url,
+            "selected_screenshot_url": after.selected_screenshot_url,
+            "design_approved_at": after.design_approved_at,
+            "refund_window_started_at": after.refund_window_started_at,
+            "refund_window_expires_at": after.refund_window_expires_at,
+        } == original
+
+
+def test_design_direction_rejects_non_v2_order(boundary):
+    client, maker, order_id, headers = boundary
+    with maker() as db:
+        order = db.get(Order, order_id)
+        order.deposit_status = "paid"
+        order.brief_answers = {}
+        order.extended_brief = {}
+        db.commit()
+    assert client.get(f"/api/orders/{order_id}/design-direction", headers=headers).status_code == 409
+    assert client.post(
+        f"/api/orders/{order_id}/design-direction", headers=headers,
+        json={"direction": "clean-modern"},
+    ).status_code == 409
+
+    # The unchanged legacy route remains available to a legacy Order and keeps
+    # its existing status-based response instead of applying the V2 hard block.
+    legacy = client.post(f"/api/orders/{order_id}/approve-design", json={})
+    assert legacy.status_code == 200
+    assert legacy.json()["success"] is False
+    assert legacy.json()["already_selected"] is False
+
+
+def test_design_direction_rejects_extra_fields_and_later_stage(boundary):
+    client, maker, order_id, headers = boundary
+    _mark_deposit(client, maker, order_id, headers)
+    assert client.post(
+        f"/api/orders/{order_id}/design-direction", headers=headers,
+        json={"direction": "clean-modern", "stage": "paid", "generation_status": "ready"},
+    ).status_code == 422
+    with maker() as db:
+        order = db.get(Order, order_id)
+        order.generation_status = "unexpected_later_state"
+        db.commit()
+    status = client.get(f"/api/orders/{order_id}/payment-status", headers=headers).json()
+    assert status["next_step"] == "post_payment_pending"
+    assert client.get(f"/api/orders/{order_id}/design-direction", headers=headers).status_code == 409
+    assert client.post(
+        f"/api/orders/{order_id}/design-direction", headers=headers,
+        json={"direction": "clean-modern"},
+    ).status_code == 409
+
+
+def test_design_direction_reads_are_stable_and_failed_commit_rolls_back(boundary, monkeypatch):
+    client, maker, order_id, headers = boundary
+    _mark_deposit(client, maker, order_id, headers)
+    first = client.get(f"/api/orders/{order_id}/design-direction", headers=headers).json()
+    second = client.get(f"/api/orders/{order_id}/design-direction", headers=headers).json()
+    assert first == second
+
+    with maker() as db:
+        # Obtain the Journey visitor through the canonical binding rather than browser data.
+        from app.journey.models import SiteFormoJourneyProject, SiteFormoVisitor
+        binding = db.execute(
+            select(SiteFormoJourneyProject).where(SiteFormoJourneyProject.order_id == order_id)
+        ).scalar_one()
+        visitor = db.get(SiteFormoVisitor, binding.siteformo_visitor_id)
+        original_commit = db.commit
+        monkeypatch.setattr(db, "commit", lambda: (_ for _ in ()).throw(RuntimeError("commit failure")))
+        from app.services.design_direction_service import confirm_design_direction
+        with pytest.raises(RuntimeError, match="commit failure"):
+            confirm_design_direction(db, visitor, order_id, "clean-modern")
+        db.rollback()
+        monkeypatch.setattr(db, "commit", original_commit)
+        assert db.get(Order, order_id).design_direction is None
 
 
 def test_signed_webhook_route_uses_persisted_attempt(boundary, monkeypatch):
