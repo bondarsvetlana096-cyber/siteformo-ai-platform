@@ -34,6 +34,20 @@ ACTIVE_ATTEMPT_STATUSES = {"creating", "checkout_created", "pending"}
 SCOPE_VERSION = "payment_scope_v2"
 SUMMARY_VERSION = "prepayment_summary_v1"
 CURRENCY = "EUR"
+INTERACTION_PREFERENCE_VALUES = frozenset({"subtle", "recommended", "more_expressive"})
+
+
+def interaction_preference_record(order: Order) -> dict[str, Any] | None:
+    extended = order.extended_brief or {}
+    post_payment = extended.get("post_payment_v2")
+    record = post_payment.get("interaction_preference") if isinstance(post_payment, dict) else None
+    if not isinstance(record, dict):
+        return None
+    if record.get("contract_version") != "v1" or record.get("value") not in INTERACTION_PREFERENCE_VALUES:
+        return None
+    if not isinstance(record.get("confirmed_at"), str) or not record["confirmed_at"]:
+        return None
+    return record
 
 
 def has_post_design_activity(order: Order) -> bool:
@@ -500,13 +514,26 @@ def payment_status(db: Session, visitor: SiteFormoVisitor, order_id: str) -> dic
     if confirmed:
         q1_exists = isinstance((order.brief_answers or {}).get("q1_v2"), dict)
         q2_exists = isinstance((order.extended_brief or {}).get("q2_v2"), dict)
+        downstream_started = has_post_design_activity(order)
         direction_required = (
             q1_exists
             and q2_exists
             and not order.design_direction
-            and not has_post_design_activity(order)
+            and not downstream_started
         )
-        next_step = "design_direction" if direction_required else "post_payment_pending"
+        interaction_required = (
+            q1_exists
+            and q2_exists
+            and bool(order.design_direction)
+            and interaction_preference_record(order) is None
+            and not downstream_started
+        )
+        if direction_required:
+            next_step = "design_direction"
+        elif interaction_required:
+            next_step = "interaction_preference"
+        else:
+            next_step = "post_payment_pending"
     elif status in {"checkout_created", "pending"}:
         next_step = "await_payment_confirmation"
     else:

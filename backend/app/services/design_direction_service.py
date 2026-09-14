@@ -7,7 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.journey.models import SiteFormoVisitor
 from app.models.order import Order
-from app.services.payment_boundary_service import PaymentBoundaryError, has_post_design_activity
+from app.services.payment_boundary_service import (
+    PaymentBoundaryError,
+    has_post_design_activity,
+    interaction_preference_record,
+)
 from app.services.q1_service import Q1OwnershipError, project_binding
 
 
@@ -62,7 +66,13 @@ def _state(order: Order, *, idempotent: bool = False) -> dict[str, Any]:
         "selected_direction": selected,
         # The existing schema has no suitable Design Direction confirmation timestamp.
         "confirmed_at": None,
-        "next_step": "post_payment_pending" if selected else "design_direction",
+        "next_step": (
+            "post_payment_pending"
+            if selected and interaction_preference_record(order)
+            else "interaction_preference"
+            if selected
+            else "design_direction"
+        ),
         "idempotent": idempotent,
     }
 

@@ -1,4 +1,5 @@
 import uuid
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -309,7 +310,7 @@ def test_paid_v2_next_step_tracks_canonical_design_direction(boundary):
     )
     assert selected.status_code == 200
     status = client.get(f"/api/orders/{order_id}/payment-status", headers=headers).json()
-    assert status["next_step"] == "post_payment_pending"
+    assert status["next_step"] == "interaction_preference"
 
 
 @pytest.mark.parametrize("deposit_status", ["not_started", "checkout_created", "pending", "failed", "cancelled", "refunded"])
@@ -389,7 +390,7 @@ def test_design_direction_write_is_idempotent_immutable_and_side_effect_free(bou
     )
     assert first.status_code == 200
     assert first.json()["stage"] == "design_direction_confirmed"
-    assert first.json()["next_step"] == "post_payment_pending"
+    assert first.json()["next_step"] == "interaction_preference"
     assert first.json()["idempotent"] is False
 
     repeated = client.post(
@@ -489,6 +490,206 @@ def test_design_direction_reads_are_stable_and_failed_commit_rolls_back(boundary
         db.rollback()
         monkeypatch.setattr(db, "commit", original_commit)
         assert db.get(Order, order_id).design_direction is None
+
+
+def _prepare_interaction_stage(client, maker, order_id, headers):
+    _mark_deposit(client, maker, order_id, headers)
+    response = client.post(
+        f"/api/orders/{order_id}/design-direction", headers=headers,
+        json={"direction": "clean-modern"},
+    )
+    assert response.status_code == 200
+
+
+def test_interaction_preference_state_machine_and_safe_read(boundary):
+    client, maker, order_id, headers = boundary
+    _mark_deposit(client, maker, order_id, headers)
+    assert client.get(f"/api/orders/{order_id}/payment-status", headers=headers).json()["next_step"] == "design_direction"
+    assert client.post(
+        f"/api/orders/{order_id}/design-direction", headers=headers,
+        json={"direction": "clean-modern"},
+    ).status_code == 200
+    assert client.get(f"/api/orders/{order_id}/payment-status", headers=headers).json()["next_step"] == "interaction_preference"
+
+    response = client.get(f"/api/orders/{order_id}/interaction-preference", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stage"] == "interaction_preference_required"
+    assert body["contract_version"] == "v1"
+    assert body["selected_preference"] is None and body["confirmed_at"] is None
+    assert body["next_step"] == "interaction_preference"
+    assert body["available_preferences"] == [
+        {"key": "subtle", "label": "Subtle", "recommended": False},
+        {"key": "recommended", "label": "Recommended", "recommended": True},
+        {"key": "more_expressive", "label": "More expressive", "recommended": False},
+    ]
+    serialized = response.text.lower()
+    assert "brief_answers" not in serialized and "extended_brief" not in serialized
+    assert "owner@example.test" not in serialized and "payment" not in serialized
+
+    selected = client.post(
+        f"/api/orders/{order_id}/interaction-preference", headers=headers,
+        json={"preference": "recommended"},
+    )
+    assert selected.status_code == 200
+    assert selected.json()["stage"] == "interaction_preference_confirmed"
+    assert selected.json()["selected_preference"] == "recommended"
+    assert selected.json()["confirmed_at"]
+    assert selected.json()["next_step"] == "post_payment_pending"
+    assert client.get(f"/api/orders/{order_id}/payment-status", headers=headers).json()["next_step"] == "post_payment_pending"
+    restored = client.get(f"/api/orders/{order_id}/interaction-preference", headers=headers).json()
+    assert restored["selected_preference"] == "recommended"
+    assert restored["confirmed_at"] == selected.json()["confirmed_at"]
+
+
+@pytest.mark.parametrize("preference", ["subtle", "recommended", "more_expressive"])
+def test_each_interaction_preference_persists_idempotently_and_is_immutable(boundary, preference):
+    client, maker, order_id, headers = boundary
+    _prepare_interaction_stage(client, maker, order_id, headers)
+    endpoint = f"/api/orders/{order_id}/interaction-preference"
+    first = client.post(endpoint, headers=headers, json={"preference": preference})
+    assert first.status_code == 200 and first.json()["idempotent"] is False
+    confirmed_at = first.json()["confirmed_at"]
+    repeated = client.post(endpoint, headers=headers, json={"preference": preference})
+    assert repeated.status_code == 200 and repeated.json()["idempotent"] is True
+    assert repeated.json()["confirmed_at"] == confirmed_at
+    different = next(value for value in ("subtle", "recommended", "more_expressive") if value != preference)
+    conflict = client.post(endpoint, headers=headers, json={"preference": different})
+    assert conflict.status_code == 409
+    current = client.get(endpoint, headers=headers).json()
+    assert current["selected_preference"] == preference and current["confirmed_at"] == confirmed_at
+
+
+def test_interaction_preference_rejects_unknown_extra_and_missing_stage(boundary):
+    client, maker, order_id, headers = boundary
+    _mark_deposit(client, maker, order_id, headers)
+    endpoint = f"/api/orders/{order_id}/interaction-preference"
+    assert client.get(endpoint, headers=headers).status_code == 409
+    assert client.post(endpoint, headers=headers, json={"preference": "recommended"}).status_code == 409
+    assert client.post(endpoint, headers=headers, json={"preference": "automatic"}).status_code == 422
+    assert client.post(endpoint, headers=headers, json={"preference": "recommended", "package": "advanced"}).status_code == 422
+
+
+@pytest.mark.parametrize(("package", "preference"), [
+    ("starter", "subtle"),
+    ("starter", "recommended"),
+    ("starter", "more_expressive"),
+    ("business", "subtle"),
+    ("reference", "recommended"),
+    ("advanced", "more_expressive"),
+])
+def test_interaction_preference_is_package_independent(boundary, package, preference):
+    client, maker, order_id, headers = boundary
+    _prepare_interaction_stage(client, maker, order_id, headers)
+    with maker() as db:
+        order = db.get(Order, order_id)
+        order.recommended_tier = package
+        db.commit()
+    response = client.post(
+        f"/api/orders/{order_id}/interaction-preference", headers=headers,
+        json={"preference": preference},
+    )
+    assert response.status_code == 200 and response.json()["selected_preference"] == preference
+    with maker() as db:
+        order = db.get(Order, order_id)
+        assert order.recommended_tier == package
+        assert order.interaction_style is None
+
+
+def test_interaction_preference_preserves_json_and_has_no_generation_side_effects(boundary):
+    client, maker, order_id, headers = boundary
+    _prepare_interaction_stage(client, maker, order_id, headers)
+    with maker() as db:
+        order = db.get(Order, order_id)
+        extended = dict(order.extended_brief or {})
+        extended["legacy_compatibility"]["interaction_style"] = "smooth"
+        extended["legacy_compatibility"]["motion_level"] = "dynamic"
+        extended["legacy_compatibility"]["selected_effects"] = ["fade"]
+        extended["payment_boundary_v2_email"] = {"operation_state": "sent", "signature": "preserve"}
+        extended["post_payment_v2"] = {"example_interaction_signals": {"contract_version": "v1", "signals": [{"interaction_key": "hover"}]}}
+        extended["unrelated_namespace"] = {"nested": ["preserve"], "flag": True}
+        order.extended_brief = extended
+        db.commit()
+        before = deepcopy(order.extended_brief)
+        side_effects = {
+            "interaction_style": order.interaction_style,
+            "design_status": order.design_status,
+            "generation_status": order.generation_status,
+            "full_generation_started_at": order.full_generation_started_at,
+            "design_approved_at": order.design_approved_at,
+            "refund_window_started_at": order.refund_window_started_at,
+            "refund_window_expires_at": order.refund_window_expires_at,
+        }
+    response = client.post(
+        f"/api/orders/{order_id}/interaction-preference", headers=headers,
+        json={"preference": "more_expressive"},
+    )
+    assert response.status_code == 200
+    with maker() as db:
+        order = db.get(Order, order_id)
+        after = order.extended_brief
+        assert after["q2_v2"] == before["q2_v2"]
+        assert after["legacy_compatibility"] == before["legacy_compatibility"]
+        assert after["payment_boundary_v2_email"] == before["payment_boundary_v2_email"]
+        assert after["post_payment_v2"]["example_interaction_signals"] == before["post_payment_v2"]["example_interaction_signals"]
+        assert after["unrelated_namespace"] == before["unrelated_namespace"]
+        assert after["post_payment_v2"]["interaction_preference"]["value"] == "more_expressive"
+        assert "interaction_style" not in after and "motion_level" not in after
+        assert "selected_effects" not in after and "effects" not in after and "motion_effects" not in after
+        assert {
+            "interaction_style": order.interaction_style,
+            "design_status": order.design_status,
+            "generation_status": order.generation_status,
+            "full_generation_started_at": order.full_generation_started_at,
+            "design_approved_at": order.design_approved_at,
+            "refund_window_started_at": order.refund_window_started_at,
+            "refund_window_expires_at": order.refund_window_expires_at,
+        } == side_effects
+
+
+def test_interaction_preference_authorization_and_payment_gates(boundary):
+    client, maker, order_id, headers = boundary
+    _prepare_interaction_stage(client, maker, order_id, headers)
+    endpoint = f"/api/orders/{order_id}/interaction-preference"
+    assert client.get(endpoint, headers=ORIGIN).status_code == 403
+    other = client.post("/api/journey/session", headers=ORIGIN).json()["credential"]
+    assert client.get(endpoint, headers={**ORIGIN, JOURNEY_CREDENTIAL_HEADER: other}).status_code == 403
+    assert client.get(f"/api/orders/{uuid.uuid4()}/interaction-preference", headers=headers).status_code == 403
+    with maker() as db:
+        order = db.get(Order, order_id)
+        order.deposit_status = "refunded"
+        db.commit()
+    assert client.get(endpoint, headers=headers).status_code == 409
+
+
+def test_interaction_preference_rejects_legacy_order(boundary):
+    client, maker, order_id, headers = boundary
+    with maker() as db:
+        order = db.get(Order, order_id)
+        order.deposit_status = "paid"
+        order.design_direction = "clean-modern"
+        order.brief_answers = {}
+        order.extended_brief = {}
+        db.commit()
+    assert client.get(f"/api/orders/{order_id}/interaction-preference", headers=headers).status_code == 409
+
+
+def test_interaction_preference_failed_commit_rolls_back(boundary, monkeypatch):
+    client, maker, order_id, headers = boundary
+    _prepare_interaction_stage(client, maker, order_id, headers)
+    from app.journey.models import SiteFormoJourneyProject, SiteFormoVisitor
+    from app.services.interaction_preference_service import confirm_interaction_preference
+    with maker() as db:
+        binding = db.execute(select(SiteFormoJourneyProject).where(SiteFormoJourneyProject.order_id == order_id)).scalar_one()
+        visitor = db.get(SiteFormoVisitor, binding.siteformo_visitor_id)
+        original = deepcopy(db.get(Order, order_id).extended_brief)
+        original_commit = db.commit
+        monkeypatch.setattr(db, "commit", lambda: (_ for _ in ()).throw(RuntimeError("commit failure")))
+        with pytest.raises(RuntimeError, match="commit failure"):
+            confirm_interaction_preference(db, visitor, order_id, "recommended")
+        db.rollback()
+        monkeypatch.setattr(db, "commit", original_commit)
+        assert db.get(Order, order_id).extended_brief == original
 
 
 def test_signed_webhook_route_uses_persisted_attempt(boundary, monkeypatch):

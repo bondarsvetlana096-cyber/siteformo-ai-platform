@@ -35,5 +35,5 @@ class DesignDirectionStateResponse(BaseModel):
     available_directions: list[DesignDirectionOption]
     selected_direction: DesignDirectionKey | None
     confirmed_at: None = None
-    next_step: Literal["design_direction", "post_payment_pending"]
+    next_step: Literal["design_direction", "interaction_preference", "post_payment_pending"]
     idempotent: bool = False

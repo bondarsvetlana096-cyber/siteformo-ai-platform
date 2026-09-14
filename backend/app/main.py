@@ -27,6 +27,7 @@ from app.api.demo_telegram import close_telegram_runtime, configure_telegram_run
 from app.api.example_routes import router as example_router
 from app.api.leads import router as leads_router
 from app.api.journey_routes import router as journey_router
+from app.api.interaction_preference_routes import router as interaction_preference_router
 from app.api.order_routes import router as order_router
 from app.api.payment_routes import router as payment_router
 from app.api.payment_boundary_routes import router as payment_boundary_router
@@ -113,6 +114,7 @@ app.include_router(request_router)
 app.include_router(payment_router)
 app.include_router(payment_boundary_router)
 app.include_router(design_direction_router)
+app.include_router(interaction_preference_router)
 app.include_router(stripe_webhook_router)
 app.include_router(admin_routes_router)
 app.include_router(review_router)

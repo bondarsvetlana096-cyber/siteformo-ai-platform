@@ -35,7 +35,7 @@
   function validState(data){
     if(!data||data.order_id!==orderId||data.contract_version!==CONTRACT_VERSION)return false;
     if(!["design_direction_required","design_direction_confirmed"].includes(data.stage))return false;
-    if(!["design_direction","post_payment_pending"].includes(data.next_step))return false;
+    if(!["design_direction","interaction_preference","post_payment_pending"].includes(data.next_step))return false;
     if(!Array.isArray(data.available_directions)||data.available_directions.length!==EXPECTED_V1_KEYS.size)return false;
     const keys=data.available_directions.map(item=>item&&item.key);
     if(new Set(keys).size!==keys.length||keys.some(key=>!EXPECTED_V1_KEYS.has(key)))return false;
