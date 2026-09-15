@@ -7,13 +7,9 @@ from time import monotonic
 from typing import Any, Callable, Literal
 import uuid
 from pydantic import BaseModel, ConfigDict, Field
-from app.services.generator_v2_contract import build_generator_v2_input_snapshot
-from app.services.generator_v2_implementation import build_generator_v2_implementation_spec
-from app.services.generator_v2_visual import VisualImplementationInputV1, VisualImplementationPlanV1, build_visual_implementation_input, build_visual_implementation_provider_request
+from app.services.generator_v2_visual import VisualImplementationInputV1, VisualImplementationPlanV1, build_visual_implementation_provider_request
 from app.services.generator_v2_visual_provider import OpenAIVisualImplementationProviderV1, build_openai_visual_implementation_provider_v1, load_visual_planner_config_v1, VisualProviderResultV1
-from app.services.site_plan_validator import validate_site_plan_v1
-from app.services.site_planner_constraint_projection import build_planner_constraint_projection_v1
-from evals.site_planner.eval_cases import site_planner_eval_cases_v1
+from evals.generator_v2.fixtures import build_business_generator_v2_fixture
 from evals.site_planner.eval_metrics import MODEL_PRICING_PER_MILLION
 
 MAX_REAL_CALLS = 1
@@ -70,20 +66,9 @@ class VisualEvalResultV1(BaseModel):
     operation_id: str = Field(min_length=1, max_length=80)
 
 def build_business_visual_input() -> VisualImplementationInputV1:
-    cases = {item.case_id: item for item in site_planner_eval_cases_v1()}
-    context = cases["BUSINESS_THREE_PAGE"].context
-    from test_generator_v2_contract_v1 import selected
-    from test_site_planner_constraint_projection_v1 import compliant_plan
-    projection = build_planner_constraint_projection_v1(context)
-    validated = validate_site_plan_v1(context, compliant_plan(context))
-    if validated.status != "valid" or validated.plan is None: raise ValueError("synthetic fixture is not valid")
-    snapshot = build_generator_v2_input_snapshot(context=context, projection=projection, site_plan=validated.plan, planner_operation_key="a" * 64, selected_design=selected(context))
-    if snapshot.status != "READY" or snapshot.snapshot is None: raise ValueError("synthetic snapshot is not ready")
-    implementation = build_generator_v2_implementation_spec(snapshot.snapshot)
-    if implementation.status != "READY_TO_RENDER" or implementation.spec is None: raise ValueError("synthetic implementation is not ready")
-    visual_input = build_visual_implementation_input(snapshot.snapshot, implementation.spec)
-    if visual_input.status != "READY" or visual_input.input is None: raise ValueError("synthetic visual input is not ready")
-    return visual_input.input
+    fixture = build_business_generator_v2_fixture()
+    if fixture.visual_input is None: raise ValueError("synthetic visual input is not ready")
+    return fixture.visual_input
 
 def preflight_visual_eval(config: VisualEvalConfigV1, environment: Mapping[str, str] | None = None) -> VisualEvalPreflightV1:
     values = environment or {}
