@@ -18,6 +18,7 @@ from evals.site_planner.eval_checkpoint import (
     EvalManifestV1, InterruptedRunRequiresExplicitResume, read_jsonl, utc_now,
 )
 from evals.site_planner.eval_metrics import EvalCost, EvalRunMetrics, EvalUsage, estimate_cost
+from evals.site_planner.eval_diagnostics import MAX_DIAGNOSTIC_BYTES, emit_diagnostic
 from evals.site_planner.eval_report import model_summary, write_artifacts
 from tests.test_site_plan_v1 import candidate, page, reduced, section
 
@@ -393,3 +394,83 @@ def test_checkpoint_artifacts_exclude_context_secrets_and_client_text(tmp_path):
     assert '"generation_context":' not in stored.lower()
     assert case.context.business.activity.niche not in stored
     assert "api_key" not in stored.lower() and "prompt" not in stored.lower()
+
+
+def test_terminal_diagnostics_are_closed_sanitized_and_private(tmp_path):
+    case = site_planner_eval_cases_v1()[0]
+    bad = candidate(case.context)
+    bad["unresolved_items"] = [{
+        "item_key": "missing_material", "category": "content",
+        "reason_code": "missing_client_material",
+    }]
+    output = []
+    run_checkpointed(tmp_path, (case,), lambda _: ScriptedProvider([bad]), progress=output.append)
+    terminal = [line for line in output if line.startswith("SITE_PLANNER_EVAL_RUN=")]
+    assert len(terminal) == 1
+    payload = json.loads(terminal[0].split("=", 1)[1])
+    assert set(payload) == {
+        "eval_run_id", "case_id", "model", "planner_status", "first_pass_valid",
+        "final_valid", "repair_used", "manual_review", "semantic_attempt_count",
+        "transport_attempt_count", "provider_error_category", "validator_reason_codes",
+        "quality_counters", "latency_ms", "input_tokens", "cached_input_tokens",
+        "output_tokens", "reasoning_tokens", "total_tokens", "estimated_cost_usd",
+    }
+    assert "unresolved_items_present" in payload["validator_reason_codes"]
+    serialized = "\n".join(output).lower()
+    for forbidden in (
+        case.context.business.identity.name, case.context.business.activity.niche,
+        "generation_context", "api_key", "raw response", "hidden reasoning", "prompt",
+    ):
+        assert forbidden.lower() not in serialized
+
+
+@pytest.mark.parametrize("reason", [
+    "unresolved_items_present", "unsafe_self_reference", "unconfirmed_simple_logo",
+    "unsafe_critical_action_interaction", "critical_action_not_marked",
+    "unconfirmed_factual_source", "scope_conflict", "reduced_motion_missing",
+])
+def test_reason_code_diagnostic_allowlist_and_unknown_sentinel(reason):
+    metric = _metric("gpt-5.6-sol", first=False, final=False, repair=False, manual=True)
+    metric = metric.model_copy(update={"validator_reason_codes": [reason, "client prose secret"]})
+    output = []
+    from evals.site_planner.eval_diagnostics import run_diagnostic
+    emit_diagnostic("SITE_PLANNER_EVAL_RUN=", run_diagnostic("safe-run", metric), output.append)
+    payload = json.loads(output[0].split("=", 1)[1])
+    assert payload["validator_reason_codes"] == [reason, "unknown_reason_code"]
+    assert "client prose secret" not in output[0]
+
+
+def test_interruption_emits_completed_runs_and_partial_diagnostic(tmp_path):
+    cases = site_planner_eval_cases_v1()[:4]
+    output = []
+    def factory(spec):
+        if spec.case.case_id == cases[3].case_id:
+            raise KeyboardInterrupt()
+        return ScriptedProvider([candidate(spec.case.context)])
+    with pytest.raises(KeyboardInterrupt):
+        run_checkpointed(tmp_path, cases, factory, progress=output.append)
+    assert len([line for line in output if line.startswith("SITE_PLANNER_EVAL_RUN=")]) == 3
+    partials = [line for line in output if line.startswith("SITE_PLANNER_EVAL_PARTIAL=")]
+    assert partials
+    payload = json.loads(partials[-1].split("=", 1)[1])
+    assert payload["completed_entries"] == 3 and payload["remaining_entries"] == 1
+
+
+def test_complete_matrix_emits_run_lines_and_exact_final_ledger_summary(tmp_path):
+    cases = site_planner_eval_cases_v1()[:2]
+    output = []
+    run_checkpointed(tmp_path, cases, lambda spec: ScriptedProvider([candidate(spec.case.context)]), progress=output.append)
+    root = tmp_path / ".stage-artifacts" / "site-planner-eval" / "checkpoint-test"
+    ledger = read_jsonl(root / "runs.jsonl")
+    assert len([line for line in output if line.startswith("SITE_PLANNER_EVAL_RUN=")]) == len(ledger)
+    finals = [line for line in output if line.startswith("SITE_PLANNER_EVAL_FINAL=")]
+    assert len(finals) == 1
+    final = json.loads(finals[0].split("=", 1)[1])
+    assert final["completed_entries"] == len(ledger)
+    assert final["remaining_entries"] == 0
+
+
+def test_diagnostic_overflow_uses_fixed_sentinel():
+    output = []
+    emit_diagnostic("SITE_PLANNER_EVAL_FINAL=", {"eval_run_id": "safe", "models": {"x": "y" * MAX_DIAGNOSTIC_BYTES}}, output.append)
+    assert output == ['SITE_PLANNER_EVAL_FINAL={"eval_run_id":"safe","status":"diagnostic_overflow"}']

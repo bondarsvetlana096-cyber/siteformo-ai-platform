@@ -27,6 +27,7 @@ from evals.site_planner.eval_checkpoint import (
 from evals.site_planner.eval_metrics import (
     EVAL_PRICING_VERSION, EvalRunMetrics, MODEL_PRICING_PER_MILLION, collect_metrics,
 )
+from evals.site_planner.eval_diagnostics import emit_diagnostic, run_diagnostic, summary_diagnostic
 
 
 EVAL_MODELS = ("gpt-5.6-sol", "gpt-6-astra")
@@ -200,12 +201,12 @@ async def run_evaluation(
     if real_provider and not real_provider_allowed(config, environment or {}):
         raise PermissionError("both real-provider evaluation switches are required")
     specs = matrix(config, cases)
+    run_id = eval_run_id or uuid.uuid4().hex
     checkpoint: EvalCheckpointStore | None = None
     durable_required = real_provider or repository_root is not None
     if real_provider and repository_root is None:
         raise ValueError("real-provider evaluation requires a durable checkpoint repository_root")
     if durable_required:
-        run_id = eval_run_id or uuid.uuid4().hex
         checkpoint = EvalCheckpointStore(repository_root or Path.cwd(), config.artifact_directory, run_id)
         now = utc_now()
         manifest = EvalManifestV1(
@@ -240,6 +241,23 @@ async def run_evaluation(
             (datetime.now(timezone.utc) - datetime.fromisoformat(manifest.started_at)).total_seconds(),
         )
     previous_sigterm = None
+
+    def diagnostic_budget_state() -> dict[str, float | int]:
+        if checkpoint:
+            return checkpoint.budget_state()
+        return {
+            "calls_used": budget.calls if budget else 0,
+            "known_estimated_spend": budget.estimated_spend if budget else 0.0,
+            "unknown_call_reserve": 0.0,
+            "budget_committed_total": budget.estimated_spend if budget else 0.0,
+        }
+
+    def emit_summary(prefix: str) -> None:
+        emit_diagnostic(
+            prefix,
+            summary_diagnostic(run_id, tuple(completed.values()), len(specs), diagnostic_budget_state()),
+            progress,
+        )
     if checkpoint and threading.current_thread() is threading.main_thread():
         try:
             previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -293,20 +311,25 @@ async def run_evaluation(
             )
         else:
             progress(f"{position}/{len(specs)} {spec.model} {spec.case.case_id} status={metrics.planner_status}")
+        emit_diagnostic("SITE_PLANNER_EVAL_RUN=", run_diagnostic(run_id, metrics), progress)
+        emit_summary("SITE_PLANNER_EVAL_PARTIAL=")
     except DurableEvaluationBudgetExceeded:
         if checkpoint:
             checkpoint.write_summary(len(specs))
             checkpoint.update_manifest(status="aborted_budget")
+        emit_summary("SITE_PLANNER_EVAL_PARTIAL=")
         raise
     except (KeyboardInterrupt, asyncio.CancelledError):
         if checkpoint:
             checkpoint.write_summary(len(specs))
             checkpoint.update_manifest(status="interrupted")
+        emit_summary("SITE_PLANNER_EVAL_PARTIAL=")
         raise
     except BaseException:
         if checkpoint:
             checkpoint.write_summary(len(specs))
             checkpoint.update_manifest(status="failed")
+        emit_summary("SITE_PLANNER_EVAL_PARTIAL=")
         raise
     finally:
         if previous_sigterm is not None:
@@ -314,4 +337,8 @@ async def run_evaluation(
     if checkpoint and len(completed) == len(specs):
         checkpoint.write_summary(len(specs), final=True)
         checkpoint.update_manifest(status="completed", next_matrix_position=len(specs), completed_run_hashes=list(completed))
+    if len(completed) == len(specs):
+        emit_summary("SITE_PLANNER_EVAL_FINAL=")
+    elif completed:
+        emit_summary("SITE_PLANNER_EVAL_PARTIAL=")
     return tuple(results)

@@ -29,6 +29,10 @@ _BROKEN_NAVIGATION = {
     "invalid_page_reference", "unsafe_self_reference", "unreachable_page",
     "conversion_path_unreachable", "primary_conversion_path_missing",
 }
+_UNAUTHORIZED_ADDON_OR_MEDIA = {
+    "unconfirmed_simple_logo", "unconfirmed_video", "unconfirmed_client_photo",
+    "unconfirmed_siteformo_image", "unconfirmed_trust_asset", "unconfirmed_video_entry",
+}
 
 
 class EvalUsage(BaseModel):
@@ -72,7 +76,9 @@ class EvalRunMetrics(BaseModel):
     validator_reason_codes: list[str]
     hallucinated_function_count: int
     unsupported_component_count: int
+    unauthorized_addon_or_media_count: int = 0
     scope_conflict_count: int
+    persistent_system_invention_count: int = 0
     broken_navigation_count: int
     interaction_safety_violation_count: int
     mobile_coverage_failure_count: int
@@ -128,7 +134,11 @@ def collect_metrics(
         validator_reason_codes=reasons,
         hallucinated_function_count=sum(counts[reason] for reason in _HALLUCINATION),
         unsupported_component_count=counts["unsupported_functional_component"],
+        unauthorized_addon_or_media_count=sum(
+            counts[reason] for reason in _UNAUTHORIZED_ADDON_OR_MEDIA
+        ),
         scope_conflict_count=counts["scope_conflict"],
+        persistent_system_invention_count=counts["invented_persistent_system"],
         broken_navigation_count=sum(counts[reason] for reason in _BROKEN_NAVIGATION),
         interaction_safety_violation_count=sum(counts[reason] for reason in _SAFETY),
         mobile_coverage_failure_count=counts["schema_validation_failed"] if "mobile" in " ".join(reasons) else 0,
