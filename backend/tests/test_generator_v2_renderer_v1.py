@@ -7,12 +7,16 @@ import pytest
 from pydantic import ValidationError
 
 from app.services.generator_v2_implementation import build_generator_v2_implementation_spec
+from app.services.generator_v2_contract import build_generator_v2_input_snapshot
+from app.services.site_planner_constraint_projection import build_planner_constraint_projection_v1
 from app.services.generator_v2_renderer import (
     GeneratorV2RenderedSiteArtifactV1,
     render_generator_v2_site,
     validate_generator_v2_rendered_site,
 )
 from test_generator_v2_contract_v1 import make_snapshot
+from test_site_plan_v1 import candidate, page, section
+from evals.site_planner.eval_cases import site_planner_eval_cases_v1
 
 
 REPRESENTATIVE = (
@@ -81,6 +85,58 @@ def test_route_link_and_security_failures_are_deterministic():
     assert validate_generator_v2_rendered_site(spec, artifact.model_copy(update={"pages": (external,)})).status == "invalid"
     unsafe = page.model_copy(update={"route": "/../escape"})
     assert validate_generator_v2_rendered_site(spec, artifact.model_copy(update={"pages": (unsafe,)})).reason_codes == ("unsafe_route",)
+
+
+def test_multi_page_navigation_resolves_page_keys_to_rendered_routes():
+    cases = {case.case_id: case for case in site_planner_eval_cases_v1()}
+    context = cases["BUSINESS_THREE_PAGE"].context
+    plan_payload = candidate(context, pages=[
+        page("home", "home", sections=[section("hero", components=["navigation", "enquiry_form"])]),
+        page("services", "services_or_offer", sections=[section("services", components=["navigation", "enquiry_form"])]),
+        page("contact", "contact_or_enquiry", sections=[section("contact", components=["navigation", "contact_form", "enquiry_form"])]),
+    ])
+    plan_payload["cross_page_navigation"] = [
+        {"from_page_key": "home", "to_page_key": "services", "purpose": "secondary"},
+        {"from_page_key": "home", "to_page_key": "contact", "purpose": "conversion"},
+        {"from_page_key": "services", "to_page_key": "home", "purpose": "secondary"},
+        {"from_page_key": "services", "to_page_key": "contact", "purpose": "conversion"},
+        {"from_page_key": "contact", "to_page_key": "home", "purpose": "secondary"},
+        {"from_page_key": "contact", "to_page_key": "services", "purpose": "secondary"},
+    ]
+    plan_payload["pages"][0]["sections"][0]["primary_actions"][0]["target_page_key"] = "contact"
+    validated = __import__("app.services.site_plan_validator", fromlist=["validate_site_plan_v1"]).validate_site_plan_v1(context, plan_payload)
+    assert validated.status == "valid" and validated.plan is not None
+    snapshot = build_generator_v2_input_snapshot(
+        context=context,
+        projection=build_planner_constraint_projection_v1(context),
+        site_plan=validated.plan,
+        planner_operation_key="a" * 64,
+        selected_design=__import__("test_generator_v2_contract_v1", fromlist=["selected"]).selected(context),
+    )
+    implementation = build_generator_v2_implementation_spec(snapshot.snapshot)
+    assert implementation.status == "READY_TO_RENDER" and implementation.spec is not None
+    result = render_generator_v2_site(implementation.spec)
+    assert result.status == "READY" and result.artifact is not None
+    by_key = {page.page_key: page for page in result.artifact.pages}
+    assert 'href="/services"' in by_key["home"].html
+    assert 'href="/contact"' in by_key["home"].html
+    assert 'href="/"' in by_key["services"].html
+    assert 'href="/contact"' in by_key["services"].html
+    assert 'href="/"' in by_key["contact"].html
+    assert 'href="/services"' in by_key["contact"].html
+    assert 'data-siteformo-target-page="services"' in by_key["home"].html
+    assert 'data-siteformo-critical-action="enquire"' in by_key["home"].html
+    assert '<a href="/contact" data-siteformo-target-page="contact"' in by_key["home"].html
+    assert all('href="#' not in page.html for page in result.artifact.pages)
+
+
+def test_cross_page_unknown_target_fails_closed():
+    spec, _ = _artifact()
+    page = spec.pages[0].model_copy(update={"navigation_targets": ("missing",)})
+    broken = spec.model_copy(update={"pages": (page,)})
+    result = render_generator_v2_site(broken)
+    assert result.status == "NOT_RENDERABLE"
+    assert result.reason_codes == ("broken_internal_link",)
 
 
 def test_critical_markers_and_shared_foundation_are_present():

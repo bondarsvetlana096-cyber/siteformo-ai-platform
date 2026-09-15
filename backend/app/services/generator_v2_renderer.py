@@ -110,16 +110,35 @@ def _render_component(component: str) -> str:
     return f'<div data-siteformo-component="{safe}" data-siteformo-runtime="not-connected"><span data-siteformo-placeholder="true">{safe} implementation placeholder</span></div>'
 
 
-def _render_action(action) -> str:
+def _render_action(action, routes: dict[str, str]) -> str:
     label = html.escape(action.intent, quote=True)
     key = html.escape(action.action_key, quote=True)
     if action.target_page_key:
+        route = routes.get(action.target_page_key)
+        if route is None:
+            raise ValueError("broken_internal_link")
         target = html.escape(action.target_page_key, quote=True)
-        return f'<a href="#{target}" data-siteformo-critical-action="{key}" data-siteformo-critical="true">{label}</a>'
+        href = html.escape(route, quote=True)
+        return f'<a href="{href}" data-siteformo-target-page="{target}" data-siteformo-critical-action="{key}" data-siteformo-critical="true">{label}</a>'
     return f'<button type="button" data-siteformo-critical-action="{key}" data-siteformo-critical="true">{label}</button>'
 
 
-def _render_section(section: GeneratorV2ImplementationSectionSpecV1) -> str:
+def _render_navigation(targets: tuple[str, ...], routes: dict[str, str]) -> str:
+    links = []
+    for target in targets:
+        route = routes.get(target)
+        if route is None:
+            raise ValueError("broken_internal_link")
+        safe_target = html.escape(target, quote=True)
+        safe_route = html.escape(route, quote=True)
+        links.append(
+            f'<a href="{safe_route}" data-siteformo-target-page="{safe_target}">'
+            f'{safe_target}</a>'
+        )
+    return "".join(links)
+
+
+def _render_section(section: GeneratorV2ImplementationSectionSpecV1, routes: dict[str, str]) -> str:
     key = html.escape(section.section_key, quote=True)
     body = [f'<section data-siteformo-section="{key}" data-siteformo-primitive="{html.escape(section.primitive_key, quote=True)}">']
     body.append(f'<h2>{html.escape(section.purpose, quote=True)}</h2>')
@@ -133,19 +152,19 @@ def _render_section(section: GeneratorV2ImplementationSectionSpecV1) -> str:
     for component in section.functional_components:
         body.append(_render_component(component))
     for action in section.primary_actions:
-        body.append(_render_action(action))
+        body.append(_render_action(action, routes))
     body.append("</section>")
     return "".join(body)
 
 
-def _render_page(page: GeneratorV2ImplementationPageSpecV1):
-    sections = tuple(_render_section(section) for section in page.sections)
+def _render_page(page: GeneratorV2ImplementationPageSpecV1, routes: dict[str, str]):
+    sections = tuple(_render_section(section, routes) for section in page.sections)
     section_keys = tuple(section.section_key for section in page.sections)
     components = tuple(dict.fromkeys(component for section in page.sections for component in section.functional_components))
     actions = tuple(action.action_key for section in page.sections for action in section.primary_actions)
     assets = tuple(asset.asset_key for section in page.sections for asset in section.media_requirements if asset.asset_key)
     contents = tuple(content.content_key for section in page.sections for content in section.content_requirements)
-    nav = "".join(f'<a href="#{html.escape(target, quote=True)}">{html.escape(target, quote=True)}</a>' for target in page.navigation_targets)
+    nav = _render_navigation(page.navigation_targets, routes)
     page_key = html.escape(page.page_key, quote=True)
     page_html = (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -185,7 +204,22 @@ def validate_generator_v2_rendered_site(
             return GeneratorV2RenderValidationResultV1(status="invalid", reason_codes=("render_validation_failed",))
         if re.search(r"(?:href|src)=\"(?:javascript:|https?://)", page.html, re.I):
             return GeneratorV2RenderValidationResultV1(status="invalid", reason_codes=("unsupported_external_url",))
-        if any(target not in page_keys for target in re.findall(r'href="#([^\"]+)"', page.html)):
+        expected_target_pages = list(source.navigation_targets) + [
+            action.target_page_key for section in source.sections for action in section.primary_actions
+            if action.target_page_key
+        ]
+        rendered_target_pages = []
+        for anchor in re.findall(r"<a\b[^>]*>", page.html, re.I):
+            target_match = re.search(r'data-siteformo-target-page="([^\"]+)"', anchor)
+            if not target_match:
+                continue
+            href_match = re.search(r'href="([^\"]+)"', anchor)
+            target = target_match.group(1)
+            href = href_match.group(1) if href_match else ""
+            rendered_target_pages.append(target)
+            if target not in page_keys or href != expected_routes[target] or href.startswith("#"):
+                return GeneratorV2RenderValidationResultV1(status="invalid", reason_codes=("broken_internal_link",))
+        if sorted(rendered_target_pages) != sorted(expected_target_pages):
             return GeneratorV2RenderValidationResultV1(status="invalid", reason_codes=("broken_internal_link",))
         if "<main" not in page.html or "<section" not in page.html:
             return GeneratorV2RenderValidationResultV1(status="invalid", reason_codes=("render_validation_failed",))
@@ -207,9 +241,10 @@ def render_generator_v2_site(spec: GeneratorV2ImplementationSpecV1) -> Generator
             _file("assets/siteformo-v2.js", "text/javascript", SHARED_JS, "shared", "shared"),
         ]
         routes = []
+        routes_by_page_key = {page.page_key: page.route_path for page in canonical.pages}
         for page in canonical.pages:
             path = _safe_path(page.route_path)
-            page_html, sections, components, actions, assets, contents = _render_page(page)
+            page_html, sections, components, actions, assets, contents = _render_page(page, routes_by_page_key)
             page_hash = _sha({"page_key": page.page_key, "route": page.route_path, "html": page_html, "sections": sections, "components": components, "actions": actions, "assets": assets, "contents": contents})
             pages.append(GeneratorV2RenderedPageV1(
                 page_key=page.page_key, route=page.route_path, html=page_html,
@@ -236,7 +271,11 @@ def render_generator_v2_site(spec: GeneratorV2ImplementationSpecV1) -> Generator
             shared_styles=("assets/siteformo-v2.css",), shared_scripts=("assets/siteformo-v2.js",),
             route_manifest=tuple(routes), artifact_manifest=tuple(files), rendered_site_hash=_sha(material),
         )
-    except (AttributeError, ValueError, TypeError):
+    except ValueError as exc:
+        if str(exc) == "broken_internal_link":
+            return GeneratorV2RenderedSiteResultV1(status="NOT_RENDERABLE", reason_codes=("broken_internal_link",))
+        return GeneratorV2RenderedSiteResultV1(status="NOT_RENDERABLE", reason_codes=("invalid_implementation_spec",))
+    except (AttributeError, TypeError):
         return GeneratorV2RenderedSiteResultV1(status="NOT_RENDERABLE", reason_codes=("invalid_implementation_spec",))
     validation = validate_generator_v2_rendered_site(canonical, artifact)
     if validation.status != "valid":
