@@ -15,8 +15,11 @@ def init_db() -> None:
         from app.models import conversation  # noqa: F401
         from app.models import order  # noqa: F401
         from app.models import request  # noqa: F401
+        from app.models import generator_v2  # noqa: F401
+        from app.models.generator_v2 import ensure_generator_v2_snapshot_immutability
 
         AppBase.metadata.create_all(bind=app_engine)
+        ensure_generator_v2_snapshot_immutability(app_engine)
         run_order_logic_migrations(app_engine)
     except Exception as exc:
         print(f"[DB WARNING] Guided web-chat tables were not initialized. Error: {exc}")

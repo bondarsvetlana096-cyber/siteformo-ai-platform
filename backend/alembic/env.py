@@ -13,6 +13,7 @@ sys.path.insert(0, str(BASE_DIR))
 from app.core.config import settings
 from app.db.base import Base
 from app.models.request import DemoAsset, EventLog, Job, Request, UserUsage
+from app.models.generator_v2 import GeneratorV2Snapshot
 from app.assistant.models import AssistantBase
 
 config = context.config

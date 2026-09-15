@@ -79,6 +79,16 @@ def _site_plan_hash(plan: SitePlanV1, context_hash: str) -> str:
     return _sha(material)
 
 
+def _site_plan_identity(plan: SitePlanV1) -> dict:
+    """Return the plan fields that define implementation authority.
+
+    ``created_at`` is observability metadata, not canonical identity.  Keeping
+    it in the embedded snapshot while excluding it from identity hashing makes
+    persistence/replay deterministic without losing the validated snapshot.
+    """
+    return plan.model_dump(mode="json", exclude={"created_at"})
+
+
 class GeneratorV2InputSnapshotV1(ClosedModel):
     contract_version: Literal["v1"]
     order_id: str = Field(min_length=1, max_length=128)
@@ -104,7 +114,7 @@ class GeneratorV2InputSnapshotV1(ClosedModel):
         if _site_plan_hash(self.site_plan, self.generation_context_hash) != self.site_plan_hash:
             raise ValueError("site_plan_hash_mismatch")
         material = self.model_dump(mode="json", exclude={"generator_input_hash", "site_plan"})
-        material["site_plan"] = self.site_plan.model_dump(mode="json")
+        material["site_plan"] = _site_plan_identity(self.site_plan)
         if _sha(material) != self.generator_input_hash:
             raise ValueError("generator_input_hash_mismatch")
         return self
@@ -164,7 +174,7 @@ def _build_material(
         "policy_version": "v1",
         "validator_version": plan.validator_version,
         "selected_design": selected_design.model_dump(mode="json"),
-        "site_plan": plan.model_dump(mode="json"),
+        "site_plan": _site_plan_identity(plan),
         "authorized_assets": [item.model_dump(mode="json") for item in assets],
         "authorized_content": [item.model_dump(mode="json") for item in content],
     }
@@ -202,6 +212,7 @@ def build_generator_v2_input_snapshot(
             assets=authorized_assets, content=authorized_content,
         )
         payload = dict(material)
+        payload["site_plan"] = plan.model_dump(mode="json")
         payload["generator_input_hash"] = _sha(material)
         snapshot = GeneratorV2InputSnapshotV1.model_validate(payload)
     except ValueError:
