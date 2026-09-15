@@ -73,6 +73,7 @@ def _input_data(request: SitePlannerProviderRequest) -> list[dict[str, Any]]:
     data = {
         "generation_context": request.generation_context.model_dump(mode="json"),
         "generation_context_hash": request.generation_context_hash,
+        "constraint_projection": request.constraint_projection.model_dump(mode="json"),
         "attempt_type": request.attempt_type,
         "attempt_number": request.attempt_number,
         "prior_candidate_projection": (

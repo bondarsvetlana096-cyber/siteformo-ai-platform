@@ -6,7 +6,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.generation_context import GenerationContextV1, InteractionSafetyPolicy
-from app.schemas.site_plan import FunctionalComponentKey, InteractionFamily, MotionLevel, PageRole, SitePlanV1
+from app.schemas.site_plan import (
+    CriticalActionFamily, FunctionalComponentKey, InteractionFamily, MotionLevel,
+    PageRole, SitePlanV1,
+)
 
 
 class ClosedModel(BaseModel):
@@ -120,6 +123,74 @@ class PlannerPolicyV1(ClosedModel):
     max_semantic_repairs: Literal[1]
 
 
+class ProjectCriticalActionRulesV1(ClosedModel):
+    component_family_registry: dict[FunctionalComponentKey, CriticalActionFamily]
+    explicit_primary_conversion_actions_are_critical: Literal[True]
+    protected_section_must_set_critical_action_true: Literal[True]
+
+
+class ProjectStructuralConstraintsV1(ClosedModel):
+    minimum_pages: int = Field(ge=1)
+    maximum_paid_capacity_if_bounded: int | None = Field(default=None, ge=1)
+    video_entry_required: bool
+    additional_page_capacity_confirmed: int = Field(ge=0)
+
+
+class ProjectMediaConstraintsV1(ClosedModel):
+    simple_logo_allowed: bool
+    client_video_available: bool
+    siteformo_imagery_allowed: bool
+    confirmed_trust_asset_types: list[str]
+
+
+class ProjectContentConstraintsV1(ClosedModel):
+    allowed_confirmed_fact_sources: list[str]
+    generated_copy_allowed: Literal[True]
+    unresolved_items_allowed: bool
+
+
+class ProjectInteractionConstraintsV1(ClosedModel):
+    allowed_families: list[InteractionFamily]
+    critical_motion_values: list[Literal["none", "subtle", "contextual"]]
+    signature_interaction_forbidden_on_critical: Literal[True]
+    hover_only_required_forbidden: Literal[True]
+    reduced_motion_required: Literal[True]
+    touch_safe_required: Literal[True]
+
+
+class ProjectionSourceAuthorityV1(ClosedModel):
+    generation_context_contract_version: Literal["v1"]
+    package_contract_version: Literal["ireland_accepted_v1"]
+    design_direction_contract_version: Literal["v1"]
+    interaction_preference_contract_version: Literal["v1"]
+    interaction_safety_contract_version: Literal["v1"]
+    validator_version: Literal["v1"]
+    q1_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    q2_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scope_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_signals_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class PlannerConstraintProjectionV1(ClosedModel):
+    contract_version: Literal["v1"]
+    generation_context_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    allowed_page_roles: list[PageRole]
+    allowed_functional_components: list[FunctionalComponentKey]
+    forbidden_functional_components: list[FunctionalComponentKey]
+    critical_components: list[FunctionalComponentKey]
+    critical_action_rules: ProjectCriticalActionRulesV1
+    allowed_stateful_journey_families: list[
+        Literal["booking", "reservation", "ecommerce", "account", "application", "saved_items"]
+    ]
+    persistent_system_allowed: bool
+    structural_constraints: ProjectStructuralConstraintsV1
+    media_constraints: ProjectMediaConstraintsV1
+    content_constraints: ProjectContentConstraintsV1
+    interaction_constraints: ProjectInteractionConstraintsV1
+    source_authority: ProjectionSourceAuthorityV1
+    projection_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class RepairSectionProjection(ClosedModel):
     section_key: str | None
     functional_components: list[str]
@@ -154,6 +225,7 @@ class SitePlannerProviderRequest(ClosedModel):
     attempt_number: int = Field(ge=0, le=1)
     generation_context: GenerationContextV1
     generation_context_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    constraint_projection: PlannerConstraintProjectionV1
     site_plan_json_schema: dict[str, Any]
     interaction_safety_contract: InteractionSafetyPolicy
     planner_policy: PlannerPolicyV1

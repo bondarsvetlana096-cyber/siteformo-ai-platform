@@ -137,7 +137,7 @@ async def test_exact_responses_parse_request_and_safe_usage_metadata():
 
 @sync_test
 async def test_sol_and_astra_receive_identical_validator_aligned_policy():
-    ctx = context(); parsed = SitePlanV1.model_validate(candidate(ctx)); instructions = []
+    ctx = context(); parsed = SitePlanV1.model_validate(candidate(ctx)); instructions = []; projections = []
     for model in ("gpt-5.6-sol", "gpt-6-astra"):
         client = FakeClient([fake_response(parsed, model=model)])
         await OpenAISitePlannerProvider(openai_config(model=model), client).create_structured_candidate(
@@ -145,6 +145,11 @@ async def test_sol_and_astra_receive_identical_validator_aligned_policy():
         )
         call = client.responses.calls[0]
         instructions.append(call["instructions"])
+        projection = json.loads(call["input"][0]["content"][0]["text"])["constraint_projection"]
+        projections.append(projection)
+        assert projection["generation_context_hash"] == ctx.fingerprints.context_hash
+        assert projection["content_constraints"]["unresolved_items_allowed"] is False
+        assert projection["critical_action_rules"]["protected_section_must_set_critical_action_true"] is True
         authority = json.loads(call["instructions"])["planner_policy"]
         assert authority["navigation_authority"]["action_target_must_differ_from_current_page"] is True
         assert authority["logo_authority"]["simple_logo_requires_confirmed_true"] is True
@@ -152,6 +157,7 @@ async def test_sol_and_astra_receive_identical_validator_aligned_policy():
         assert authority["critical_action_policy"]["allowed_critical_motion_levels"] == ["none", "subtle", "contextual"]
         assert authority["factual_source_policy"]["confirmed_fact_requires_allowlisted_source_key"] is True
     assert instructions[0] == instructions[1]
+    assert projections[0] == projections[1]
 
 
 @sync_test

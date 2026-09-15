@@ -16,10 +16,11 @@ from app.schemas.generation_context import GenerationContextV1
 from app.schemas.site_plan import SitePlanV1
 from app.schemas.site_planner import (
     CandidateRepairProjection, FinalSitePlannerResult, PlannerAttemptMetadata,
-    RepairPageProjection, RepairSectionProjection, SitePlannerProviderRequest,
-    SitePlannerProviderResult,
+    PlannerConstraintProjectionV1, RepairPageProjection, RepairSectionProjection,
+    SitePlannerProviderRequest, SitePlannerProviderResult,
 )
 from app.services.site_plan_validator import validate_site_plan_v1
+from app.services.site_planner_constraint_projection import build_planner_constraint_projection_v1
 from app.services.site_planner_config import SitePlannerConfigV1
 from app.services.site_planner_policy import PLANNER_CONTRACT_VERSION, planner_policy_v1
 from app.services.site_planner_provider import SitePlannerProvider, SitePlannerProviderException
@@ -70,7 +71,11 @@ def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
-def planner_operation_key(context: GenerationContextV1, config: SitePlannerConfigV1) -> str:
+def planner_operation_key(
+    context: GenerationContextV1, config: SitePlannerConfigV1,
+    constraint_projection: PlannerConstraintProjectionV1 | None = None,
+) -> str:
+    constraint_projection = constraint_projection or build_planner_constraint_projection_v1(context)
     material = {
         "generation_context_hash": context.fingerprints.context_hash,
         "planner_contract_version": PLANNER_CONTRACT_VERSION,
@@ -81,6 +86,8 @@ def planner_operation_key(context: GenerationContextV1, config: SitePlannerConfi
         "provider_config_version": config.provider_config_version,
         "validator_version": "v1",
         "planning_strategy_version": config.planning_strategy_version,
+        "constraint_projection_contract_version": constraint_projection.contract_version,
+        "constraint_projection_hash": constraint_projection.projection_hash,
     }
     return hashlib.sha256(_canonical_json(material).encode("utf-8")).hexdigest()
 
@@ -156,12 +163,15 @@ def _precheck(context: GenerationContextV1, config: SitePlannerConfigV1) -> list
 
 def _request(
     context: GenerationContextV1, attempt_type: str, attempt_number: int,
+    constraint_projection: PlannerConstraintProjectionV1 | None = None,
     projection: CandidateRepairProjection | None = None, reasons: list[str] | None = None,
 ) -> SitePlannerProviderRequest:
+    constraint_projection = constraint_projection or build_planner_constraint_projection_v1(context)
     return SitePlannerProviderRequest(
         planner_contract_version="v1", site_plan_schema_version="v1", validator_version="v1",
         attempt_type=attempt_type, attempt_number=attempt_number,
         generation_context=context.model_copy(deep=True), generation_context_hash=context.fingerprints.context_hash,
+        constraint_projection=constraint_projection.model_copy(deep=True),
         site_plan_json_schema=SitePlanV1.model_json_schema(),
         interaction_safety_contract=context.constraints.interaction_safety,
         planner_policy=planner_policy_v1(), prior_candidate_projection=projection,
@@ -197,9 +207,12 @@ async def _provider_call(
             return result, calls, int((perf_counter() - started) * 1000)
 
 
-def _base_result(context: GenerationContextV1, config: SitePlannerConfigV1, started: datetime) -> dict[str, Any]:
+def _base_result(
+    context: GenerationContextV1, config: SitePlannerConfigV1, started: datetime,
+    constraint_projection: PlannerConstraintProjectionV1,
+) -> dict[str, Any]:
     return {
-        "operation_key": planner_operation_key(context, config),
+        "operation_key": planner_operation_key(context, config, constraint_projection),
         "generation_context_hash": context.fingerprints.context_hash,
         "planner_contract_version": "v1", "provider_config_version": config.provider_config_version,
         "validator_version": "v1", "provider_identifier": config.provider_identifier,
@@ -213,13 +226,15 @@ async def create_final_site_plan_v1(
     config: SitePlannerConfigV1,
     current_context_hash_verifier: ContextHashVerifier,
 ) -> FinalSitePlannerResult:
-    started = datetime.now(timezone.utc); base = _base_result(context, config, started)
+    started = datetime.now(timezone.utc)
+    constraint_projection = build_planner_constraint_projection_v1(context)
+    base = _base_result(context, config, started, constraint_projection)
     precheck = _precheck(context, config)
     if precheck:
         return FinalSitePlannerResult(status="manual_review", reason_codes=precheck, attempt_count=0, provider_call_count=0, provider_error_category=None, validated_plan=None, attempts=[], completed_at=datetime.now(timezone.utc), **base)
 
     attempts: list[PlannerAttemptMetadata] = []; semantic_attempts = 0; provider_calls = 0
-    request = _request(context, "initial", 0)
+    request = _request(context, "initial", 0, constraint_projection)
     for semantic_index in range(2):
         semantic_attempts += 1
         result, calls, latency = await _provider_call(provider, request, config); provider_calls += calls
@@ -260,6 +275,9 @@ async def create_final_site_plan_v1(
 
         if semantic_index == 1 or validation.status == "manual_review" or set(validation.reason_codes) & _NON_REPAIRABLE:
             return FinalSitePlannerResult(status="manual_review", reason_codes=validation.reason_codes, attempt_count=semantic_attempts, provider_call_count=provider_calls, provider_error_category=None, validated_plan=None, attempts=attempts, completed_at=datetime.now(timezone.utc), **base)
-        request = _request(context, "repair", 1, _repair_projection(candidate), validation.reason_codes)
+        request = _request(
+            context, "repair", 1, constraint_projection,
+            _repair_projection(candidate), validation.reason_codes,
+        )
 
     raise AssertionError("bounded semantic loop exhausted")
