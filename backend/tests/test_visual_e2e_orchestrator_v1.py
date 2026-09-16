@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -192,7 +193,7 @@ def test_missing_plan_and_traversal_export_fail_closed(tmp_path):
 
 def test_orchestrator_is_not_runtime_wired():
     import ast
-    source = open("backend/evals/visual_implementation/e2e_orchestrator.py", encoding="utf-8").read()
+    source = (Path(__file__).parents[1] / "evals/visual_implementation/e2e_orchestrator.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports = [node.module or "" for node in tree.body if isinstance(node, ast.ImportFrom)]
     assert not any(token in " ".join(imports).lower() for token in ("openai", "redis", "worker", "queue", "database"))
