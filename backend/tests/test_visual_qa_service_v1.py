@@ -186,18 +186,52 @@ def test_duplicate_and_restart_never_resume_action(tmp_path):
         thread.join(2)
 
 
-def test_authorization_writer_is_atomic_private_and_never_returns_nonce(tmp_path):
+def test_authorization_writer_generates_256_bit_nonce_atomically_and_privately(monkeypatch, tmp_path):
     control = tmp_path / "control"
+    generated = "ab" * 32
+    calls = []
+
+    def token_hex(byte_count):
+        calls.append(byte_count)
+        return generated
+
+    monkeypatch.setattr(qa_service.secrets, "token_hex", token_hex)
     path = qa_service.write_business_authorization(
         control_directory=control, run_id="safe-run", source_identity="sha",
-        authorized_instance_id="replica-a", authorization_nonce="ab" * 32,
+        authorized_instance_id="replica-a",
     )
     assert path == control / qa_service.AUTHORIZATION_FILENAME
-    assert qa_service._read_secure_authorization(path).authorization_nonce == "ab" * 32
+    assert calls == [32]
+    assert qa_service._read_secure_authorization(path).authorization_nonce == generated
     assert not list(control.glob("*.tmp"))
     if os.name != "nt":
         assert path.stat().st_mode & 0o777 == 0o600
         assert control.stat().st_mode & 0o777 == 0o700
+
+
+def test_authorization_cli_never_reads_or_exposes_nonce(monkeypatch, tmp_path, capsys):
+    generated = "9b" * 32
+
+    class ForbiddenStdin:
+        def __getattr__(self, name):
+            raise AssertionError(f"stdin access forbidden: {name}")
+
+    monkeypatch.setattr(qa_service.secrets, "token_hex", lambda byte_count: generated if byte_count == 32 else None)
+    monkeypatch.setattr(qa_service.sys, "stdin", ForbiddenStdin())
+    arguments = [
+        "--authorize-business", "--run-id", "cli-safe-run",
+        "--source-identity", "source-sha", "--authorized-instance-id", "replica-a",
+        "--control-directory", str(tmp_path / "control"),
+    ]
+    assert generated not in arguments
+    assert qa_service.main(arguments) == 0
+    captured = capsys.readouterr()
+    assert generated not in captured.out and generated not in captured.err
+    assert "Authorization nonce" not in captured.out + captured.err
+    assert json.loads(captured.out) == {"run_id": "cli-safe-run", "status": "AUTHORIZATION_WRITTEN"}
+    assert qa_service._read_secure_authorization(
+        tmp_path / "control" / qa_service.AUTHORIZATION_FILENAME
+    ).authorization_nonce == generated
 
 
 def test_startup_removes_stale_internal_raw_authorization(tmp_path):
@@ -217,8 +251,12 @@ def test_startup_removes_stale_internal_raw_authorization(tmp_path):
         thread.join(2)
 
 
-def test_idle_control_file_runs_fake_business_once_and_primary_survives(tmp_path):
+def test_idle_control_file_runs_fake_business_once_and_primary_survives(monkeypatch, tmp_path):
     env = _idle_env(tmp_path)
+    generated = "cd" * 32
+    monkeypatch.setattr(
+        qa_service.secrets, "token_hex", lambda byte_count: generated if byte_count == 32 else None
+    )
     process = _start(tmp_path / "state", env, "--fake-business-for-test")
     try:
         initial = _wait(tmp_path / "state", {"IDLE"})
@@ -226,12 +264,11 @@ def test_idle_control_file_runs_fake_business_once_and_primary_survives(tmp_path
         qa_service.write_business_authorization(
             control_directory=tmp_path / "control", run_id="control-fake",
             source_identity="test-sha", authorized_instance_id="replica-a",
-            authorization_nonce="cd" * 32,
         )
         final = _wait(tmp_path / "state", {"VALID_RENDERED", "PROCESS_FAILURE"}, 15)
         assert final.action_status == "VALID_RENDERED"
         assert final.authorization_consumed is True
-        assert final.authorization_nonce_hash == hashlib.sha256(("cd" * 32).encode()).hexdigest()
+        assert final.authorization_nonce_hash == hashlib.sha256(generated.encode()).hexdigest()
         assert final.provider_call_count == 1
         verified = verify_visual_qa_export(tmp_path / "state" / "runs" / "control-fake" / "export")
         assert verified.c3_status == "VALID" and verified.c4b_status == "READY"
@@ -240,6 +277,46 @@ def test_idle_control_file_runs_fake_business_once_and_primary_survives(tmp_path
         assert not list((tmp_path / "control").glob(".consumed.*"))
     finally:
         _terminate(process)
+
+
+def test_raw_authorization_is_removed_before_provider_construction(monkeypatch, tmp_path):
+    env = _idle_env(tmp_path)
+    generated = "7c" * 32
+    control = tmp_path / "control"
+    root = tmp_path / "state"
+    original_provider_factory = qa_service._fake_provider_for_test
+    provider_constructed = threading.Event()
+
+    def guarded_provider_factory():
+        assert not (control / qa_service.AUTHORIZATION_FILENAME).exists()
+        assert not list(control.glob(".consumed.*"))
+        state_text = (root / "qa_service_state.json").read_text(encoding="utf-8")
+        claim_text = (root / "claims" / "ordering-run.json").read_text(encoding="utf-8")
+        assert generated not in state_text and generated not in claim_text
+        assert hashlib.sha256(generated.encode()).hexdigest() in state_text
+        provider_constructed.set()
+        return original_provider_factory()
+
+    monkeypatch.setattr(qa_service.secrets, "token_hex", lambda _byte_count: generated)
+    monkeypatch.setattr(qa_service, "_fake_provider_for_test", guarded_provider_factory)
+    stop = threading.Event()
+    thread = threading.Thread(target=qa_service.run_qa_service, kwargs={
+        "environment": env, "root": root, "stop_event": stop,
+        "fake_business_for_test": True, "heartbeat_seconds": 0.02,
+    })
+    thread.start()
+    try:
+        _wait(root, {"IDLE"})
+        qa_service.write_business_authorization(
+            control_directory=control, run_id="ordering-run",
+            source_identity="test-sha", authorized_instance_id="replica-a",
+        )
+        final = _wait(root, {"VALID_RENDERED", "PROCESS_FAILURE"}, 15)
+        assert final.action_status == "VALID_RENDERED"
+        assert provider_constructed.is_set() and final.provider_call_count == 1
+    finally:
+        stop.set()
+        thread.join(2)
 
 
 def test_replacement_without_ephemeral_file_remains_idle(tmp_path):
@@ -255,7 +332,6 @@ def test_replacement_without_ephemeral_file_remains_idle(tmp_path):
         qa_service.write_business_authorization(
             control_directory=tmp_path / "control", run_id="instance-a-run",
             source_identity="test-sha", authorized_instance_id="replica-a",
-            authorization_nonce="01" * 32,
         )
         assert _wait(tmp_path / "a", {"VALID_RENDERED"}, 12).provider_call_count == 1
     finally:
@@ -315,7 +391,6 @@ def test_consumed_authorization_cannot_replay(tmp_path):
         kwargs = {
             "control_directory": tmp_path / "control", "run_id": "one-shot",
             "source_identity": "test-sha", "authorized_instance_id": "replica-a",
-            "authorization_nonce": "ef" * 32,
         }
         qa_service.write_business_authorization(**kwargs)
         first = _wait(tmp_path / "state", {"VALID_RENDERED"}, 12)
@@ -453,7 +528,6 @@ def test_control_file_cannot_bypass_disabled_provider_switches(monkeypatch, tmp_
         qa_service.write_business_authorization(
             control_directory=tmp_path / "control", run_id="switch-refused",
             source_identity="test-sha", authorized_instance_id="replica-a",
-            authorization_nonce="23" * 32,
         )
         state = _wait(tmp_path / "state", {"AUTHORIZATION_REFUSED"})
         assert state.reason_codes == ("provider_switches_disabled",)

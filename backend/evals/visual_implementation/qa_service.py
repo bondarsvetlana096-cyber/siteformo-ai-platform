@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import getpass
 import hashlib
 import json
 import os
+import secrets
 import signal
 import stat
 import sys
@@ -175,12 +175,13 @@ def _read_secure_authorization(path: Path) -> VisualQABusinessAuthorizationV1:
 
 def write_business_authorization(
     *, control_directory: str | Path, run_id: str, source_identity: str,
-    authorized_instance_id: str, authorization_nonce: str,
+    authorized_instance_id: str,
 ) -> Path:
-    """Atomically publish a one-shot authorization without printing its nonce."""
+    """Generate and atomically publish a one-shot authorization without exposing its nonce."""
     directory = Path(control_directory)
     _prepare_control_directory(directory)
     now = datetime.now(timezone.utc)
+    authorization_nonce = secrets.token_hex(32)
     authorization = VisualQABusinessAuthorizationV1(
         run_id=run_id, source_identity=source_identity,
         authorized_instance_id=authorized_instance_id,
@@ -370,10 +371,12 @@ def run_qa_service(
                            action="business_e2e", run_id=authorization.run_id,
                            authorization_consumed=True)
                     return
+                authorized_run_id = authorization.run_id
                 consumed.unlink()
-                persist(action="business_e2e", run_id=authorization.run_id,
+                del authorization
+                persist(action="business_e2e", run_id=authorized_run_id,
                         authorization_consumed=True, authorization_nonce_hash=nonce_hash)
-                execute_business(authorization.run_id, nonce_hash)
+                execute_business(authorized_run_id, nonce_hash)
                 discard_later_authorizations()
                 return
             except (ValueError, json.JSONDecodeError) as error:
@@ -451,13 +454,11 @@ def main(argv: list[str] | None = None) -> int:
         missing = [name for name, value in required.items() if not value]
         if missing:
             parser.error(f"required with --authorize-business: {', '.join(missing)}")
-        nonce = getpass.getpass("Authorization nonce: ") if sys.stdin.isatty() else sys.stdin.readline().rstrip("\r\n")
         directory = Path(args.control_directory) if args.control_directory else _default_control_directory()
         write_business_authorization(
             control_directory=directory, run_id=args.run_id,
             source_identity=args.source_identity,
             authorized_instance_id=args.authorized_instance_id,
-            authorization_nonce=nonce,
         )
         print(json.dumps({"status": "AUTHORIZATION_WRITTEN", "run_id": args.run_id}, sort_keys=True))
         return 0
