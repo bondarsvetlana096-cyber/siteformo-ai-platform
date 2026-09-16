@@ -22,7 +22,9 @@ from openai import (
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator, model_validator
 
 from app.services.generator_v2_visual import (
+    VisualImplementationCandidateV1,
     VisualImplementationPlanV1,
+    accept_visual_implementation_candidate,
     VisualImplementationProviderRequestV1,
     validate_visual_implementation_plan_v1,
 )
@@ -237,7 +239,7 @@ class OpenAIVisualImplementationProviderV1:
             response = await _bounded(self._client.responses.parse(
                 model=self._config.model,
                 instructions=_instructions(), input=_input(request),
-                text_format=VisualImplementationPlanV1,
+                text_format=VisualImplementationCandidateV1,
                 reasoning={"effort": self._config.reasoning_effort},
                 max_output_tokens=self._config.max_output_tokens,
                 tools=[], store=False, stream=False, truncation="disabled",
@@ -258,7 +260,8 @@ class OpenAIVisualImplementationProviderV1:
             parsed = getattr(response, "output_parsed", None)
             if parsed is None:
                 return VisualProviderResultV1(status="provider_failure", error_category="empty_response", **base)
-            plan = parsed if isinstance(parsed, VisualImplementationPlanV1) else VisualImplementationPlanV1.model_validate(parsed)
+            candidate = parsed if isinstance(parsed, VisualImplementationCandidateV1) else VisualImplementationCandidateV1.model_validate(parsed)
+            plan = accept_visual_implementation_candidate(request.input, candidate)
             validation = validate_visual_implementation_plan_v1(request.input, plan)
             if validation.status != "VALID":
                 return VisualProviderResultV1(status="manual_review", error_category="invalid_visual_plan",

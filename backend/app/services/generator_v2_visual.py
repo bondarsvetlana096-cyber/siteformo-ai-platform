@@ -148,7 +148,7 @@ class VisualPagePlanV1(_ClosedFrozen):
     sections: tuple[VisualSectionPlanV1, ...]
 
 
-class VisualImplementationPlanV1(_ClosedFrozen):
+class VisualImplementationCandidateV1(_ClosedFrozen):
     contract_version: Literal["v1"]
     generator_input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     implementation_spec_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -160,6 +160,10 @@ class VisualImplementationPlanV1(_ClosedFrozen):
     structural_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     global_style: VisualGlobalStyleV1
     pages: tuple[VisualPagePlanV1, ...] = Field(min_length=1)
+
+
+class VisualImplementationPlanV1(VisualImplementationCandidateV1):
+    """Server-accepted visual plan; the identity hash is server-derived."""
     visual_plan_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -305,6 +309,21 @@ def _visual_plan_material(plan: dict) -> dict:
     return material
 
 
+def derive_visual_plan_hash(plan: VisualImplementationCandidateV1 | VisualImplementationPlanV1) -> str:
+    """Derive identity from canonical visual decisions, excluding the identity itself."""
+    return _sha(_visual_plan_material(plan.model_dump(mode="json")))
+
+
+def accept_visual_implementation_candidate(
+    visual_input: VisualImplementationInputV1,
+    candidate: VisualImplementationCandidateV1,
+) -> VisualImplementationPlanV1:
+    """Attach the server-owned identity after typed candidate validation."""
+    payload = candidate.model_dump(mode="json")
+    payload["visual_plan_hash"] = derive_visual_plan_hash(candidate)
+    return VisualImplementationPlanV1.model_validate(payload)
+
+
 def build_default_visual_implementation_plan(
     visual_input: VisualImplementationInputV1,
 ) -> VisualImplementationPlanV1:
@@ -346,8 +365,7 @@ def build_default_visual_implementation_plan(
         "structural_fingerprint": visual_input.structural_fingerprint,
         "global_style": global_style.model_dump(mode="json"), "pages": [page.model_dump(mode="json") for page in pages],
     }
-    payload = dict(material); payload["visual_plan_hash"] = _sha(material)
-    return VisualImplementationPlanV1.model_validate(payload)
+    return accept_visual_implementation_candidate(visual_input, VisualImplementationCandidateV1.model_validate(material))
 
 
 def validate_visual_implementation_plan_v1(
@@ -388,8 +406,7 @@ def validate_visual_implementation_plan_v1(
                 return VisualImplementationPlanValidationResultV1(status="INVALID", reason_codes=("unauthorized_asset",))
             if tuple(section.content_reference_keys) != tuple(source.content_reference_keys):
                 return VisualImplementationPlanValidationResultV1(status="INVALID", reason_codes=("unauthorized_content",))
-    material = canonical.model_dump(mode="json"); material.pop("visual_plan_hash", None)
-    if _sha(material) != canonical.visual_plan_hash:
+    if derive_visual_plan_hash(canonical) != canonical.visual_plan_hash:
         return VisualImplementationPlanValidationResultV1(status="INVALID", reason_codes=("visual_plan_hash_mismatch",))
     return VisualImplementationPlanValidationResultV1(status="VALID")
 

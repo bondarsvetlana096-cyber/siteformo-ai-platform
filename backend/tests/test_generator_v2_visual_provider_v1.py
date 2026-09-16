@@ -81,11 +81,14 @@ def test_environment_values_are_typed_fail_closed(name, value):
 
 def test_fake_business_plan_is_valid_and_request_has_structured_boundary():
     request, plan = visual_request()
-    client = FakeClient(response(plan))
+    bad_hash_plan = plan.model_copy(update={"visual_plan_hash": "0" * 64})
+    client = FakeClient(response(bad_hash_plan))
     result = asyncio.run(OpenAIVisualImplementationProviderV1(config(), client).create_visual_plan(request))
-    assert result.status == "valid" and result.plan == plan
+    assert result.status == "valid" and result.plan is not None
+    assert result.plan.visual_plan_hash == plan.visual_plan_hash
     call = client.responses.calls[0]
-    assert call["model"] == "gpt-5.6-sol" and call["text_format"].__name__ == "VisualImplementationPlanV1"
+    assert call["model"] == "gpt-5.6-sol" and call["text_format"].__name__ == "VisualImplementationCandidateV1"
+    assert "visual_plan_hash" not in call["text_format"].model_fields
     assert call["reasoning"] == {"effort": "medium"}
     assert call["tools"] == [] and call["store"] is False and call["stream"] is False
     assert call["truncation"] == "disabled" and "temperature" not in call and "top_p" not in call

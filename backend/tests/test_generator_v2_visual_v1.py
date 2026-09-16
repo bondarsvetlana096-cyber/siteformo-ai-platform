@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from app.services.generator_v2_implementation import build_generator_v2_implementation_spec
 from app.services.generator_v2_visual import (
+    VisualImplementationCandidateV1,
     VisualImplementationPlanV1,
     VisualImplementationProviderRequestV1,
     build_default_visual_implementation_plan,
@@ -15,6 +16,7 @@ from app.services.generator_v2_visual import (
     build_visual_implementation_provider_request,
     validate_visual_implementation_plan_v1,
     structural_fingerprint,
+    derive_visual_plan_hash,
 )
 from test_generator_v2_contract_v1 import make_snapshot
 
@@ -137,6 +139,16 @@ def test_visual_plan_hash_detects_mutation_and_is_order_independent():
     section = plan.pages[0].sections[0].model_copy(update={"density": "airy"})
     changed = plan.model_copy(update={"pages": (plan.pages[0].model_copy(update={"sections": (section,)}),)})
     assert validate_visual_implementation_plan_v1(visual_input, changed).reason_codes == ("visual_plan_hash_mismatch",)
+
+
+def test_visual_plan_hash_is_server_derived_and_candidate_cannot_supply_identity():
+    _, _, visual_input, plan = _visual()
+    candidate_payload = plan.model_dump(mode="json")
+    candidate_payload.pop("visual_plan_hash")
+    candidate = VisualImplementationCandidateV1.model_validate(candidate_payload)
+    assert derive_visual_plan_hash(candidate) == plan.visual_plan_hash
+    with pytest.raises(ValidationError):
+        VisualImplementationCandidateV1.model_validate({**candidate_payload, "visual_plan_hash": "0" * 64})
 
 
 def test_provider_request_is_closed_and_contains_only_visual_boundary():
