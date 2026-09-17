@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from threading import BoundedSemaphore, Lock
+import hashlib
+import time
+import uuid
 from html import escape
 from typing import Any
 
@@ -14,8 +18,10 @@ from app.models.order import FinalPackage, Order, OrderStatus
 from app.schemas.order import ApprovalResponse, IntakePayload, IntakeResponse, Q1ProjectRequest, Q1ProjectResponse, Q1V2Payload, Q1V2Response, Q2V2Payload, Q2V2Response
 from app.journey.identity import JOURNEY_CREDENTIAL_HEADER
 from app.journey.service import JourneyCredentialError, require_journey_visitor
-from app.services.q1_service import Q1OwnershipError, ensure_project, save_q1
+from app.services.q1_service import Q1OwnershipError, ensure_project, project_binding, save_q1
 from app.services.q2_service import save_q2
+from app.schemas.existing_website_analysis import ExistingWebsiteAnalysisRequestV2, ExistingWebsiteAnalysisV2
+from app.services.existing_website_analyzer_v2 import analyze_existing_website, pinned_transport, system_resolver, ANALYZER_VERSION
 from app.services.approval_service import ApprovalService
 from app.services.intake_service import IntakeService
 from app.services.launch_link_service import LaunchLinkService
@@ -26,6 +32,12 @@ from app.services.generation_queue_service import create_generation_job
 from app.services.review_service import apply_creative_payload, package_revision_rounds
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
+
+_ANALYZER_GLOBAL = BoundedSemaphore(3)
+_ANALYZER_LOCK = Lock()
+_ANALYZER_IN_FLIGHT: set[str] = set()
+_ANALYZER_ATTEMPTS: dict[str, list[float]] = {}
+_ANALYZER_CACHE: dict[str, tuple[float, dict]] = {}
 
 
 def _is_v2_project(order: Order) -> bool:
@@ -345,6 +357,60 @@ def update_q1(
     except Q1OwnershipError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from None
     return Q1V2Response(order_id=order_id, journey_id=str(visitor.id), flow_version="q1_v2", schema_version=2, idempotent=repeated)
+
+
+@router.post("/{order_id}/q1/existing-website-analysis", response_model=ExistingWebsiteAnalysisV2)
+def analyze_q1_existing_website(
+    order_id: str,
+    payload: ExistingWebsiteAnalysisRequestV2,
+    request: Request,
+    db: Session = Depends(get_db),
+    credential: str | None = Header(default=None, alias=JOURNEY_CREDENTIAL_HEADER),
+):
+    visitor = _questionnaire_visitor(request, db, credential)
+    try:
+        project_binding(db, visitor, order_id)
+    except Q1OwnershipError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
+    order = db.get(Order, order_id)
+    if order is None or order.status != OrderStatus.DRAFT:
+        raise HTTPException(status_code=403, detail="Only the current draft project may be analyzed")
+    q1 = dict(order.brief_answers or {}).get("q1_v2")
+    existing = q1.get("existing_website") if isinstance(q1, dict) else None
+    stored_url = existing.get("url") if isinstance(existing, dict) and existing.get("has_existing_website") is True else None
+    if not stored_url or stored_url.strip() != payload.url.strip():
+        raise HTTPException(status_code=409, detail="Analysis URL must match the saved Q1 existing website")
+    visitor_key = str(visitor.id); now=time.time()
+    with _ANALYZER_LOCK:
+        cache_key=hashlib.sha256((ANALYZER_VERSION+"|"+payload.url.strip()).encode()).hexdigest()
+        cached=_ANALYZER_CACHE.get(cache_key)
+        # An identical, still-valid result is a read-only idempotent replay. It
+        # neither spends an attempt nor consumes another project success.
+        if cached and now-cached[0]<21600:
+            rebound={**cached[1],"order_id":order_id,"analysis_id":str(uuid.uuid4())}
+            return ExistingWebsiteAnalysisV2.model_validate(rebound)
+        attempts=[item for item in _ANALYZER_ATTEMPTS.get(visitor_key,[]) if now-item<3600]
+        if len(attempts)>=6: raise HTTPException(status_code=429, detail="Analysis attempt limit reached")
+        attempts.append(now); _ANALYZER_ATTEMPTS[visitor_key]=attempts
+        if order_id in _ANALYZER_IN_FLIGHT: raise HTTPException(status_code=409, detail="Analysis already in progress")
+        internal=dict(order.brief_answers or {}).get("existing_website_analysis_v2_meta") or {}
+        if int(internal.get("successful_count",0))>=3: raise HTTPException(status_code=429, detail="Project analysis limit reached")
+        _ANALYZER_IN_FLIGHT.add(order_id)
+    try:
+        with _ANALYZER_GLOBAL:
+            result=analyze_existing_website(order_id,payload.url,system_resolver,pinned_transport)
+        brief=dict(order.brief_answers or {})
+        # Phase 1 storage is isolated from the live Q1 V2 payload until frontend integration.
+        brief["existing_website_analysis_v2"]=result.model_dump(mode="json")
+        successful=result.status in {"COMPLETE","PARTIAL"}; internal=dict(brief.get("existing_website_analysis_v2_meta") or {})
+        internal["successful_count"]=int(internal.get("successful_count",0))+(1 if successful else 0); brief["existing_website_analysis_v2_meta"]=internal
+        order.brief_answers=brief; db.commit()
+        if successful:
+            safe=result.model_dump(mode="json"); safe.pop("order_id",None); safe.pop("analysis_id",None)
+            with _ANALYZER_LOCK: _ANALYZER_CACHE[cache_key]=(now,safe)
+        return result
+    finally:
+        with _ANALYZER_LOCK: _ANALYZER_IN_FLIGHT.discard(order_id)
 
 
 @router.patch("/{order_id}/q2", response_model=Q2V2Response)
