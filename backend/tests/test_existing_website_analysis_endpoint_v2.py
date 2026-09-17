@@ -120,3 +120,14 @@ def test_persisted_contract_contains_no_raw_or_future_authority(owned):
     for forbidden in ("raw_html","recommended_package","production_risk","eligibility","future_pages","confirmed_function","authorized_material"):
         assert forbidden not in flattened
     assert all(item["reuse_authority"]=="UNCONFIRMED" for item in result["materials"]["candidates"])
+
+def test_closed_analysis_can_be_persisted_inside_q1_existing_website(owned):
+    client,headers,order_id,maker=owned
+    analysis=client.post(endpoint(order_id),headers=headers,json={"url":"https://example.test"}).json()
+    payload=q1();payload["existing_website"]["analysis"]=analysis
+    saved=client.patch(f"/api/orders/{order_id}/q1",headers=headers,json=payload)
+    assert saved.status_code==200
+    with maker() as db:
+        order=db.get(__import__("app.models.order",fromlist=["Order"]).Order,order_id)
+        nested=order.brief_answers["q1_v2"]["existing_website"]["analysis"]
+        assert nested["contract_version"]=="existing_website_analysis_v2" and nested["order_id"]==order_id

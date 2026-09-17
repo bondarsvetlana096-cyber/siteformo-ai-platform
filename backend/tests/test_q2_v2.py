@@ -36,7 +36,7 @@ def q1_payload():
     return {
         "flow_version": "q1_v2", "schema_version": 2, "project_class_intent": "business_site",
         "preferred_contact": {"channel": "email", "value": "owner@example.test", "normalized_value": "owner@example.test", "purpose": "operational_communication", "display_on_generated_website": False},
-        "existing_website": {"has_existing_website": True, "url": "https://example.test", "analysis": {"source": "existing_website", "status": "unconfirmed", "data": {"business_hints": ["electrical services"], "function_hints": ["booking"], "complexity_hints": ["rich navigation"]}}},
+        "existing_website": {"has_existing_website": True, "url": "https://example.test", "analysis": None},
         "examples_context": {"selected_example_id": "business1", "visual_dna": {"tone": "clean"}},
         "package_browsing_context": {"package_key": "advanced", "source": "example"},
         "package_qualification": {"status": "unqualified", "candidate_package": None, "source": None},
@@ -103,8 +103,10 @@ def test_same_journey_same_order_q1_preserved_and_idempotent():
             assert order.status == OrderStatus.DRAFT
             assert order.brief_answers["q1_v2"]["project_class_intent"] == "business_site"
             assert order.extended_brief["q2_v2"]["flow_version"] == "q2_v2"
-            assert order.extended_brief["q2_v2"]["analysis_hints"]["business_hints"] == ["electrical services"]
-            assert order.extended_brief["q2_v2"]["analysis_hints"]["status"] == "unconfirmed"
+            # Phase 2 stores closed Analyzer V2 evidence in Q1; Q2 consumption
+            # remains intentionally unimplemented until the separate Q2 task.
+            assert order.extended_brief["q2_v2"]["analysis_hints"]["business_hints"] == []
+            assert order.extended_brief["q2_v2"]["analysis_hints"]["status"] is None
             assert order.extended_brief["legacy_compatibility"]["pages"][0]["source"] == "pre_stripe_scope_planner"
             assert order.extended_brief["legacy_compatibility"]["visual_dna"] == {"tone": "clean"}
             assert len(db.execute(select(Order)).scalars().all()) == 1

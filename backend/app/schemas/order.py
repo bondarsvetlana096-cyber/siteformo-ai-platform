@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.existing_website_analysis import ExistingWebsiteAnalysisV2
+
 
 class ReferenceSiteInput(BaseModel):
     url: str
@@ -62,12 +64,6 @@ class PreferredContactV2(BaseModel):
     normalized_value: str = Field(min_length=1, max_length=320)
     purpose: Literal["operational_communication"] = "operational_communication"
     display_on_generated_website: Literal[False] = False
-
-
-class ExistingWebsiteAnalysisV2(BaseModel):
-    source: Literal["existing_website"] = "existing_website"
-    status: Literal["unconfirmed"] = "unconfirmed"
-    data: dict = Field(default_factory=dict)
 
 
 class ExistingWebsiteV2(BaseModel):
