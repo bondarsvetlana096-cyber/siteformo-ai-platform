@@ -107,13 +107,65 @@ def test_explicit_new_project_allows_multiple_orders_without_ambiguous_current()
 
 def test_frontend_contract_and_sleeping_assistant():
     source=(Path(__file__).parents[2]/"frontend"/"q1_v2_WPCode.html").read_text(encoding="utf-8")
-    for step in ("q1_intro","q1_project_type","q1_contact","q1_existing_website","q1_complete"): assert step in source
-    assert "Question ${map[state.current_step]} of 3" in source
-    assert "Redesign existing website" not in source and "qualified_package" not in source
-    assert "/api/orders/intake" not in source
-    assert 'if(state.current_step==="q1_intro"){try{await journey()}' in source
+    assert 'STEPS=["intro","q1","q2","q3","complete"]' in source
+    assert 'aria-label="Question ${n} of 3"' in source
+    for value in ("one_page", "business_site", "ecommerce_catalog", "online_service_platform", "unsure"):
+        assert value in source
+    for value in ("whatsapp", "telegram", "email"):
+        assert value in source
+    assert "display_on_generated_website:false" in source
+    assert 'purpose:"operational_communication"' in source
+    assert 'existing_website:{has_existing_website:null,url:null,analysis:null}' in source
+    assert 'analysis:null' in source and 'status:"unqualified"' in source
+    assert "/api/journey/session" in source
+    assert "/api/orders/q1/project" in source
+    assert '/api/orders/${encodeURIComponent(state.journey.order_id)}/q1' in source
+    assert '"X-SiteFormo-Visitor"' in source
+    assert 'Q2_URL="/extended-questionnaire/"' in source
+    assert 'entry:"q1_v2"' in source
     assert "/api/assistant/session" not in source and "/api/assistant/message" not in source
-    assert "display_on_generated_website:false" in source and "overflow-x:clip" in source
+    assert "overflow-x:clip" in source and "prefers-reduced-motion:reduce" in source
+
+
+def test_frontend_has_only_approved_three_question_authority():
+    source=(Path(__file__).parents[2]/"frontend"/"q1_v2_WPCode.html").read_text(encoding="utf-8")
+    assert "What kind of website are you looking for?" in source
+    assert "How should SiteFormo contact you?" in source
+    assert "Do you already have a website?" in source
+    assert "Website URL" in source
+    forbidden=(
+        "/api/orders/intake", "siteformo_openai_brief", "Redesign existing website",
+        "optional note", "Skip this website question", "qualified_package",
+        "siteformo_q1_v41", "siteformo_q1_v40", "siteformo_q1_v34",
+        "test-contact", "owner alert", "synthetic order",
+    )
+    for token in forbidden:
+        assert token not in source
+    assert "alert(" not in source
+
+
+def test_frontend_examples_resume_and_review_are_fail_closed():
+    source=(Path(__file__).parents[2]/"frontend"/"q1_v2_WPCode.html").read_text(encoding="utf-8")
+    assert 'DRAFT_KEY="siteformo_q1_v2_draft"' in source
+    assert '"siteformo_source_example_payload","siteformo_example_tracking"' in source
+    assert "document.title" not in source
+    assert 'selected_example_id:"example-owner-review"' in source
+    assert 'if(REVIEW_MODE){state.journey={journey_id:"journey-review",order_id:"order-review"' in source
+    assert 'Saved in local review mode. No production request was sent.' in source
+
+
+def test_frontend_validation_accessibility_and_safe_redirect_contract():
+    source=(Path(__file__).parents[2]/"frontend"/"q1_v2_WPCode.html").read_text(encoding="utf-8")
+    assert 'role="radiogroup"' in source and 'role="radio"' in source
+    assert 'role="alert" aria-live="assertive"' in source
+    assert ":focus-visible" in source
+    assert "^\\+[1-9]\\d{7,14}$" in source
+    assert "^@[A-Za-z0-9_]{5,32}$" in source
+    assert "u.hostname.includes" in source
+    assert "order_id:state.journey.order_id" in source
+    assert "project_class_intent:state.project_class_intent" in source
+    redirect=source[source.index("function redirectUrl()"):source.index("async function submit()")]
+    assert "preferred_contact" not in redirect and "normalized_value" not in redirect
 
 
 def test_project_lifecycle_on_postgresql():
