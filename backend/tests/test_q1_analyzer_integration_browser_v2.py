@@ -15,7 +15,7 @@ SOURCE=(Path(__file__).parents[2]/"frontend"/"q1_v2_WPCode.html").read_text(enco
 def result(status="COMPLETE",failure=None,flags=None):
     return {"contract_version":"existing_website_analysis_v2","status":status,"safe_failure_code":failure,"clarification_flags":flags or []}
 
-def run_flow(analysis,choose_yes=True,second_continue=False):
+def run_flow(analysis,choose_yes=True,second_continue=False,analyzer_status=200):
     requests=[]
     with sync_playwright() as pw:
         try:browser=pw.chromium.launch(headless=True)
@@ -27,7 +27,8 @@ def run_flow(analysis,choose_yes=True,second_continue=False):
             requests.append((req.method,parsed.path,json.loads(req.post_data) if req.post_data else None))
             if parsed.path=="/api/journey/session":body={"credential":"opaque-test","journey_id":"journey-test"}
             elif parsed.path=="/api/orders/q1/project":body={"order_id":"order-test","journey_id":"journey-test","created":True}
-            elif parsed.path.endswith("/existing-website-analysis"):body=analysis
+            elif parsed.path.endswith("/existing-website-analysis"):
+                return handler.fulfill(status=analyzer_status,content_type="application/json",body=json.dumps(analysis or {"detail":"unavailable"}))
             else:body={"order_id":"order-test","journey_id":"journey-test","flow_version":"q1_v2","schema_version":2,"idempotent":False}
             handler.fulfill(status=200,content_type="application/json",body=json.dumps(body))
         page.route("**/*",route);page.goto("https://q1.test/start/")
@@ -37,7 +38,7 @@ def run_flow(analysis,choose_yes=True,second_continue=False):
         page.get_by_role("radio",name="Yes" if choose_yes else "No",exact=True).click()
         if choose_yes:page.locator("#sfq-website-url").fill("https://example.test")
         page.get_by_role("button",name="Continue").click()
-        if analysis["status"]=="COMPLETE":page.wait_for_function("window.__SITEFORMO_Q1_TEST__.getState().current_step === 'complete'")
+        if analyzer_status==200 and analysis["status"]=="COMPLETE":page.wait_for_function("window.__SITEFORMO_Q1_TEST__.getState().current_step === 'complete'")
         elif second_continue:
             page.wait_for_function("window.__SITEFORMO_Q1_TEST__.getState().existing_website.analysis_url !== null")
             page.get_by_role("button",name="Continue").click()
@@ -64,16 +65,26 @@ def test_complete_and_clarification_results_are_advisory_and_reach_completion(fl
     assert all(item[2]["package_qualification"]["status"]=="unqualified" for item in requests if item[0]=="PATCH")
 
 @pytest.mark.parametrize("analysis",[
-    result("PARTIAL","PARTIAL_CRAWL"),result("UNAVAILABLE","DNS_FAILURE"),result("PARTIAL","JS_HEAVY_INCONCLUSIVE"),
+    result("PARTIAL","PARTIAL_CRAWL"),result("UNAVAILABLE","DNS_FAILURE"),result("JS_HEAVY_INCONCLUSIVE","JS_HEAVY_INCONCLUSIVE"),
 ])
 def test_partial_unavailable_and_js_heavy_are_nonblocking(analysis):
     state,_=run_flow(analysis,second_continue=True)
-    assert state["current_step"]=="complete" and state["existing_website"]["analysis"]["status"] in {"PARTIAL","UNAVAILABLE"}
+    assert state["current_step"]=="complete" and state["existing_website"]["analysis"]["status"] in {"PARTIAL","UNAVAILABLE","JS_HEAVY_INCONCLUSIVE"}
+
+def test_transport_failure_is_explicit_nonblocking_and_never_fabricates_analysis():
+    state,requests=run_flow(None,second_continue=True,analyzer_status=503)
+    assert state["current_step"]=="complete"
+    assert state["existing_website"]["analysis"] is None
+    assert state["existing_website"]["analysis_state"]=="transport_unavailable"
+    patches=[body for method,path,body in requests if method=="PATCH" and path.endswith("/q1")]
+    assert len(patches)==1 and patches[0]["existing_website"]["analysis"] is None
 
 @pytest.mark.parametrize("status",["REFUSED_UNSAFE","INVALID"])
 def test_unsafe_or_server_invalid_stays_on_question_three(status):
-    state,_=run_flow(result(status,"UNSAFE_URL" if status=="REFUSED_UNSAFE" else "INVALID_URL"))
+    state,requests=run_flow(result(status,"UNSAFE_URL" if status=="REFUSED_UNSAFE" else "INVALID_URL"))
     assert state["current_step"]=="q3"
+    patches=[body for method,path,body in requests if method=="PATCH" and path.endswith("/q1")]
+    assert len(patches)==2 and patches[1]["existing_website"]["analysis"]["status"]==status
 
 def test_inline_invalid_url_does_not_call_analyzer():
     state,requests=run_flow(result(),choose_yes=True)

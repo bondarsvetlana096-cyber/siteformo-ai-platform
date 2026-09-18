@@ -1,0 +1,210 @@
+<script>
+(function () {
+  "use strict";
+
+  const API_BASE = "https://siteformo-ai-platform-production.up.railway.app";
+  const STORAGE_KEY = "siteformo_example_tracking";
+  const START_URL = "/start/";
+  const START_CTA_SELECTOR = "a.sf-start-questionnaire[data-select-example]";
+  const HANDOFF_PREFIX = "siteformo_q1_handoff_";
+  const WINDOW_PREFIX = "siteformo-q1-";
+  const HANDOFF_CONTRACT = "siteformo_q1_example_handoff_v1";
+  const HANDOFF_TTL_MS = 5 * 60 * 1000;
+  const MAX_STORAGE_KEYS_TO_SWEEP = 128;
+  const TOKEN_RE = /^[a-f0-9]{32}$/;
+
+  function now() { return Date.now(); }
+
+  function getPageExampleId() {
+    return document.body.dataset.exampleId ||
+      document.querySelector("[data-example-id]")?.getAttribute("data-example-id") ||
+      new URLSearchParams(window.location.search).get("example_id") || "";
+  }
+
+  function getPackage() {
+    return document.body.dataset.package ||
+      document.querySelector("[data-siteformo-package]")?.getAttribute("data-siteformo-package") ||
+      new URLSearchParams(window.location.search).get("package") || "";
+  }
+
+  function getDesignDirection() {
+    return document.body.dataset.designDirection ||
+      document.querySelector("[data-design-direction]")?.getAttribute("data-design-direction") ||
+      new URLSearchParams(window.location.search).get("design_direction") || "";
+  }
+
+  function readState() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch (error) { return {}; }
+  }
+
+  function writeState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+  function detectEntrySource() {
+    const path = window.location.pathname;
+    if (path.includes("starter.siteformo.com")) return "starter_example";
+    if (path.includes("business.siteformo.com")) return "business_example";
+    if (path.includes("reference.siteformo.com")) return "reference_example";
+    if (path.includes("advanced.siteformo.com")) return "advanced_example";
+    if (path.includes("design-previews")) return "design_direction";
+    if (path.includes("homepage-interaction-style")) return "interaction_style";
+    return "site";
+  }
+
+  function initState() {
+    const state = readState();
+    state.entry_source = state.entry_source || detectEntrySource();
+    state.viewed_examples = Array.isArray(state.viewed_examples) ? state.viewed_examples : [];
+    state.time_spent = state.time_spent || {};
+    state.selected_example_id = state.selected_example_id || "";
+    state.package = state.package || getPackage();
+    state.design_direction = state.design_direction || getDesignDirection();
+    state.interaction_style = state.interaction_style || "";
+    writeState(state);
+    return state;
+  }
+
+  function trackView(exampleId) {
+    if (!exampleId) return;
+    const state = initState();
+    if (!state.viewed_examples.includes(exampleId)) state.viewed_examples.push(exampleId);
+    state.current_example_id = exampleId;
+    state.current_example_started_at = now();
+    writeState(state);
+  }
+
+  function saveTimeSpent() {
+    const state = readState();
+    if (!state.current_example_id || !state.current_example_started_at) return;
+    const seconds = Math.max(1, Math.round((now() - state.current_example_started_at) / 1000));
+    state.time_spent[state.current_example_id] =
+      (state.time_spent[state.current_example_id] || 0) + seconds;
+    state.current_example_started_at = now();
+    writeState(state);
+  }
+
+  async function sendTracking() {
+    const state = readState();
+    try {
+      await fetch(API_BASE + "/api/examples/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_id: state.order_id || null,
+          entry_source: state.entry_source || null,
+          viewed_examples: state.viewed_examples || [],
+          time_spent: state.time_spent || {},
+          package: state.package || null,
+          business_type: state.business_type || null,
+          industry_group: state.industry_group || null,
+          design_direction: state.design_direction || null,
+          interaction_style: state.interaction_style || null
+        })
+      });
+    } catch (error) { console.warn("SiteFormo tracking sync failed", error); }
+  }
+
+  async function selectExample(exampleId) {
+    if (!exampleId) return;
+    saveTimeSpent();
+    const state = readState();
+    state.selected_example_id = exampleId;
+    if (!state.viewed_examples.includes(exampleId)) state.viewed_examples.push(exampleId);
+    writeState(state);
+    try {
+      const response = await fetch(API_BASE + "/api/examples/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_id: state.order_id || null,
+          entry_source: state.entry_source || "example_page",
+          viewed_examples: state.viewed_examples || [],
+          time_spent: state.time_spent || {},
+          package: state.package || null,
+          business_type: state.business_type || null,
+          industry_group: state.industry_group || null,
+          design_direction: state.design_direction || null,
+          interaction_style: state.interaction_style || null,
+          selected_example_id: exampleId
+        })
+      });
+      const data = await response.json();
+      localStorage.setItem("siteformo_generation_profile", JSON.stringify(data.generation_profile || data));
+    } catch (error) { console.warn("SiteFormo example selection failed", error); }
+  }
+
+  function cleanId(value) {
+    return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)
+      ? value : null;
+  }
+
+  function cleanViewed(value) {
+    return Array.isArray(value)
+      ? [...new Set(value.map(cleanId).filter(Boolean))].slice(0, 24) : [];
+  }
+
+  function validMailbox(payload, timestamp) {
+    return Boolean(payload && payload.contract_version === HANDOFF_CONTRACT &&
+      Number.isSafeInteger(payload.created_at) && Number.isSafeInteger(payload.expires_at) &&
+      payload.created_at <= timestamp && payload.expires_at > timestamp &&
+      payload.expires_at >= payload.created_at &&
+      payload.expires_at - payload.created_at <= HANDOFF_TTL_MS &&
+      cleanId(payload.selected_example_id) && Array.isArray(payload.viewed_examples) &&
+      payload.viewed_examples.every((item) => cleanId(item)));
+  }
+
+  function sweepStaleHandoffs(timestamp) {
+    const keys = [];
+    const count = Math.min(localStorage.length, MAX_STORAGE_KEYS_TO_SWEEP);
+    for (let index = 0; index < count; index += 1) {
+      const key = localStorage.key(index);
+      if (key && key.startsWith(HANDOFF_PREFIX)) keys.push(key);
+    }
+    keys.forEach(function (key) {
+      const token = key.slice(HANDOFF_PREFIX.length);
+      let payload = null;
+      try { payload = JSON.parse(localStorage.getItem(key) || "null"); }
+      catch (error) {}
+      if (!TOKEN_RE.test(token) || !validMailbox(payload, timestamp)) localStorage.removeItem(key);
+    });
+  }
+
+  function createHandoff(link, selectedId) {
+    const createdAt = now();
+    sweepStaleHandoffs(createdAt);
+    const state = readState();
+    const viewedExamples = cleanViewed(state.viewed_examples);
+    if (!viewedExamples.includes(selectedId)) viewedExamples.push(selectedId);
+    const words = crypto.getRandomValues(new Uint32Array(4));
+    const token = Array.from(words, (word) => word.toString(16).padStart(8, "0")).join("");
+    localStorage.setItem(HANDOFF_PREFIX + token, JSON.stringify({
+      contract_version: HANDOFF_CONTRACT,
+      created_at: createdAt,
+      expires_at: createdAt + HANDOFF_TTL_MS,
+      selected_example_id: selectedId,
+      viewed_examples: viewedExamples
+    }));
+    link.href = START_URL;
+    link.target = WINDOW_PREFIX + token;
+    const rel = new Set((link.getAttribute("rel") || "").split(/\s+/).filter(Boolean));
+    rel.add("noopener");
+    link.setAttribute("rel", Array.from(rel).join(" "));
+  }
+
+  window.SiteFormoExamples = { readState, writeState, saveTimeSpent, sendTracking, selectExample };
+
+  const exampleId = getPageExampleId();
+  if (exampleId) trackView(exampleId);
+
+  document.addEventListener("click", function (event) {
+    const button = event.target.closest("[data-select-example]");
+    if (!button) return;
+    const selectedId = button.getAttribute("data-select-example");
+    selectExample(selectedId);
+    if (button.matches(START_CTA_SELECTOR) && cleanId(selectedId)) createHandoff(button, selectedId);
+  });
+
+  window.addEventListener("beforeunload", saveTimeSpent);
+  setInterval(function () { saveTimeSpent(); sendTracking(); }, 15000);
+})();
+</script>

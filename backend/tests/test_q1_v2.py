@@ -115,7 +115,7 @@ def test_frontend_contract_and_sleeping_assistant():
         assert value in source
     assert "display_on_generated_website:false" in source
     assert 'purpose:"operational_communication"' in source
-    assert 'existing_website:{has_existing_website:null,url:null,analysis:null,analysis_url:null}' in source
+    assert 'existing_website:{has_existing_website:null,url:null,analysis:null,analysis_url:null,analysis_state:null}' in source
     assert 'analysis:null' in source and 'status:"unqualified"' in source
     assert "/api/journey/session" in source
     assert "/api/orders/q1/project" in source
@@ -164,10 +164,13 @@ def test_frontend_analyzer_v2_advisory_integration_contract():
     assert "preferred_contact" not in redirect and "analysis" not in redirect
 
 
-def test_frontend_examples_resume_and_review_are_fail_closed():
+def test_frontend_examples_fresh_load_and_review_are_fail_closed():
     source=(Path(__file__).parents[2]/"frontend"/"q1_v2_WPCode.html").read_text(encoding="utf-8")
-    assert 'DRAFT_KEY="siteformo_q1_v2_draft"' in source
-    assert '"siteformo_source_example_payload","siteformo_example_tracking"' in source
+    assert 'let state=fresh()' in source
+    assert 'localStorage.getItem(DRAFT_KEY)' not in source
+    assert 'body:JSON.stringify({start_new_project:true})' in source
+    assert 'WINDOW_PREFIX="siteformo-q1-"' in source
+    assert 'localStorage.removeItem(key)' in source
     assert "document.title" not in source
     assert 'selected_example_id:"example-owner-review"' in source
     assert 'if(REVIEW_MODE){state.journey={journey_id:"journey-review",order_id:"order-review"' in source
