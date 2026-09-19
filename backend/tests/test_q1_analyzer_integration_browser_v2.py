@@ -12,6 +12,65 @@ from playwright.sync_api import sync_playwright
 
 SOURCE=(Path(__file__).parents[2]/"frontend"/"q1_v2_WPCode.html").read_text(encoding="utf-8")
 
+def run_project_init(session,stored_credential=None):
+    requests=[]
+    with sync_playwright() as pw:
+        try:browser=pw.chromium.launch(headless=True)
+        except Exception as exc:pytest.skip(f"Playwright Chromium unavailable: {exc}")
+        page=browser.new_page(viewport={"width":1440,"height":900})
+        def route(handler):
+            req=handler.request;parsed=urlparse(req.url)
+            if parsed.hostname=="q1.test" and parsed.path=="/start/":return handler.fulfill(status=200,content_type="text/html",body=SOURCE)
+            requests.append({"method":req.method,"path":parsed.path,"body":json.loads(req.post_data) if req.post_data else None,"visitor":req.headers.get("x-siteformo-visitor")})
+            if parsed.path=="/api/journey/session":body=session
+            elif parsed.path=="/api/orders/q1/project":body={"order_id":"new-order","journey_id":session.get("journey_id"),"created":True}
+            else:body={"detail":"unexpected"}
+            handler.fulfill(status=200,content_type="application/json",body=json.dumps(body))
+        page.route("**/*",route);page.goto("https://q1.test/start/")
+        if stored_credential is not None:
+            page.evaluate("value=>localStorage.setItem('siteformo_journey_credential_v1',value)",stored_credential);page.reload()
+            requests.clear()
+        page.get_by_role("button",name="Continue").click()
+        page.wait_for_timeout(100)
+        state=page.evaluate("window.__SITEFORMO_Q1_TEST__.getState()")
+        stored=page.evaluate("localStorage.getItem('siteformo_journey_credential_v1')")
+        error=page.locator(".sfq-error").inner_text()
+        browser.close()
+    return state,requests,stored,error
+
+def test_new_journey_credential_is_stored_and_fresh_project_is_created():
+    state,requests,stored,error=run_project_init({"journey_id":"journey-new","credential":"issued-credential","resumed":False})
+    project=[request for request in requests if request["path"]=="/api/orders/q1/project"]
+    assert stored=="issued-credential" and error==""
+    assert state["current_step"]=="q1" and state["journey"]["order_id"]=="new-order"
+    assert len(project)==1 and project[0]["body"]=={"start_new_project":True}
+    assert project[0]["visitor"]=="issued-credential"
+
+def test_resumed_journey_retains_credential_and_creates_fresh_project():
+    state,requests,stored,error=run_project_init({"journey_id":"journey-existing","credential":None,"resumed":True},"retained-credential")
+    session_request=next(request for request in requests if request["path"]=="/api/journey/session")
+    project=[request for request in requests if request["path"]=="/api/orders/q1/project"]
+    assert stored=="retained-credential" and error==""
+    assert session_request["visitor"]=="retained-credential"
+    assert state["current_step"]=="q1" and state["journey"]=={"journey_id":"journey-existing","order_id":"new-order","handoff_id":None}
+    assert len(project)==1 and project[0]["body"]=={"start_new_project":True}
+    assert project[0]["visitor"]=="retained-credential"
+
+@pytest.mark.parametrize(("session","stored"),[
+    ({"credential":"issued-credential","resumed":False},None),
+    ({"journey_id":"","credential":"issued-credential","resumed":False},None),
+    ({"journey_id":"journey-test","credential":None,"resumed":False},None),
+    ({"journey_id":"journey-test","credential":None,"resumed":True},None),
+    ({"journey_id":"journey-test","credential":"   ","resumed":False},None),
+    ({"journey_id":"journey-test","credential":17,"resumed":False},None),
+    ({"journey_id":"journey-test","credential":None,"resumed":True},"   "),
+])
+def test_invalid_journey_response_never_posts_project(session,stored):
+    state,requests,_,error=run_project_init(session,stored)
+    assert state["current_step"]=="intro" and state["journey"]["order_id"] is None
+    assert not any(request["path"]=="/api/orders/q1/project" for request in requests)
+    assert "We couldn" in error and "start your project" in error
+
 def result(status="COMPLETE",failure=None,flags=None):
     return {"contract_version":"existing_website_analysis_v2","status":status,"safe_failure_code":failure,"clarification_flags":flags or []}
 
