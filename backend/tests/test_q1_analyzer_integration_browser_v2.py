@@ -97,7 +97,8 @@ def run_flow(analysis,choose_yes=True,second_continue=False,analyzer_status=200)
         page.get_by_role("radio",name="Yes" if choose_yes else "No",exact=True).click()
         if choose_yes:page.locator("#sfq-website-url").fill("https://example.test")
         page.get_by_role("button",name="Continue").click()
-        if analyzer_status==200 and analysis["status"]=="COMPLETE":page.wait_for_function("window.__SITEFORMO_Q1_TEST__.getState().current_step === 'complete'")
+        if analyzer_status==200 and analysis["status"] in {"COMPLETE","PARTIAL","UNAVAILABLE","JS_HEAVY_INCONCLUSIVE"}:
+            page.wait_for_function("window.__SITEFORMO_Q1_TEST__.getState().current_step === 'complete'")
         elif second_continue:
             page.wait_for_function("window.__SITEFORMO_Q1_TEST__.getState().existing_website.analysis_url !== null")
             page.get_by_role("button",name="Continue").click()
@@ -126,17 +127,25 @@ def test_complete_and_clarification_results_are_advisory_and_reach_completion(fl
 @pytest.mark.parametrize("analysis",[
     result("PARTIAL","PARTIAL_CRAWL"),result("UNAVAILABLE","DNS_FAILURE"),result("JS_HEAVY_INCONCLUSIVE","JS_HEAVY_INCONCLUSIVE"),
 ])
-def test_partial_unavailable_and_js_heavy_are_nonblocking(analysis):
-    state,_=run_flow(analysis,second_continue=True)
+def test_partial_unavailable_and_js_heavy_auto_advance_on_first_continue(analysis):
+    state,requests=run_flow(analysis,second_continue=False)
     assert state["current_step"]=="complete" and state["existing_website"]["analysis"]["status"] in {"PARTIAL","UNAVAILABLE","JS_HEAVY_INCONCLUSIVE"}
+    assert sum(path.endswith("existing-website-analysis") for _,path,_ in requests)==1
+    assert len([1 for method,path,_ in requests if method=="PATCH" and path.endswith("/q1")])==2
 
 def test_transport_failure_is_explicit_nonblocking_and_never_fabricates_analysis():
     state,requests=run_flow(None,second_continue=True,analyzer_status=503)
     assert state["current_step"]=="complete"
     assert state["existing_website"]["analysis"] is None
     assert state["existing_website"]["analysis_state"]=="transport_unavailable"
+    assert sum(path.endswith("existing-website-analysis") for _,path,_ in requests)==1
     patches=[body for method,path,body in requests if method=="PATCH" and path.endswith("/q1")]
     assert len(patches)==1 and patches[0]["existing_website"]["analysis"] is None
+
+def test_analyzer_guard_blocks_duplicate_submission_while_request_is_in_flight():
+    assert 'if(analyzing||!validate())return;' in SOURCE
+    assert 'if(saving)return;' in SOURCE
+    assert 'state.existing_website.analysis_state="checking"' in SOURCE
 
 @pytest.mark.parametrize("status",["REFUSED_UNSAFE","INVALID"])
 def test_unsafe_or_server_invalid_stays_on_question_three(status):
@@ -151,9 +160,9 @@ def test_inline_invalid_url_does_not_call_analyzer():
     assert state["existing_website"]["url"]=="https://example.test/"
     assert "Enter a valid website URL." in SOURCE
 
-def test_same_url_resume_does_not_repeat_and_changed_url_clears_analysis():
+def test_same_url_typed_result_auto_advances_without_repeat():
     state,requests=run_flow(result("PARTIAL","PARTIAL_CRAWL"),second_continue=False)
-    assert state["current_step"]=="q3"
+    assert state["current_step"]=="complete"
     assert sum(path.endswith("existing-website-analysis") for _,path,_ in requests)==1
     assert "state.existing_website.analysis=null;state.existing_website.analysis_url=null" in SOURCE
 
