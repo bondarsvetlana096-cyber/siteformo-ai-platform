@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated
 from urllib.parse import parse_qs, urlsplit
 
@@ -68,13 +69,19 @@ class VerificationMailRequest(BaseModel):
             query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
         except ValueError as exc:
             raise ValueError("invalid verification query") from exc
-        if set(query) != {"uid", "token"} or any(len(values) != 1 for values in query.values()):
+        required = {"uid", "token"}
+        allowed = required | {"cont"}
+        if not required.issubset(query) or not set(query).issubset(allowed):
             raise ValueError("invalid verification query")
-        if query["uid"][0] != str(self.wordpress_user_id):
+        if any(len(values) != 1 for values in query.values()):
+            raise ValueError("invalid verification query")
+        uid = query["uid"][0]
+        if not re.fullmatch(r"[1-9][0-9]*", uid) or int(uid) != self.wordpress_user_id:
             raise ValueError("verification UID mismatch")
-        token = query["token"][0]
-        if not 20 <= len(token) <= 128 or any(ord(char) < 33 or ord(char) > 126 for char in token):
-            raise ValueError("invalid verification token shape")
+        if query["token"][0] == "":
+            raise ValueError("empty verification token")
+        if "cont" in query and query["cont"][0] == "":
+            raise ValueError("empty continuation token")
         return self
 
 

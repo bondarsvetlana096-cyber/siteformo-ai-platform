@@ -18,6 +18,7 @@ SECRET = "dummy-test-secret"
 REQUEST_ID = "123e4567-e89b-42d3-a456-426614174000"
 EMAIL = "fixture@example.com"
 TOKEN = "dummy-token-abcdefghijklmnopqrstuvwxyz"
+CONT = "opaque-continuation-fixture-0123456789abcdefghijklmnop"
 
 
 class FakeStore:
@@ -90,6 +91,21 @@ def test_valid_signature_and_provider_acceptance(bridge):
     assert len(bridge[2]) == 1
 
 
+def test_uid_token_and_optional_opaque_cont_are_accepted(bridge):
+    uid_token = send(bridge[0], payload())
+    assert uid_token.status_code == 202
+
+    continuation_request_id = "223e4567-e89b-42d3-a456-426614174000"
+    continuation = payload(
+        request_id=continuation_request_id,
+        verification_url=(
+            "https://advanced1.siteformo.com/verify-email/"
+            f"?uid=13&token={TOKEN}&cont={CONT}"
+        ),
+    )
+    assert send(bridge[0], continuation).status_code == 202
+
+
 def test_invalid_signature(bridge):
     assert send(bridge[0], payload(), signature="invalid").status_code == 401
 
@@ -145,6 +161,15 @@ def test_concurrent_duplicate_sends_once(bridge, monkeypatch):
     {"verification_url": f"http://advanced1.siteformo.com/verify-email/?uid=13&token={TOKEN}"},
     {"verification_url": f"https://advanced1.siteformo.com/wrong/?uid=13&token={TOKEN}"},
     {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=14&token={TOKEN}"},
+    {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=0&token={TOKEN}"},
+    {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=-1&token={TOKEN}"},
+    {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=abc&token={TOKEN}"},
+    {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=13&token={TOKEN}&extra=x"},
+    {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=13&uid=13&token={TOKEN}"},
+    {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=13&token={TOKEN}&token=x"},
+    {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=13&token={TOKEN}&cont={CONT}&cont=x"},
+    {"verification_url": "https://advanced1.siteformo.com/verify-email/?uid=13&token="},
+    {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=13&token={TOKEN}&cont="},
     {"verification_url": f"https://user@advanced1.siteformo.com/verify-email/?uid=13&token={TOKEN}"},
     {"verification_url": f"https://advanced1.siteformo.com/verify-email/?uid=13&token={TOKEN}#x"},
     {"subject": "caller"}, {"body": "caller"}, {"sender": "caller@example.test"},
@@ -179,8 +204,14 @@ def test_provider_failures_are_cached(bridge, monkeypatch, error, status):
 
 def test_log_redaction(bridge, caplog):
     caplog.set_level(logging.INFO, logger="siteformo.adv01_verification_mail")
-    assert send(bridge[0], payload()).status_code == 202
-    assert all(value not in caplog.text for value in (SECRET, EMAIL, TOKEN, "verify-email"))
+    verification_url = (
+        "https://advanced1.siteformo.com/verify-email/"
+        f"?uid=13&token={TOKEN}&cont={CONT}"
+    )
+    assert send(bridge[0], payload(verification_url=verification_url)).status_code == 202
+    assert all(value not in caplog.text for value in (
+        SECRET, EMAIL, TOKEN, CONT, verification_url, "verify-email"
+    ))
 
 
 def test_fixed_provider_envelope(monkeypatch):
