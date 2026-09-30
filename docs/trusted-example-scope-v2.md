@@ -10,6 +10,9 @@ Example and protected contact identity. The generic key contract is:
 - Business 01: `SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1`
 - Business 02 / VOLTINK: `SF_BU_02_VOLTINK_EXAMPLE_V1`
 - Business 03 / NORTHFORM: `SF_BU_03_NORTHFORM_EXAMPLE_V1`
+- Business 04 / NEXORA: `SF_BU_04_NEXORA_EXAMPLE_V1`
+- Business 05 / HEARTHLINE: `SF_BU_05_HEARTHLINE_EXAMPLE_V1`
+- Reference 01 / VELAIRE: `SF_REF_01_VELAIRE`
 
 These identifiers are stable product identities and do not contain the temporary dev host.
 
@@ -17,9 +20,10 @@ These identifiers are stable product identities and do not contain the temporary
 
 All Contact request models explicitly accept `example_id` and retain Pydantic
 `extra="forbid"`. The shared resolver combines the exact `Origin` header with the requested
-canonical identity. `https://dev.siteformo.com` may request any of the three allowlisted
+canonical identity. `https://dev.siteformo.com` may request any of the six allowlisted
 Examples. Dedicated `businessN.siteformo.com` origins are restricted to their matching
-identity. Unknown origins, unknown identifiers, and mismatched Origin/Example pairs fail
+identity. Reference 01 is bound exclusively to `https://reference1.siteformo.com`. Unknown
+origins, unknown identifiers, and mismatched Origin/Example pairs fail
 closed before quota state or provider access.
 
 The only shared-dev compatibility fallback maps a missing `example_id` to Business 01. It is
@@ -31,6 +35,7 @@ callers on the shared dev origin send their canonical identity explicitly.
 
 - Email remains `sf:demo-email:v1:quota:EMAIL:<example_hash>:<contact_hash>`.
 - SMS remains `sf:demo-sms:v1:quota:SMS:<role>:<example_hash>:<contact_hash>`.
+- WhatsApp V2 is `sf:demo-whatsapp:v2:quota:WHATSAPP:<example_hash>:<contact_hash>`.
 - Call changes from `sf:demo-voice:v1:quota:recipient:<contact_hash>` to
   `sf:demo-voice:v1:quota:CALL:<example_hash>:<contact_hash>`.
 
@@ -39,7 +44,14 @@ records continue to apply to Business 01. Business 02 and 03 naturally receive d
 hashes. Legacy unscoped Call keys remain inert historical records; new scoped keys start
 independent counters. Rate and global safety limits remain separate safeguards.
 
-Future WhatsApp, Viber, Messenger, Telegram and other channels must call the same resolver
+WhatsApp V2 uses a 15-minute, random one-time handoff reference. The visible reference
+contains no identity, PII, hash, credential, or quota state. Its Redis record is created
+with NX, stores only hashed Example state plus the prepared first name, and is atomically
+consumed after a valid signed inbound request. Accepted quota is permanent (no TTL);
+provider-definitive failures release the pending claim. Legacy V1 day-bucket keys are not
+read, migrated, or used by V2.
+
+Future Viber, Messenger, Telegram and other channels must call the same resolver
 and use the generic key contract. Provider-specific Example mappings are not permitted.
 
 HTTP 429 retains canonical machine-readable details. Frontends render quota exhaustion as a
