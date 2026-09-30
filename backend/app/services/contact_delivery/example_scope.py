@@ -6,6 +6,8 @@ BUSINESS_1_EXAMPLE_ID = "SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1"
 BUSINESS_2_EXAMPLE_ID = "SF_BU_02_VOLTINK_EXAMPLE_V1"
 BUSINESS_3_EXAMPLE_ID = "SF_BU_03_NORTHFORM_EXAMPLE_V1"
 BUSINESS_4_EXAMPLE_ID = "SF_BU_04_NEXORA_EXAMPLE_V1"
+BUSINESS_5_EXAMPLE_ID = "SF_BU_05_HEARTHLINE_EXAMPLE_V1"
+REFERENCE_1_EXAMPLE_ID = "SF_REF_01_VELAIRE"
 
 CANONICAL_EXAMPLE_IDS = frozenset(
     {
@@ -13,6 +15,8 @@ CANONICAL_EXAMPLE_IDS = frozenset(
         BUSINESS_2_EXAMPLE_ID,
         BUSINESS_3_EXAMPLE_ID,
         BUSINESS_4_EXAMPLE_ID,
+        BUSINESS_5_EXAMPLE_ID,
+        REFERENCE_1_EXAMPLE_ID,
     }
 )
 
@@ -21,6 +25,9 @@ EXAMPLES_BY_ORIGIN = {
     "https://business1.siteformo.com": frozenset({BUSINESS_1_EXAMPLE_ID}),
     "https://business2.siteformo.com": frozenset({BUSINESS_2_EXAMPLE_ID}),
     "https://business3.siteformo.com": frozenset({BUSINESS_3_EXAMPLE_ID}),
+    "https://business4.siteformo.com": frozenset({BUSINESS_4_EXAMPLE_ID}),
+    "https://business5.siteformo.com": frozenset({BUSINESS_5_EXAMPLE_ID}),
+    "https://reference1.siteformo.com": frozenset({REFERENCE_1_EXAMPLE_ID}),
 }
 
 # Explicit, bounded compatibility for the original Business 01 caller only.
@@ -30,6 +37,9 @@ LEGACY_DEFAULT_BY_ORIGIN = {
     "https://business1.siteformo.com": BUSINESS_1_EXAMPLE_ID,
     "https://business2.siteformo.com": BUSINESS_2_EXAMPLE_ID,
     "https://business3.siteformo.com": BUSINESS_3_EXAMPLE_ID,
+    "https://business4.siteformo.com": BUSINESS_4_EXAMPLE_ID,
+    "https://business5.siteformo.com": BUSINESS_5_EXAMPLE_ID,
+    "https://reference1.siteformo.com": REFERENCE_1_EXAMPLE_ID,
 }
 
 

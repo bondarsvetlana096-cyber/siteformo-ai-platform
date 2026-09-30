@@ -32,6 +32,7 @@ class ContactWhatsAppRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     first_name: str | None = Field(default=None, max_length=100)
+    example_id: str | None = Field(default=None, min_length=1, max_length=100)
 
     @field_validator("first_name", mode="before")
     @classmethod
@@ -124,7 +125,7 @@ async def send_demo_contact_whatsapp(
     origin: str | None = Header(default=None),
     content_length: int | None = Header(default=None),
 ) -> ContactWhatsAppResponse:
-    example = trusted_example_for_origin(origin)
+    example = trusted_example_for_origin(origin, payload.example_id)
     if not example:
         raise HTTPException(status_code=403, detail="origin_not_allowed")
     if content_length is not None and content_length > 16_384:
@@ -144,7 +145,9 @@ async def send_demo_contact_whatsapp(
         )
     try:
         url, correlation_hash = await service.prepare(
-            payload.first_name, request.client.host if request.client else "unknown"
+            payload.first_name,
+            request.client.host if request.client else "unknown",
+            example.example_id,
         )
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="whatsapp_example_unavailable") from exc

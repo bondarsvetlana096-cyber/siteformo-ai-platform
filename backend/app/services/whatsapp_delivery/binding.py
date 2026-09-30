@@ -1,28 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from app.services.contact_delivery.example_scope import (
+    ExampleScopeError,
+    TrustedExampleScope,
+    resolve_trusted_example,
+)
 
 
-@dataclass(frozen=True, slots=True)
-class TrustedExample:
-    example_id: str
-    display_name: str
-    contact_route: str
-
-
-TRUSTED_EXAMPLES = {
-    "https://dev.siteformo.com": TrustedExample(
-        example_id="SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
-        display_name="SiteFormo Consulting Example",
-        contact_route="/contact/",
-    ),
-    "https://business1.siteformo.com": TrustedExample(
-        example_id="SF_BU_01_CANONICAL_CONSULTING_EXAMPLE_V1",
-        display_name="SiteFormo Consulting Example",
-        contact_route="/contact/",
-    ),
-}
-
-
-def trusted_example_for_origin(origin: str | None) -> TrustedExample | None:
-    return TRUSTED_EXAMPLES.get(origin or "")
+def trusted_example_for_origin(
+    origin: str | None, requested_example_id: str | None = None
+) -> TrustedExampleScope | None:
+    """Compatibility wrapper over the single canonical Example/Origin resolver."""
+    try:
+        return resolve_trusted_example(origin, requested_example_id)
+    except ExampleScopeError:
+        return None
