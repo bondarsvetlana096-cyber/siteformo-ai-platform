@@ -5,7 +5,8 @@ from collections.abc import Callable
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from app.services.contact_delivery.demo_adapter import INTENTS
 
 from app.services.whatsapp_delivery.binding import trusted_example_for_origin
 from app.services.whatsapp_delivery.configuration import (
@@ -33,6 +34,8 @@ class ContactWhatsAppRequest(BaseModel):
 
     first_name: str | None = Field(default=None, max_length=100)
     example_id: str | None = Field(default=None, min_length=1, max_length=100)
+    intent: str = "other"
+    order_number: str | None = Field(default=None, max_length=80)
 
     @field_validator("first_name", mode="before")
     @classmethod
@@ -52,6 +55,18 @@ class ContactWhatsAppRequest(BaseModel):
         if "\r" in value or "\n" in value or any(ord(char) < 32 or ord(char) == 127 for char in value):
             raise ValueError("unsafe control character")
         return value
+
+    @model_validator(mode="after")
+    def validate_demo_context(self) -> "ContactWhatsAppRequest":
+        if self.intent not in INTENTS:
+            raise ValueError("invalid intent")
+        order = (self.order_number or "").strip()
+        if self.intent in {"order", "returns"} and not order:
+            raise ValueError("order_number required for this intent")
+        if self.intent not in {"order", "returns"} and order:
+            raise ValueError("order_number not allowed for this intent")
+        self.order_number = order or None
+        return self
 
 
 class ContactWhatsAppResponse(BaseModel):
@@ -148,6 +163,8 @@ async def send_demo_contact_whatsapp(
             payload.first_name,
             request.client.host if request.client else "unknown",
             example.example_id,
+            payload.intent,
+            payload.order_number,
         )
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="whatsapp_example_unavailable") from exc

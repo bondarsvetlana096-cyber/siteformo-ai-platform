@@ -16,6 +16,7 @@ import redis.asyncio as redis
 
 from app.services.whatsapp_delivery.models import WhatsAppMessage, normalize_e164
 from app.services.whatsapp_delivery.transport import TransportState, WhatsAppTransport
+from app.services.contact_delivery.demo_adapter import DemoContext, validate_context, whatsapp_text
 
 TRIGGER_PREFIX = "Start SiteFormo WhatsApp example "
 TOKEN = re.compile(r"^[A-Za-z0-9_-]{22}$")
@@ -77,6 +78,9 @@ def validate_twilio_signature(url: str, params: Mapping[str, str], signature: st
 class HandoffState:
     example_hash: str
     first_name: str | None
+    example_id: str = ""
+    intent: str = "other"
+    order_number: str | None = None
 
 
 class QuotaClaim(str, Enum):
@@ -93,7 +97,7 @@ class InboundResult:
 
 
 class ExampleStore(Protocol):
-    async def create_handoff(self, client_hash: str, example_hash: str, first_name: str | None) -> str: ...
+    async def create_handoff(self, client_hash: str, example_hash: str, first_name: str | None, example_id: str, intent: str, order_number: str | None) -> str: ...
     async def consume_handoff(self, token_hash: str) -> HandoffState | None: ...
     async def claim_inbound(self, sid_hash: str, example_hash: str, recipient_hash: str) -> QuotaClaim: ...
     async def finalize_accepted(self, sid_hash: str, example_hash: str, recipient_hash: str) -> int: ...
@@ -138,7 +142,7 @@ class RedisWhatsAppExampleStore:
         quota = self.quota_key(example_hash, recipient_hash)
         return f"{self.namespace}:inbound:{sid_hash}", quota, f"{quota}:pending"
 
-    async def create_handoff(self, client_hash: str, example_hash: str, first_name: str | None) -> str:
+    async def create_handoff(self, client_hash: str, example_hash: str, first_name: str | None, example_id: str = "", intent: str = "other", order_number: str | None = None) -> str:
         client = self.client()
         try:
             rate_key = f"{self.namespace}:prepare-rate:{client_hash}:{int(time.time())//3600}"
@@ -147,7 +151,10 @@ class RedisWhatsAppExampleStore:
                 await client.expire(rate_key, 3700)
             if count > 20:
                 raise RuntimeError("prepare_rate_limited")
-            payload = json.dumps({"example_hash": example_hash, "first_name": first_name}, separators=(",", ":"))
+            context = (validate_context(DemoContext(example_id, intent, first_name, order_number))
+                       if example_id == "SF_REF_01_VELAIRE" else DemoContext(example_id, "other", first_name))
+            payload = json.dumps({"example_hash": example_hash, "first_name": first_name, "example_id": example_id,
+                                  "intent": context.intent, "order_number": context.order_number}, separators=(",", ":"))
             for _ in range(5):
                 token = secrets.token_urlsafe(16)
                 if TOKEN.fullmatch(token) and await client.set(
@@ -167,7 +174,8 @@ class RedisWhatsAppExampleStore:
         if not raw:
             return None
         payload = json.loads(raw)
-        return HandoffState(str(payload["example_hash"]), normalize_first_name(payload.get("first_name")))
+        return HandoffState(str(payload["example_hash"]), normalize_first_name(payload.get("first_name")),
+                            str(payload["example_id"]), str(payload["intent"]), payload.get("order_number"))
 
     async def claim_inbound(self, sid_hash: str, example_hash: str, recipient_hash: str) -> QuotaClaim:
         client = self.client()
@@ -212,8 +220,12 @@ class CustomerInitiatedWhatsAppService:
         self.store, self.transport = store, transport
         self.sender_e164, self.public_base_url = normalize_e164(sender_e164), public_base_url.rstrip("/")
 
-    async def prepare(self, first_name: str | None, client_id: str, example_id: str) -> tuple[str, str]:
-        token = await self.store.create_handoff(digest(client_id), digest(example_id), normalize_first_name(first_name))
+    async def prepare(self, first_name: str | None, client_id: str, example_id: str, intent: str = "other", order_number: str | None = None) -> tuple[str, str]:
+        normalized = normalize_first_name(first_name)
+        try:
+            token = await self.store.create_handoff(digest(client_id), digest(example_id), normalized, example_id, intent, order_number)
+        except TypeError:
+            token = await self.store.create_handoff(digest(client_id), digest(example_id), normalized)  # type: ignore[call-arg]
         return f"https://wa.me/{self.sender_e164[1:]}?text={quote(render_starter_message(token))}", digest(token)
 
     async def handle_inbound(self, params: Mapping[str, str]) -> InboundResult:
@@ -243,7 +255,9 @@ class CustomerInitiatedWhatsAppService:
         if claim is QuotaClaim.EXHAUSTED:
             return InboundResult("QUOTA_EXHAUSTED", 0)
         delivery_hash = digest(f"{sid_hash}:{recipient_hash}:{handoff.example_hash}")
-        reply = WhatsAppMessage(destination_e164=recipient, body=render_session_reply(handoff.first_name),
+        body = (whatsapp_text(DemoContext(handoff.example_id, handoff.intent, handoff.first_name, handoff.order_number))
+                if handoff.example_id == "SF_REF_01_VELAIRE" else render_session_reply(handoff.first_name))
+        reply = WhatsAppMessage(destination_e164=recipient, body=body,
                                 template_id="CUSTOMER_INITIATED_SESSION_FREEFORM", template_version="v2",
                                 locale="en", correlation_id=delivery_hash, content_variables={})
         result = await self.transport.send(reply, sid_hash)

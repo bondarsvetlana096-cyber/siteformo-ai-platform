@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
+from app.services.contact_delivery.demo_adapter import DemoContext, email_html, email_text, message_for
 
 SUBJECT = "Your SiteFormo demonstration enquiry"
 SENDER = "SiteFormo <siteformo@siteformo.com>"
@@ -71,7 +72,7 @@ def _substitute(template: str, values: dict[str, str], *, html: bool) -> str:
     return rendered
 
 
-def render(enquiry: Enquiry) -> RenderedEmail:
+def render(enquiry: Enquiry, context: DemoContext | None = None) -> RenderedEmail:
     values = {
         "first_name": _single_line("first_name", enquiry.first_name, 100),
         "last_name": _single_line("last_name", enquiry.last_name, 100),
@@ -82,6 +83,10 @@ def render(enquiry: Enquiry) -> RenderedEmail:
     if values["preferred_method"] != "Email":
         raise TemplateValidationError("preferred_method must be Email")
 
+    if context is not None:
+        message = message_for(context)
+        return RenderedEmail(subject=message.subject, sender=SENDER, reply_to=REPLY_TO,
+                             html=email_html(context), text=email_text(context))
     html_template = (TEMPLATE_ROOT / "template.html").read_text(encoding="utf-8")
     text_template = (TEMPLATE_ROOT / "template.txt").read_text(encoding="utf-8")
     return RenderedEmail(

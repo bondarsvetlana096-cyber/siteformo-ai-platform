@@ -23,6 +23,7 @@ from app.services.contact_delivery.template import (
     TemplateValidationError,
     render,
 )
+from app.services.contact_delivery.demo_adapter import DemoContext, DemoMessageError, INTENTS
 
 IDEMPOTENCY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$")
 router = APIRouter(prefix="/api/v1/demo-contact", tags=["demo-contact"])
@@ -38,6 +39,8 @@ class ContactEmailRequest(BaseModel):
     message: str = Field(min_length=1, max_length=5_000)
     idempotency_key: str = Field(min_length=16, max_length=128)
     example_id: str | None = Field(default=None, min_length=1, max_length=128)
+    intent: str = "other"
+    order_number: str | None = Field(default=None, max_length=80)
 
     @field_validator("first_name", "last_name", "preferred_method", "contact_value", "idempotency_key")
     @classmethod
@@ -66,6 +69,14 @@ class ContactEmailRequest(BaseModel):
             raise ValueError("invalid email address") from exc
         self.contact_value = validated.normalized.lower()
         self.preferred_method = "Email"
+        if self.intent not in INTENTS:
+            raise ValueError("invalid intent")
+        order = (self.order_number or "").strip()
+        if self.intent in {"order", "returns"} and not order:
+            raise ValueError("order_number required for this intent")
+        if self.intent not in {"order", "returns"} and order:
+            raise ValueError("order_number not allowed for this intent")
+        self.order_number = order or None
         return self
 
 
@@ -129,6 +140,8 @@ async def send_demo_contact_email(
         )
 
     try:
+        context = (DemoContext(example_id, payload.intent, payload.first_name, payload.order_number, payload.message)
+                   if example_id == "SF_REF_01_VELAIRE" else None)
         rendered = render(
             Enquiry(
                 first_name=payload.first_name,
@@ -136,12 +149,12 @@ async def send_demo_contact_email(
                 preferred_method=payload.preferred_method,
                 contact_value=payload.contact_value,
                 message=payload.message,
-            )
+            ), context
         )
         acceptance = await send_with_resend(
             rendered, payload.contact_value, payload.idempotency_key, example_id
         )
-    except TemplateValidationError as exc:
+    except (TemplateValidationError, DemoMessageError) as exc:
         await finalize_failed(identity, "template_invalid")
         raise HTTPException(status_code=422, detail="template_invalid") from exc
     except ProviderError as exc:
