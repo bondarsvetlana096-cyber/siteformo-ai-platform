@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     main_site_checkout_path: str | None = "/checkout"
     demo_ttl_minutes: int = 10
     demo_retention_hours: int = 96
+    demo_handoff_redeem_url: str | None = None
+    funnel_handoff_service_secret: str | None = None
+    demo_handoff_timeout_seconds: float = 5.0
     demo_storage_dir: str | None = "./demo_storage"
     demo_protection_enabled: bool = True
     demo_ready_followup_delay_minutes: int = 30
@@ -188,6 +191,8 @@ class Settings(BaseSettings):
         "main_site_continue_path",
         "main_site_checkout_path",
         "demo_storage_dir",
+        "demo_handoff_redeem_url",
+        "funnel_handoff_service_secret",
         "offer_output_dir",
         "queue_backend",
         "storage_backend",
