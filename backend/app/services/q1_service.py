@@ -50,9 +50,9 @@ def ensure_project(
         if order.status == OrderStatus.DRAFT and not existing.is_current:
             raise Q1OwnershipError("Project is no longer the current draft")
 
-    if current and not start_new_project:
+    if current:
         order = db.get(Order, current.order_id)
-        if order and order.status == OrderStatus.DRAFT:
+        if order and order.status == OrderStatus.DRAFT and (not start_new_project or current.handoff_id is not None):
             return order, False
 
     if current:
